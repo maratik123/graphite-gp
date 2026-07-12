@@ -1,1 +1,11 @@
 /target
+
+# Harness local-only state (see AGENTS.md § Agent Docs)
+/ai-docs/plans/**/*.progress.md
+/ai-docs/pr-comments/
+/ai-docs/bugfix/trace-*.md
+/ai-docs/triage/*.progress.md
+
+# Per-machine / local settings
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

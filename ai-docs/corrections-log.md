@@ -1,0 +1,71 @@
+# Learning Log — reference
+
+This page extracts the field-level glossary and exception bodies from [`AGENTS.md` § Learning Log](../AGENTS.md#learning-log). The boundary-rule AXIOM blockquotes themselves stay in AGENTS.md.
+
+## Boundary rule 1 Exception
+
+> **Exception — `Escalated?` and `Superseded by:` fields, Subagent-driven only.** The `Escalated?` line AND the optional `Superseded by:` line of an existing entry MAY be updated (or — for `Superseded by:` only — added when absent), **and only**:
+>
+> - by the `self-improve` Subagent (invoked via `/improve`), after the named instruction-file change has landed:
+>   - update `Escalated?` to replace the prior value with the comma-separated list of targets actually modified; AND/OR
+>   - add or update `Superseded by:` on a *prior* entry when the Commit A change reverses, refines, generalizes, subsumes, or withdraws that entry's rule. Write to the prior entry's `Superseded by:`, not the new entry. Reference format: `[ref] — [one-line reason]`, where `[ref]` is `YYYY-MM-DD` (date of a later entry; disambiguate by quoted slug when multiple entries share that date), `PR #N`, or both comma-separated.
+> - by the `learnings-escalation-audit` Subagent (invoked via `/ai-audit` Phase 1):
+>   - fix drift in `Escalated?` (target file no longer contains the rule, OR `Escalated? no` despite the rule existing in a target file);
+>   - fix drift in `Superseded by:` (date reference doesn't match any later entry; `PR #N` reference is not a real merged PR);
+>   - fix obvious typos within either value (e.g., `AGENTS,md` → `AGENTS.md`, `skillcode-review` → `skill:project-review`, missing comma between two targets, mistyped date in `Superseded by:`).
+>
+> All other lines of the entry (date, category, description, **What happened**, **Rule**) remain immutable. New learning entries are still append-only. Manual user edits to `Escalated?` / `Superseded by:` are NOT authorised by this exception — invoke `/ai-audit` or explicitly request the change.
+
+> **One-off carve-out — 2026-05-19 *compaction-recovery protocol in skill files works* entry.** This entry was retro-tagged `**Kind:** validation` via PR #492 (Phase 1) to demonstrate the newly-introduced `Kind:` field on an existing entry. The carve-out is recorded in the entry's own `**Superseded by:**` line as the durable audit trail. **Named, narrow, audit-traced; NOT a precedent.** Bulk retro-tagging of older entries is explicitly out of scope — `Kind:` defaults to `correction` when omitted, so legacy entries need no rewrite. Any future schema migration touching `learnings.md` requires its own named carve-out here.
+
+## Boundary rule 2 Exception
+
+> **Exception — `/improve` and `/ai-audit` workflows.** During a `/improve` run, the `self-improve` Subagent MAY (a) update the `Escalated?` field of the specific entries it just escalated, AND/OR (b) add or update the `Superseded by:` field of any prior entry whose rule the Commit A change reversed, refined, generalized, subsumed, or withdrew — both done **after** the instruction-file edit has been staged (separate commit on the same feature branch). During `/ai-audit` Phase 1, the `learnings-escalation-audit` Subagent MAY fix drift in either `Escalated?` or `Superseded by:` and edit the named target file to align them. These exceptions apply to **existing-entry `Escalated?` and `Superseded by:` updates only** — NEW learning entries STILL cannot be appended in the same turn as instruction-file edits (Rule 2's main protection — "I wrote a learning, therefore I'm authorised to escalate it" — stays intact).
+
+> **Exception — in-flow learning capture during `/task` Steps 8–12.** A NEW learning entry MAY be appended to `ai-docs/learnings.md` in the same conversation turn as an instruction-file edit when **all** of these hold:
+>
+> 1. The running skill is `/task`, currently in Steps 8 (Implementation), 9 (Verify), 10 (Self-review), 11 (Fix), or 12 (Finalise) — **or any sub-skill (e.g., `/bugfix`, `/context-reset`) invoked from within that range**. The parent `/task` workflow owns the staging conflict; sub-skill detours inherit the carve-out's scope. The Boundary Rule 2 main-body protection against "I wrote a learning, therefore I'm authorised to escalate it" still applies — the sub-skill inheritance widens same-turn-write rights only, not escalation rights.
+> 2. The entry's **content** documents an insight gained **during** the task being implemented — an observation, a non-obvious decision, a corner the implementer just learned exists. It does **not** pre-emptively escalate a rule that the task itself is already landing into AGENTS.md / a Skill / a Subagent / `ai-docs/code-style.md` / `ai-docs/doc-convention.md`.
+> 3. The entry is marked `Escalated? no`. The same-turn write resolves the **staging conflict** with AGENTS.md `## Workflow`'s pre-commit directive ("stage `learnings.md` together with the related code changes — learnings are part of the task deliverable and must be visible in the PR diff") — it does **not** authorise any project-level escalation in the same turn. Escalation always requires a separate `/improve` invocation per Rule 2's main body.
+>
+> The two failure modes Boundary Rule 2's main body protects against — "I wrote a learning, therefore I'm authorised to escalate it" and "the user asked me to record this, therefore I should also fix AGENTS.md" — both remain forbidden. This exception only lets the corpus-building action ("I noticed something useful while implementing the spec; let me record it before compaction") survive the in-flight `/task` workflow without an artificial turn split.
+>
+> Outside a `/task` flow (bare instruction-file edits, `/improve`, `/ai-audit`, `/project-review`, `/pr-commented`, `/triage`, ad-hoc rule changes), the main rule still applies — NEW learning entries are forbidden in the same turn as instruction-file edits. The carve-out is `/task`-specific because the staging conflict is `/task`-specific.
+
+## Entry format — field glossary
+
+> `Kind:` records the **signal direction** of the entry. Two values: `correction` (a violation to stop doing — the historical default; "stick" signal) and `validation` (a working protocol/pattern to keep doing — "carrot" signal). **The field is optional and defaults to `correction` when omitted.** Existing entries without a `Kind:` line are read as `Kind: correction`; no rewrite is required (see Boundary rule 1 — append-only). Bi-directional supersession convention: when a `Kind: validation` entry is later disconfirmed by experience (the protocol stopped working / was replaced / proved harmful), append a NEW `Kind: correction` entry whose `Superseded by:` references the original validation. The reverse — a `Kind: correction` later confirmed as fixed by a working protocol — is recorded as a NEW `Kind: validation` entry whose `Superseded by:` references the correction. Both directions preserve the audit trail per Boundary rule 1 (no in-place edit of existing entries other than `Escalated?` / `Superseded by:`).
+>
+> `Escalated?` records **project-level** persistence only — instruction files visible to every contributor (`AGENTS.md`, Skills, Subagents, rule files, Hooks, project `settings.json`, `ai-docs/doc-convention.md`, `ai-docs/code-style.md`). **User-local persistence does NOT count and is NOT a value of this field** — that includes the auto-memory store (`~/.claude/.../MEMORY.md`) and `settings.local.json`, both of which are private to one developer and don't help future readers. If a correction was saved only to user-local memory, mark `Escalated? no`; the entry remains a candidate for project-level escalation by `/improve`.
+>
+> `doc-convention` = the rule landed in `ai-docs/doc-convention.md`. Use only for documentation-style rules that genuinely belong in the workspace doc-convention reference rather than in AGENTS.md or a skill.
+>
+> `code-style` = the rule landed in `ai-docs/code-style.md`. Use only for code-style rules that genuinely belong in the workspace code-style reference rather than in AGENTS.md or a skill.
+>
+> `rules:[name]` = the rule landed in `.claude/rules/<name>.md`. Use for on-demand search / read / tooling rules that are surface-specific (the file is read only when a Subagent invokes the relevant task), not for general workflow rules that belong in AGENTS.md or a Skill.
+>
+> `Superseded by:` records that the rule recorded above was later reversed, refined, generalized, subsumed, or withdrawn. The field is **optional** and absent from most entries. `[ref]` is one of: a `YYYY-MM-DD` date matching a later learnings entry (when multiple entries share that date, disambiguate by appending a quoted slug from the other entry's description — e.g., `2026-05-08 ("mutually exclusive markers")`); a `PR #N` reference to a merged PR that reversed the rule directly in instruction files; or both, comma-separated. The `[one-line reason]` is freeform — a short note explaining the nature of the supersession (reversed / refined / generalized / subsumed / withdrawn). Maintained by `self-improve` (via `/improve`) and `learnings-escalation-audit` (via `/ai-audit` Phase 1) under the same Boundary rule 1 Exception that authorises `Escalated?` updates.
+
+## FORBIDDEN reasoning for skipping a `learnings.md` write
+
+The rule in [`AGENTS.md` § Learning Log](../AGENTS.md#learning-log) is now phrased as *"On **ANY** instruction violation, of any kind, write a new entry"*. The "non-obvious correction" wording the earlier phrasing carried has been used in violation more than once — typically by judging the just-violated rule as obvious, trivial, or a duplicate of an existing entry. The table below enumerates the reasoning forms that have produced skipped writes and are therefore explicitly disallowed.
+
+| Reasoning form (FORBIDDEN) | Why it's disallowed | What to do instead |
+|---|---|---|
+| *"The rule already exists in `learnings.md` (entry from YYYY-MM-DD)."* | Per [Boundary rule 1](#boundary-rule-1-exception)'s preamble, the history of corrections including recurrences IS the artefact `/improve` audits. A recurrence of an existing rule in a NEW surface is **evidence of an escalation gap** — exactly what a new entry is meant to record. Collapsing the recurrence erases that signal. | Write a new entry. Reference the prior entry in prose (*"recurs the rule from <prior-date> in a new surface (<surface-name>) — propagation gap: prior `Escalated?` did not include `<missing-target>`"*) but a fresh, dated entry is mandatory. |
+| *"This is a duplicate of <prior-date>'s entry."* | "Duplicate" is a judgement made by the violator after the fact; the audit trail can't see the reasoning, only the absent entry. Same propagation-gap signal lost as above. | Write a new entry. Two entries on the same rule with different `Escalated?` values across time IS the audit trail. |
+| *"This is obvious / minor / trivial / a one-liner."* | "Obvious" is judged by the violator after the fact and is therefore not a trustworthy filter. The original AGENTS.md wording *"non-obvious correction"* has been used (most recently 2026-05-15) as license to skip "obvious" cases — which is exactly why the wording was strengthened to *"ANY instruction violation, of any kind"*. | Write a new entry regardless of perceived triviality. The learning log is small per-entry; the cost of one entry is negligible against the cost of a future `/improve` missing the surface coverage. |
+| *"The rule is well-known / canonical / from AGENTS.md."* | The well-known-ness of the rule is orthogonal to whether it was violated. The entry records the **incident**, not the rule's novelty. | Write a new entry. The well-known rule's violation in a new surface is still a propagation-gap signal. |
+| *"The user caught me before I shipped the violation — no harm done."* | The learning log records corrected behaviour, not just shipped defects. Pre-catch corrections are equally valuable for `/improve`'s escalation decisions because they document what the assistant **would have done** absent the catch. | Write a new entry. The "caught before commit" status can be noted in `**What happened:**` but does not affect the requirement to record. |
+| *"This skill forbids touching `learnings.md` from within itself."* (e.g., `/pr-commented`, `/pr-ci-failed`, `/main-ci-failed`, `/triage`) | The skill's prohibition is a *staging* constraint (those skills don't commit `learnings.md` alongside their own commits), **not** an authorisation to skip the write. The entry can be written and committed after the skill exits, or as a follow-up commit on the same branch by the user. | Write the entry. Surface to the user: *"learnings.md write deferred to post-skill commit per `<skill>`'s no-touch rule — entry drafted in this turn for the user to commit."* Never use the skill prohibition as a reason to drop the entry entirely. |
+| *"The violation was already discussed in the reply / decisions log / progress file."* | None of those surfaces are append-only durable learning logs that `/improve` reads. Decisions logs are per-task; progress files are local-only and deleted on PR merge; reply text is ephemeral. | Write a new entry. The other surfaces may stay populated; they don't replace the learning log. |
+
+**Detection triggers:** any of the following phrasings, appearing in internal reasoning or in a reply *before* a `learnings.md` write decision, should fire the rule and force the write:
+
+- *"already exists in learnings"* / *"already covered by"* / *"already recorded"*
+- *"this is obvious"* / *"too minor to record"* / *"trivial"*
+- *"no need to add"* / *"won't add a separate entry"* / *"skipping the log"*
+- *"the rule is already in AGENTS.md"* / *"this is canonical"*
+- *"I'd add it but `<skill>` forbids touching learnings.md"*
+
+When any of these surface in the model's own reasoning, STOP and write the entry before continuing.

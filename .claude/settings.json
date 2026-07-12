@@ -10,10 +10,115 @@
   "enabledPlugins": {
     "ast-index@ast-index": true
   },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v ast-index >/dev/null 2>&1; then if ast-index stats >/dev/null 2>&1; then ast-index update >/dev/null 2>&1 || true; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"ast-index: index updated\"}}'; else ast-index rebuild >/dev/null 2>&1 || true; echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"ast-index: index rebuilt\"}}'; fi; else echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"ast-index: not found\"}}'; fi",
+            "timeout": 120,
+            "statusMessage": "Syncing ast-index..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"REQUIRED SESSION START to read rules from CLAUDE.md. Show user a summary of these rules\"}}'",
+            "timeout": 30,
+            "statusMessage": "Read session rules..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '(^|[ ;&|`])git[[:space:]]+commit\\b'; then branch=$(git branch --show-current 2>/dev/null); if [ \"$branch\" = \"main\" ]; then printf 'BLOCKED: git commit on main is forbidden.\\n\\nRecovery (no commits yet on main):\\n  git checkout -b feat/YYYY-MM-DD-name\\n\\nRecovery (commits already on main, not yet pushed):\\n  git stash                                           # save uncommitted work\\n  git checkout -b feat/YYYY-MM-DD-name                 # branch carries the commits\\n  git checkout main                                    # back to main\\n  git reset --soft origin/main && git restore --staged .   # rewind without losing work\\n  git checkout feat/YYYY-MM-DD-name && git stash pop   # resume on feature branch\\n\\nNever use git reset --hard. Full procedure: AGENTS.md > Workflow > Recovery.\\n' >&2; exit 2; fi; fi",
+            "timeout": 10,
+            "statusMessage": "Checking branch before commit..."
+          },
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '(^|[ ;&|`])git[[:space:]]+commit\\b'; then ast-index update >/dev/null 2>&1 || true; fi; exit 0",
+            "timeout": 30,
+            "statusMessage": "Refreshing ast-index..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f && [[ \"$f\" == *.rs ]] && cargo fmt --quiet --manifest-path \"$CLAUDE_PROJECT_DIR/Cargo.toml\"; } || true",
+            "timeout": 60,
+            "statusMessage": "Formatting Rust..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; if [[ \"$f\" == *.rs && \"$f\" != *\"/tests/\"* && \"$f\" != *\"/examples/\"* ]] && [ -f \"$f\" ]; then hits=$(awk '/^\\s*#\\[cfg\\(test\\)\\]/{flag=1; next} flag && /^\\s*mod\\s+[a-zA-Z_]+\\s*\\{/{intest=1; depth=1; flag=0; next} intest{depth+=gsub(/\\{/,\"{\")-gsub(/\\}/,\"}\"); if(depth<=0){intest=0}; next} /\\.unwrap\\(\\)|\\.expect\\(|panic!\\(/ && !/^\\s*\\/\\//{print FILENAME\":\"NR\": \"$0}' \"$f\"); if [ -n \"$hits\" ]; then printf '\\n[panic-gate] panicking calls in production code (outside #[cfg(test)]):\\n%s\\n[panic-gate] verify each is genuinely unrecoverable \\u2014 see AGENTS.md Rust Test Conventions (no unwrap in prod); substitution table in .claude/agents/self-review.md \\u00a74.\\n' \"$hits\" >&2; fi; fi; } || true",
+            "timeout": 10,
+            "statusMessage": "Checking for panicking calls..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '(^|[ ;&|`])git[[:space:]]+push\\b' && ! echo \"$cmd\" | grep -qE 'gh[[:space:]]+pr[[:space:]]+create'; then branch=$(git branch --show-current 2>/dev/null); if [ -n \"$branch\" ] && [ \"$branch\" != \"main\" ]; then pr_json=$(gh pr view --json number,state,url 2>/dev/null); if [ -n \"$pr_json\" ]; then state=$(echo \"$pr_json\" | jq -r '.state // empty'); number=$(echo \"$pr_json\" | jq -r '.number // empty'); if [ \"$state\" = \"OPEN\" ]; then printf '\\n[pr-sync] open PR #%s on %s \\u2014 re-read body with `gh pr view %s --json title,body` and sync via `gh pr edit` if scope/names/ACs drifted (AGENTS.md \"PR body sync after every push\"). Exception: this push immediately preceded `gh pr create`.\\n' \"$number\" \"$branch\" \"$number\" >&2; fi; fi; fi; fi",
+            "timeout": 15,
+            "statusMessage": "Checking PR body sync..."
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
+      "Edit(./**)",
+      "Edit(~/.claude/**)",
+      "Edit(.claude/**)",
+      "Write(./**)",
+      "Write(~/.claude/**)",
+      "Write(.claude/**)",
+      "Bash(cargo *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(ast-index *)",
       "Bash(ya tool ast-index *)",
-      "Bash(ast-index *)"
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(jq *)",
+      "Bash(awk *)",
+      "Bash(sort *)",
+      "Bash(wc *)"
+    ],
+    "deny": [
+      "Read(.idea/**)",
+      "Edit(.idea/**)",
+      "Write(.idea/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Edit(**/.env)",
+      "Edit(**/.env.*)",
+      "Write(**/.env)",
+      "Write(**/.env.*)",
+      "Read(**/secrets*)",
+      "Read(**/.secrets*)",
+      "Edit(**/secrets*)",
+      "Edit(**/.secrets*)",
+      "Write(**/secrets*)",
+      "Write(**/.secrets*)"
     ]
   }
 }

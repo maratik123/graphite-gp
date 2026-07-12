@@ -1,0 +1,275 @@
+# Rust Agent Rules
+
+**CRITICALLY**
+1) English for all output. Other language only on explicit user request.
+
+## Project
+
+**graphite-gp** — a grid-based vector-racing game (the classic "Racetrack" pencil game: integer position + velocity, accelerate ±1 per axis per turn) with procedurally generated closed tracks and self-taught AI opponents. Rust workspace.
+
+> Read [`ai-docs/context.md`](ai-docs/context.md) for purpose, architecture, and design decisions — on demand. The canonical spec is [`docs/design.md`](docs/design.md); the review record is [`docs/design-review.md`](docs/design-review.md).
+
+## Permissions
+
+Machine-enforced rules live in `.claude/settings.json` (allow/deny entries) and on `origin` (branch protection, when configured). Read those files for the authoritative list — duplicating them here lets the two sources drift.
+
+Honor-system rules (no machine check; still binding):
+
+- **DENY:** `git push --force` to feature branches — prefer `--force-with-lease`, and only after explicit user approval. Never force-push `main`.
+- **DENY:** files outside project root.
+- **ASK:** any tool not allow-listed in `settings.json`; if denied — suggest an alternative.
+
+On session start: read `.gitignore`, treat matched paths as a read blacklist.
+
+## Build & Test
+
+```bash
+cargo build                                             # whole workspace
+cargo test                                              # all tests
+cargo test <name>                                       # filter by substring
+cargo test -- --nocapture                               # show stdout
+cargo clippy --workspace --all-targets -- -D warnings   # strict lint (covers tests, benches, examples)
+cargo fmt                                                # fix formatting
+cargo fmt --check                                       # check only
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace   # doc gate
+cargo run -p gp-game                                    # run the graphite-gp binary
+```
+
+> **AXIOM — Every project instruction file Claude loads per invocation MUST stay below 40,000 chars.**
+> Harness-enforced soft cap; crossing it imposes measurable per-invocation cost on every subagent spawn, `/task`, and review pass. Project-side **35,000-char early warning** gives one full `/task` cycle of headroom. Applies to `AGENTS.md`, `CLAUDE.md`, every `.claude/skills/**/*.md`, every `.claude/agents/**.md`, every `.claude/rules/*.md`, and `ai-docs/{code-style,doc-convention,context,agent-writing-style,corrections-log}.md`.
+>
+> | If `wc -c <file>` reports... | Action |
+> |---|---|
+> | ≥ 40,000 chars | **`major`** — plan extraction/dedup for the next `/ai-audit` pass (extract verbose subsections into `ai-docs/<topic>.md` reference pages with anchored links). |
+> | 35,000–39,999 chars | **`minor`** — proactive extraction pass; don't let the next `/task` push it over 40k. |
+> | < 35,000 chars | OK. |
+
+Search: `ast-index` first (see [`.claude/rules/ast-index.md`](.claude/rules/ast-index.md)); fall back to `rg <pattern> --type rust [-l | -C 3]` when `ast-index` returns empty.
+
+## API Stability
+
+> **AXIOM — Pre-publish: clean breaks. No compat shims.**
+> The project has **not** been published to crates.io and has no downstream clients. Public API may be freely renamed, removed, or restructured without backward-compat shims, deprecation layers, or `#[deprecated]` wrappers.
+>
+> | If you're tempted to... | Do this instead |
+> |---|---|
+> | Add `pub use OldName as NewName;` "for compat" | **REMOVE** the alias — make the clean rename |
+> | Wrap removed fn with `#[deprecated] pub fn old() -> _ { new() }` | **DELETE** the wrapper — call sites update directly |
+> | Keep both old and new APIs side-by-side temporarily | Pick one — old is gone |
+
+Revisit this rule before the first `cargo publish`.
+
+## API Naming
+
+See [`ai-docs/api-naming.md` → The _unchecked AXIOM](ai-docs/api-naming.md#the-_unchecked-axiom) for the `_unchecked` AXIOM + naming rules.
+
+## Code Style
+
+Thin by design — this project grows its own style rules through the learning loop (`/improve`). Start with:
+
+- **Source files:** Rust-only (`.rs`) under `crates/*/src/`; format via `cargo fmt`, never `rustfmt <file>` directly.
+- **Linter posture:** strict clippy (`-D warnings`); no blanket `#[allow]` without a justifying comment.
+- **Rust idioms:** prefer idiomatic Rust over literal ports; comparison helpers (`.min`/`.max`/`.clamp`/`Option::or`/`Option::filter`) over explicit `if`/`match`. The physics core (`gp-core`) is integer-only and deterministic — no floats in `sim`/`geom` (see `docs/design.md` §3a).
+- **Magic numbers:** numeric literals with semantic meaning → module-level `const SCREAMING_SNAKE_CASE`, not inline. Self-evident constants (`0`, `1`, `-1`, `2`) and test fixtures exempt.
+- **Documentation:** every public item has at least a one-line `///`; broken intra-doc links are denied. See [`ai-docs/doc-convention.md`](ai-docs/doc-convention.md).
+- **Error types:** `thiserror` for new error enum/struct; hand-rolled `Display`/`Error` only where the derive cannot express it.
+- **File size:** target 200–400 lines per `.rs` file excluding `#[cfg(test)]`; refactor larger files before merge unless exempt (single `match`/state machine, `macro_rules!`).
+
+See [`ai-docs/code-style.md`](ai-docs/code-style.md) for the canonical (growing) reference.
+
+## Dependency Versions
+
+> **AXIOM — Query live state BEFORE asserting any claim about an external dep or the project's own dep graph. Memory is stale.**
+>
+> | If you're about to write... | Verify first with |
+> |---|---|
+> | A specific version of crate `X` | `curl -sS "https://crates.io/api/v1/crates/X" \| jq -r '.crate.max_stable_version'` |
+> | A claim that `X` is / isn't / would-be-added-as a dep in this project | `grep -r '<X>' --include='Cargo.toml' .` AND `cargo tree --invert <X>` (catches transitive presence) |
+>
+> See [`ai-docs/dependency-versions.md`](ai-docs/dependency-versions.md) for the lookup recipes. Apply the pinning rule to the **observed** version, never the remembered one.
+
+When adding or editing dependencies in `Cargo.toml`:
+
+- Use `0.x` for `0.x.y` versions — never pin the patch.
+- Use `x` for `x.y.z` versions — never pin minor or patch.
+- No `~` prefix — Cargo's default `^` semantics are sufficient.
+- After changing version constraints, run `cargo update` then `cargo build` to verify.
+
+## Workflow
+
+> **AXIOM 1 — NEVER edit on local `main` when work is intended for a PR.**
+> Create a feature branch (`git checkout -b feat/...` or `chore/...`) **before** any file edit — not before commit, **before edit**.
+>
+> | If `git branch --show-current` returns... | Action |
+> |---|---|
+> | `main` AND you're about to make a PR-targeted edit | **STOP**. Run `git checkout -b <prefix>/<descriptive-name>` first. Only then edit. |
+> | A feature branch | Proceed with edits |
+> | `main` AND you've already made commits (recovery) | `git stash` → `git checkout -b <feature>` → `git checkout main && git reset --soft origin/main && git restore --staged .` → push feature branch → open PR. Pop stash on feature branch if needed. |
+>
+> The first action of any skill/workflow that produces commits (`/task`, `/improve`, `/ai-audit`, etc.) is `git branch --show-current`; if `main`, switch **before** any `Edit`/`Write`. Before any `git push`, confirm again — if it is `main`, stop and apply recovery.
+
+- Merge PRs via merge commit (`gh pr merge --merge`); never squash/rebase-merge.
+- Run `cargo build` before commit so `Cargo.lock` refreshes.
+- Stage explicitly; **never** `git add -A` / `git add .`.
+- **Before every `git commit` during a PR task**, stage `ai-docs/learnings.md` with related code. **After every push**, give a post-push learning entry its own commit.
+- **Never** `git commit --no-verify` (or any hook-skip flag) — fix the hook.
+- **NEVER** batch a `git commit` / data-dependent `AskUserQuestion` in the same turn as the `Edit`/subagent call producing its inputs; verify with `git diff --cached --stat` first.
+- **CI-fix commits get self-review too.** Spawn `self-review` before pushing any CI-fix commit.
+- **No "too simple" step-skip in `/task`.** Steps 6 / 7 / 10 are MANDATORY; user authorisation is the only bypass.
+- **NEVER** `git reset --hard` — discards uncommitted work.
+- Plan first. Tests before prod code (TDD). Lint changed files.
+- Files with ~50+ lines of substantial logic MUST have a `#[cfg(test)] mod tests` block (exceptions: `examples/`, `benches/` with `harness = false`).
+- After generating/moving a markdown file with relative links, trace one link via `realpath` before committing.
+- **PR review comment resolution:** Resolve only comments fixed by code; objections stay open for the reviewer.
+
+> **AXIOM 2 — Read the PR body via `gh pr view <N>` after EVERY `git push` to a feature branch with an open PR. Unconditional.**
+> The READ is mandatory even for a routine typo/format/nit push. The EDIT is conditional — only when the body contradicts the new commits.
+>
+> | After... | Required action |
+> |---|---|
+> | `git push` to a feature branch with an open PR | Run `gh pr view <N> --json title,body` immediately. Read the body. |
+> | The body still describes the diff accurately | No `gh pr edit` needed — read complete |
+> | The body contradicts the new commits (renames, scope drift, AC flips, cited counts) | Run `gh pr edit` to sync |
+> | `gh pr create` immediately preceded the push (first push that opened the PR) | **Skip** the read — the body is what you just authored. The rule fires on the **next** push. |
+
+> **AXIOM — Every code-producing commit on a feature branch with an open PR (or about-to-be-opened PR) must pass `self-review` before `git push`.**
+> Per-skill instances: `/task` Step 10, `/pr-commented` Step 5, `/pr-ci-failed` Step 5, `/main-ci-failed` Step 5, `/bugfix` Step 6. This AXIOM names them as one workspace rule so the next surface without its own step still falls under it.
+>
+> APPROVE = push. REJECT = fix on the same branch and re-run; after 3 REJECTs in a row, surface and stop without pushing.
+
+> **AXIOM — `ai-docs/deferred/_inbox.jsonl` is written ONLY by `/task` Step 12 and `/triage`.**
+> Hand-edits defeat the propagation contract — they hide rows from the parser and conflict with future Step-12 appends; the JSONL line-per-object format is hand-edit-hostile (one malformed line breaks the whole `jq` read).
+>
+> | If you see... | Action |
+> |---|---|
+> | A row in `_inbox.jsonl` you want to move or drop | Run `/triage`; let it sort/drain the row |
+> | A row missing for a freshly-merged spec | Re-run `/task` Step 12 manually |
+
+## Propagation Rule
+
+> **AXIOM — Edits to one instruction file MUST propagate to its sync-group siblings in the SAME PR.**
+> The Propagation Rule fires whenever you edit an instruction file. Sister files in the same sync group must receive the corresponding change before the PR is opened.
+>
+> | If you edit... | You MUST also check / update... |
+> |---|---|
+> | `.claude/skills/project-review/SKILL.md` | `.claude/agents/review-findings.md` AND `.claude/agents/self-review.md` (Review group) |
+> | `.claude/agents/review-findings.md` | `.claude/skills/project-review/SKILL.md` AND `.claude/agents/self-review.md` (Review group) |
+> | `.claude/agents/self-review.md` | `.claude/skills/project-review/SKILL.md` AND `.claude/agents/review-findings.md` (Review group) |
+> | `.claude/skills/interview/SKILL.md` | `.claude/agents/spec-writer.md` (Interview group) |
+> | `.claude/agents/spec-writer.md` | `.claude/skills/interview/SKILL.md` (Interview group) |
+> | `.claude/skills/triage/SKILL.md` | `.claude/agents/triage-runner.md` AND `.claude/skills/next/SKILL.md` (Triage group) |
+> | `.claude/agents/triage-runner.md` | `.claude/skills/triage/SKILL.md` AND `.claude/skills/next/SKILL.md` (Triage group) |
+> | `.claude/skills/next/SKILL.md` | `.claude/skills/triage/SKILL.md` AND `.claude/agents/triage-runner.md` (Triage group) |
+> | `.claude/skills/task/SKILL.md` (Steps 6–8 design phase) | `.claude/agents/design.md` AND `.claude/agents/design-review.md` AND `.claude/skills/context-reset/SKILL.md` (Task/Design group) |
+> | `.claude/agents/design.md` OR `.claude/agents/design-review.md` OR `.claude/skills/context-reset/SKILL.md` | See *Task/Design group* anchor row above. |
+> | `.claude/skills/task/SKILL.md` Spec/Design Amendment recipe | `.claude/skills/pr-commented/SKILL.md` AND `.claude/skills/pr-ci-failed/SKILL.md` AND `.claude/skills/main-ci-failed/SKILL.md` AND `.claude/agents/self-review.md` (Spec-Amendment group) |
+> | `AGENTS.md` "Learning Log" section (Boundary rules 1/2, entry format incl. `Kind:`, `Escalated?` semantics, 🌱 verdict) | `.claude/agents/self-improve.md` AND `.claude/agents/learnings-escalation-audit.md` (Learning-Log group) |
+> | `AGENTS.md` (rule add / exemption) | Run `grep -rn "<changed-keyword>" .claude/ AGENTS.md ai-docs/` and apply the same change to every match (new pre-resolved rules also add a Rule-5 substring-blacklist entry in `.claude/agents/spec-writer.md`). |
+> | Any edit that changes a Tool/Subagent/Skill/Hook contract | Update `ai-docs/claude-tools-hierarchy.md` in the same PR. |
+> | Any other instruction file | Run the same grep — the Procedure below catches lingering references. |
+
+**Procedure:**
+1. Before closing the edit, `grep -rn "<changed-keyword>" .claude/agents/ .claude/skills/ .claude/rules/ AGENTS.md ai-docs/` for any file referencing the same rule/terminology.
+2. Apply the same change (or the corresponding enforcement adjustment) in every match.
+3. AGENTS.md rule exemptions must propagate to subagent checklists that enforce the rule (`self-review.md`, `review-findings.md`).
+
+Do not refer to a skill as an "agent" or vice versa — the distinction matters for spawning. (`project-review` is a skill; `review-findings` and `self-review` are agents spawned by it.)
+
+## Communication
+
+Interpret user phrasing literally and conservatively. When uncertain — ask, don't guess.
+
+- **"Submit / push to PR"** = `git push` the branch to remote so commits appear in the open PR. **NOT** `gh pr merge`. Only merge when the user explicitly says "merge".
+- **"wtf?" / "what?" / "huh?"** (or similar surprise/frustration) = the previous action was the opposite of what the user wanted. **Stop immediately**, do not retry, ask what was wrong before doing anything else.
+- **IDE files** (`.idea/`, `*.iml`, `.vscode/`, `*.swp`, etc.) — never add, remove, modify, stage, or `.gitignore` them unless the user explicitly asks. "add ide files" most likely means **commit and track them** — confirm before acting.
+
+## Agent Docs
+
+| Path | Purpose |
+|------|---------|
+| `ai-docs/context.md` | Project context — read on demand |
+| `ai-docs/code-style.md` | Workspace code-style reference — read on demand |
+| `ai-docs/doc-convention.md` | rustdoc conventions — read on demand |
+| `ai-docs/corrections-log.md` | Learning-Log carve-outs + field glossary |
+| `ai-docs/key-decisions.md` | Key design-decision detail bodies |
+| `ai-docs/api-naming.md` | `_unchecked` AXIOM + naming rules |
+| `ai-docs/dependency-versions.md` | Live Cargo / GitHub Action version lookup recipes |
+| `ai-docs/agent-writing-style.md` | Binary-rule writing style for dual-model readability |
+| `ai-docs/agent-docs-index.md` | Verbose bodies of `§ Agent Docs` rows — read on demand |
+| `ai-docs/instruction-file-validation.md` | Dual-model instruction-file-clarity test methodology |
+| `ai-docs/claude-tools-hierarchy.md` | Project Tool/Subagent/Skill/Hook inventory |
+| `ai-docs/templates/progress-format.md` | Canonical `.progress.md` format spec |
+| `ai-docs/plans/INDEX.md` | Plan index — statuses and dependency order |
+| `ai-docs/plans/*.spec.md` | Active task spec + acceptance criteria |
+| `ai-docs/plans/*.design.md` | Active task design documents |
+| `ai-docs/plans/*.progress.md` | Active task progress / handoff state — local-only (gitignored) |
+| `ai-docs/plans/done/` | Completed plans (spec + design, implemented) |
+| `ai-docs/plans/deferred/` | Blocked or future plans |
+| `ai-docs/deferred/_inbox.jsonl` | Triage queue — rows from completed specs awaiting `/triage` |
+| `ai-docs/bugfix/trace-*.md` | Bugfix trace + durable-state surface — deleted on resolution |
+| `ai-docs/learnings.md` | Corrections log — feed for `/improve` |
+
+## Learning Log
+
+On **ANY** instruction violation, of any kind, write a new entry to `ai-docs/learnings.md` — there is no "obvious", "minor", "trivial", "already-known", or "duplicate" disposition. The history (including recurrences and superseded entries) is the artefact `/improve` audits to decide escalation fan-out. See [`ai-docs/corrections-log.md` → FORBIDDEN reasoning for skipping a `learnings.md` write](ai-docs/corrections-log.md#forbidden-reasoning-for-skipping-a-learningsmd-write) for the enumerated skip-reasons that are explicitly disallowed. **Read the two boundary rules below before you write.**
+
+### Boundary rule 1 — `ai-docs/learnings.md` is APPEND-ONLY
+
+> **NEVER** edit, rewrite, reorder, summarise, or delete an existing entry in `ai-docs/learnings.md`. Only append new entries at the end. This applies even when:
+> - a newer correction supersedes an older one — write a NEW entry that says so, leave the old one intact
+> - an entry turns out to be wrong, redundant, or poorly worded — write a NEW entry that corrects it
+> - you are tempted to "tidy up" or "consolidate" the file
+>
+> The history of corrections (including superseded and wrong ones) is itself the artefact `/improve` audits. Editing past entries destroys that history.
+>
+> **Exception — `Escalated?` and `Superseded by:` fields, subagent-driven only.** Both fields MAY be updated in-place by the `self-improve` subagent (`/improve`) and the `learnings-escalation-audit` subagent (`/ai-audit` Phase 1). See [`ai-docs/corrections-log.md` → Boundary rule 1 Exception](ai-docs/corrections-log.md#boundary-rule-1-exception). All other lines of an entry remain immutable.
+
+### Boundary rule 2 — writing to `learnings.md` triggers NO other rule-file edits in the same turn
+
+> When you write to `ai-docs/learnings.md`, you **MUST NOT** also edit any of these files in the same conversation turn:
+>
+> - `AGENTS.md`
+> - `CLAUDE.md`
+> - `.claude/skills/**` (any file)
+> - `.claude/agents/**` (any file)
+> - `.claude/settings.json`
+> - `ai-docs/code-style.md`
+> - `ai-docs/doc-convention.md`
+>
+> Writing a learning entry is **NOT** authorisation to escalate the rule into instruction files. Set `Escalated? no` and stop. Project-level escalation happens only when:
+>
+> 1. The user runs `/improve` (which spawns the `self-improve` subagent), OR
+> 2. The user explicitly asks ("escalate this", "update AGENTS.md", "add to skill X").
+>
+> **Exception — `/improve` and `/ai-audit` workflows.** `self-improve` + `learnings-escalation-audit` MAY update `Escalated?` / `Superseded by:` on existing entries alongside instruction-file edits. Existing-entry updates ONLY — NEW learning entries still cannot be appended in the same turn as instruction-file edits.
+>
+> **Exception — in-flow learning capture during `/task` Steps 8–12.** A NEW learning entry MAY be appended in the same turn as an instruction-file edit when ALL hold: (a) running skill is `/task` Steps 8–12 (incl. sub-skills `/bugfix`, `/context-reset`); (b) entry documents an in-task insight (not pre-emptive escalation); (c) marked `Escalated? no`.
+
+### Entry format
+
+```
+### YYYY-MM-DD — [category] — [short description]
+**What happened:** [quote or paraphrase]
+**Rule:** [what to do instead, or what to keep doing]
+**Kind:** correction | validation    (optional; defaults to `correction` when omitted)
+**Escalated?** no | AGENTS.md | skill:[name] | hook | settings | agent:[name] | rules:[name] | doc-convention | code-style (comma-separate multiple)
+**Superseded by:** [ref] — [one-line reason]    (optional; omitted when not applicable)
+```
+
+`Kind:` defaults to `correction` when omitted. Write `Kind: validation` for entries that document a working protocol/pattern to keep doing (carrot signal); `Kind: correction` (or omit) for a violation to stop doing (stick signal). `Escalated?` records **project-level** persistence only — user-local auto-memory and `settings.local.json` do **not** count → stay `no`.
+
+See [`ai-docs/corrections-log.md` → Entry format — field glossary](ai-docs/corrections-log.md#entry-format--field-glossary) for the semantics of each field.
+
+Categories: `code-style` | `process` | `architecture` | `testing` | `documentation` | `tooling` | `search` | `other`
+
+Run `/improve` when **≥3 unescalated correction entries**, **≥2 unescalated validation entries**, or a `🌱 Stale-validation` flag from `/ai-audit` accumulates.
+
+## Rust Test Conventions
+
+- Unit tests in the same file under a `#[cfg(test)]` module. Integration tests in `tests/`.
+- Use `rstest` for parameterized tests when useful; `mockall` for mocking traits; `pretty_assertions` encouraged for diffs.
+- Assert with `assert_eq!` / `assert_matches!`. **`assert_matches!` formats the scrutinee with `{:?}` on mismatch, so its type MUST impl `Debug`**; if the scrutinee is non-`Debug`, leave `assert!(matches!(...))` as-is — do NOT add a production `#[derive(Debug)]` to satisfy a test-only assertion.
+- Test names as `snake_case` describing behaviour: `returns_empty_when_not_found`.
+- No `unwrap()` in production code without a justifying comment; `expect("reason")` preferred.
+- No `#[allow(clippy::...)]` / `#[allow(dead_code)]` unless unavoidable (with justification).
+- Test behaviour, transitions, errors, edge cases. The `gp-core` physics is deterministic — assert exact states. The `supercover` predicate (`docs/design.md` §3 C4) ships with its full case table as unit tests.
