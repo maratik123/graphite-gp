@@ -34,16 +34,18 @@ block 1, state + legal mask onto 3a).
 
 ## Status
 
-Scaffold only — module structure, the `TrackArtifact` contract, and stub APIs are
-in place; the algorithms (supercover, `step`, generation pipeline, oracle,
-feature extraction, policy) are `todo!()`. See the `TODO(<block>)` markers.
+Early block 3a — module structure, the `TrackArtifact` contract, and stub APIs are
+in place; the exact integer `supercover` predicate (`crates/core`) is implemented
+with its full §3 C4 test table. The remaining algorithms (`step`, generation
+pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
+`TODO(<block>)` markers.
 
 ## Build
 
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # once tests exist
+cargo test             # 12 gp-core supercover tests green
 ```
 
 ## License
