@@ -1,0 +1,49 @@
+/* ============================================================
+   Graphite GP — Spacing, sizing & layout tokens
+   Base unit = 4px, echoing the game's integer lattice. The grid is
+   the brand: spacing snaps to the cell.
+   ============================================================ */
+
+:root {
+  /* ---- Spacing scale (4px lattice) ---- */
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+  --space-20:  80px;
+
+  /* ---- Graph-paper cell (the design grid pitch) ---- */
+  --cell:      24px;   /* one graph-paper square */
+  --cell-sm:   16px;
+  --cell-lg:   32px;
+
+  /* ---- Radii — crisp / blueprint. Small by default. ---- */
+  --radius-0:   0px;      /* grid elements, chips-on-grid */
+  --radius-1:   3px;
+  --radius-2:   6px;      /* default cards / inputs */
+  --radius-3:   10px;     /* panels */
+  --radius-pill: 999px;
+
+  /* ---- Border widths (pencil strokes) ---- */
+  --bw-hair:   1px;
+  --bw-1:      1.5px;
+  --bw-2:      2px;
+  --bw-heavy:  3px;   /* wall emphasis */
+
+  /* ---- Control sizing ---- */
+  --control-h-sm:  30px;
+  --control-h-md:  38px;
+  --control-h-lg:  46px;
+  --tap-min:       44px;   /* min hit target */
+
+  /* ---- Containers ---- */
+  --content-max:   1200px;
+  --panel-max:     420px;
+}

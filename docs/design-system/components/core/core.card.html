@@ -1,0 +1,73 @@
+<!-- @dsCard group="Components" viewport="700x430" name="Core — Button · IconButton · Badge · Tag · Card" subtitle="Actions, status pills, chips, paper surfaces" -->
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-ui);background:var(--surface-page);
+    background-image:var(--bg-grid);background-size:var(--cell) var(--cell);padding:24px;color:var(--text-ink)}
+  .wrap{display:flex;flex-direction:column;gap:18px;max-width:640px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .lbl{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px}
+  [data-lucide]{width:18px;height:18px}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { Button, IconButton, Badge, Tag, Card } = window.GraphiteGPDesignSystem_1b43c8;
+  function Demo(){
+    return (
+      <div className="wrap">
+        <div>
+          <div className="lbl">Buttons</div>
+          <div className="row">
+            <Button variant="primary">Generate track</Button>
+            <Button variant="secondary">Cancel</Button>
+            <Button variant="ghost">Reset</Button>
+            <Button variant="danger">Abandon</Button>
+            <Button variant="primary" disabled>Disabled</Button>
+          </div>
+          <div className="row" style={{marginTop:10}}>
+            <Button size="sm" variant="secondary">Small</Button>
+            <Button size="md" variant="secondary">Medium</Button>
+            <Button size="lg" variant="primary">Large · Start race</Button>
+          </div>
+        </div>
+        <div>
+          <div className="lbl">Icon buttons</div>
+          <div className="row" id="icons">
+            <IconButton label="Play"><i data-lucide="play"></i></IconButton>
+            <IconButton label="Pause"><i data-lucide="pause"></i></IconButton>
+            <IconButton label="Grid" active={true}><i data-lucide="grid-3x3"></i></IconButton>
+            <IconButton label="Zoom in" variant="ghost"><i data-lucide="zoom-in"></i></IconButton>
+            <IconButton label="Settings"><i data-lucide="settings"></i></IconButton>
+          </div>
+        </div>
+        <div>
+          <div className="lbl">Badges & tags</div>
+          <div className="row">
+            <Badge tone="ok">VALID</Badge>
+            <Badge tone="warn">RUN-OUT</Badge>
+            <Badge tone="danger" solid>CRASH</Badge>
+            <Badge tone="accent">Vmax 7</Badge>
+            <Tag color="var(--car-2)">Rival · Blue</Tag>
+            <Tag selected>Track 04</Tag>
+            <Tag onRemove={()=>{}}>Filter</Tag>
+          </div>
+        </div>
+        <Card eyebrow="Track 04 · Procedural" title="Oracle report" right={<Badge tone="ok">VALID</Badge>} grid>
+          <div style={{fontFamily:'var(--font-mono)',fontSize:13,color:'var(--text-muted)'}}>
+            Closes a lap by construction · tempo 0.87 · Vmax 7
+          </div>
+        </Card>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+  setTimeout(()=>window.lucide&&window.lucide.createIcons(),60);
+</script>
+</body></html>

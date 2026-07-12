@@ -1,0 +1,47 @@
+/* ============================================================
+   Graphite GP — Typography tokens
+   Display/UI: Space Grotesk (geometric, technical).
+   Data/telemetry: JetBrains Mono (coordinates, vectors, metrics).
+   ============================================================ */
+
+:root {
+  /* ---- Families ---- */
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-ui:      'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* ---- Type scale (px) — display heavy, tight tracking ---- */
+  --fs-display:   56px;   /* hero wordmark / big numerals */
+  --fs-h1:        40px;
+  --fs-h2:        30px;
+  --fs-h3:        22px;
+  --fs-title:     18px;
+  --fs-body:      15px;
+  --fs-sm:        13px;
+  --fs-xs:        11px;
+  --fs-micro:     10px;   /* grid labels, fine print */
+
+  /* ---- Weights ---- */
+  --fw-regular:   400;  /* @kind other */
+  --fw-medium:    500;  /* @kind other */
+  --fw-semibold:  600;  /* @kind other */
+  --fw-bold:      700;  /* @kind other */
+
+  /* ---- Line heights ---- */
+  --lh-tight:     1.05;  /* @kind other */
+  --lh-snug:      1.2;   /* @kind other */
+  --lh-normal:    1.5;   /* @kind other */
+
+  /* ---- Letter spacing ---- */
+  --ls-display:   -0.02em;   /* @kind other */
+  --ls-normal:    0;         /* @kind other */
+  --ls-label:     0.06em;    /* @kind other */
+  --ls-mono:      0.02em;    /* @kind other */
+
+  /* ---- Semantic roles ---- */
+  --text-eyebrow-transform: uppercase;
+
+  /* ---- Roles as composites (font / weight / size / lh / spacing helpers) ---- */
+  --role-display-size:  var(--fs-display);
+  --role-value-size:    var(--fs-h2);   /* telemetry big numbers */
+}

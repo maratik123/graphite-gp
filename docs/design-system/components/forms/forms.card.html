@@ -1,0 +1,55 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Forms — Slider · Switch · Segmented · Stepper" subtitle="Parameter and option controls on the lattice" -->
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-ui);background:var(--surface-page);
+    background-image:var(--bg-grid);background-size:var(--cell) var(--cell);padding:24px;color:var(--text-ink)}
+  .wrap{display:grid;grid-template-columns:1fr 1fr;gap:26px 32px;max-width:620px}
+  .lbl{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:12px}
+  .col{display:flex;flex-direction:column;gap:16px}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { Slider, Switch, SegmentedControl, Stepper } = window.GraphiteGPDesignSystem_1b43c8;
+  function Demo(){
+    const [t,setT]=React.useState(0.35);
+    const [v,setV]=React.useState(6);
+    const [heat,setHeat]=React.useState(true);
+    const [lap,setLap]=React.useState(false);
+    const [grid,setGrid]=React.useState(true);
+    const [diff,setDiff]=React.useState('Pro');
+    const [m,setM]=React.useState(4);
+    return (
+      <div className="wrap">
+        <div className="col">
+          <div><div className="lbl">Sliders</div>
+            <Slider label="Pilot temperature" value={t} min={0} max={1} step={0.05} format={(x)=>`T ${x.toFixed(2)}`} onChange={setT}/>
+          </div>
+          <Slider label="V_target" value={v} min={2} max={12} step={1} format={(x)=>`${x} cells`} onChange={setV}/>
+        </div>
+        <div className="col">
+          <div className="lbl">Switches (overlays)</div>
+          <Switch label="Speed heatmap" checked={heat} onChange={setHeat}/>
+          <Switch label="Fastest lap" checked={lap} onChange={setLap}/>
+          <Switch label="Graph-paper grid" checked={grid} onChange={setGrid}/>
+        </div>
+        <div className="col">
+          <div className="lbl">Segmented — difficulty</div>
+          <SegmentedControl value={diff} onChange={setDiff} options={['Rookie','Pro','Ace']}/>
+        </div>
+        <div className="col">
+          <div className="lbl">Stepper</div>
+          <Stepper label="Cars (m)" value={m} min={2} max={6} onChange={setM}/>
+        </div>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script>
+</body></html>

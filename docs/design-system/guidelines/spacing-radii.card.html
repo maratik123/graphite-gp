@@ -1,0 +1,20 @@
+<!-- @dsCard group="Spacing" viewport="700x170" name="Radii & borders" subtitle="Crisp / blueprint — 0px on-grid to 10px panels" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-mono);background:var(--surface-page);padding:22px;color:var(--text-ink)}
+  .row{display:flex;gap:18px;align-items:center}
+  .box{width:80px;height:80px;background:var(--surface-card);display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;font-size:9px;color:var(--text-muted)}
+  .h{border:1px solid var(--border-hairline)}
+  .s{border:2px solid var(--border-strong)}
+  .w{border:3px solid var(--wall)}
+</style></head>
+<body>
+  <div class="row">
+    <div class="box h" style="border-radius:var(--radius-0)">0 · on-grid</div>
+    <div class="box h" style="border-radius:var(--radius-2)">6 · default</div>
+    <div class="box h" style="border-radius:var(--radius-3)">10 · panel</div>
+    <div class="box h" style="border-radius:var(--radius-pill)">pill</div>
+    <div class="box s" style="border-radius:var(--radius-2)">2px strong</div>
+    <div class="box w" style="border-radius:var(--radius-0)">3px wall</div>
+  </div>
+</body></html>

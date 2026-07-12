@@ -1,0 +1,11 @@
+/* ============================================================
+   Graphite GP — Fonts
+   No fonts ship with the scaffold codebase (rendering backend not
+   yet chosen). SUBSTITUTION (flagged in README):
+     • Space Grotesk — technical geometric grotesk for display/UI
+     • JetBrains Mono — coordinates, velocity vectors, telemetry
+   Loaded from Google Fonts. Swap for licensed binaries + @font-face
+   here if the project adopts official faces.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');

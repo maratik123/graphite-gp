@@ -1,0 +1,60 @@
+<!-- @dsCard group="Components" viewport="700x380" name="Game — Telemetry · MovePad · CarChip · LapMeter" subtitle="The vector-racing HUD primitives" -->
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-ui);background:var(--surface-page);
+    background-image:var(--bg-grid);background-size:var(--cell) var(--cell);padding:24px;color:var(--text-ink)}
+  .wrap{display:flex;flex-direction:column;gap:22px;max-width:640px}
+  .lbl{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:12px}
+  .hud{display:flex;gap:28px;align-items:flex-end;background:var(--graphite-900);padding:16px 20px;border-radius:var(--radius-2)}
+  .split{display:flex;gap:40px;align-items:center;flex-wrap:wrap}
+  .stack{display:flex;flex-direction:column;gap:8px}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const { Telemetry, MovePad, CarChip, LapMeter } = window.GraphiteGPDesignSystem_1b43c8;
+  function Demo(){
+    const [move,setMove]=React.useState('right');
+    return (
+      <div className="wrap">
+        <div>
+          <div className="lbl">Telemetry HUD strip (on graphite)</div>
+          <div className="hud" style={{filter:'invert(0)'}}>
+            <div style={{'--text-muted':'#A69D8C'}}>
+              <Telemetry label="SPEED" value="3.61" tone="accent" size="lg"/>
+            </div>
+            <Telemetry label="v" value="(2, 3)" tone="default" size="md" style={{'--text-ink':'#FBF8F0'}}/>
+            <Telemetry label="POS" value="(41, 17)" style={{'--text-ink':'#FBF8F0'}}/>
+            <Telemetry label="TEMPO" value="0.87" unit="c/t" tone="muted" style={{'--text-muted':'#A69D8C'}}/>
+          </div>
+        </div>
+        <div className="split">
+          <div>
+            <div className="lbl">MovePad — 5 accelerations (some illegal)</div>
+            <MovePad value={move} legal={['coast','up','right','down']} onSelect={(k)=>setMove(k)}/>
+          </div>
+          <div className="stack" style={{minWidth:220}}>
+            <div className="lbl">Lap meter</div>
+            <LapMeter lap={2} total={5}/>
+          </div>
+        </div>
+        <div>
+          <div className="lbl">Car chips / standings</div>
+          <div className="stack">
+            <CarChip color="var(--car-1)" name="You" kind="you" rank={1} active/>
+            <CarChip color="var(--car-2)" name="Rival Blue" kind="ai" rank={2}/>
+            <CarChip color="var(--car-3)" name="Rival Green" kind="ai" rank={3}/>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script>
+</body></html>

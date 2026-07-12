@@ -1,0 +1,20 @@
+<!-- @dsCard group="Brand" viewport="700x180" name="Motion — the move chord" subtitle="Cars slide linearly along the chord; hover to replay" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-mono);background-color:var(--paper-1);
+    background-image:var(--bg-grid);background-size:var(--cell) var(--cell);padding:0;color:var(--text-ink)}
+  .stage{height:180px;position:relative;display:flex;align-items:center}
+  .track{position:absolute;left:40px;top:90px;width:560px;height:3px;background:var(--graphite-300)}
+  .car{position:absolute;top:82px;left:40px;width:18px;height:18px;border-radius:50%;background:var(--car-1);border:2px solid var(--graphite-900);
+    animation:slide 2.6s var(--ease-standard) infinite}
+  @keyframes slide{0%{left:40px}45%{left:520px}55%{left:520px}100%{left:40px}}
+  @media (prefers-reduced-motion: reduce){.car{animation:none;left:280px}}
+  .note{position:absolute;left:40px;bottom:16px;font-size:11px;color:var(--text-muted)}
+</style></head>
+<body>
+  <div class="stage">
+    <div class="track"></div>
+    <div class="car"></div>
+    <div class="note">linear ease · (x,y) → (x+vx, y+vy) · dur --dur-med / --ease-standard for UI</div>
+  </div>
+</body></html>

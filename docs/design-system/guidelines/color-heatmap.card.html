@@ -1,0 +1,12 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Speed heatmap" subtitle="Slow → fast overlay ramp for the analytics view" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-mono);background:var(--surface-page);padding:20px;color:var(--text-ink)}
+  .bar{height:60px;border-radius:var(--radius-2);border:1px solid var(--border-hairline);
+       background:linear-gradient(90deg,var(--heat-0),var(--heat-1),var(--heat-2),var(--heat-3))}
+  .labels{display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--text-muted)}
+</style></head>
+<body>
+  <div class="bar"></div>
+  <div class="labels"><span>|v| slow · heat-0</span><span>heat-1</span><span>heat-2</span><span>fast · heat-3</span></div>
+</body></html>
