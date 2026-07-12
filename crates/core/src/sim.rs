@@ -4,7 +4,7 @@
 //! engine that the renderer and AI training both drive — the technical guarantee
 //! that "bots play the same game" as the player.
 
-use crate::geom::{supercover, Corridor, Point};
+use crate::geom::{Corridor, Point, supercover};
 use crate::track::{RaceDir, StartFinish};
 
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
@@ -147,7 +147,7 @@ impl LapCounter {
 }
 
 /// Crash resolution — a wall collision, arising as a search dead-end where all 5
-/// moves leave `D` (design doc §3, marked **[OPEN]**).
+/// moves leave `D` (design doc §3, marked **\[OPEN\]**).
 ///
 /// Leaning rule: zero the into-wall velocity component, keep the along-wall
 /// component with strong damping (e.g. `/2`), respawn at the last valid cell —

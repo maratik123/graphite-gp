@@ -24,11 +24,7 @@ pub struct Features {
 /// physically cannot learn to brake for a corner it cannot yet see.
 ///
 /// TODO(4): centerline-frame projection, ray/curvature look-ahead, rival deltas.
-pub fn extract_features(
-    _track: &TrackArtifact,
-    _me: CarState,
-    _rivals: &[CarState],
-) -> Features {
+pub fn extract_features(_track: &TrackArtifact, _me: CarState, _rivals: &[CarState]) -> Features {
     todo!("feature extraction (design doc §5)")
 }
 
