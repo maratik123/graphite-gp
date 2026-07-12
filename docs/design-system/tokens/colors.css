@@ -1,0 +1,88 @@
+/* ============================================================
+   Graphite GP — Color tokens
+   Grounded in the product: a pencil-and-paper "Racetrack" vector
+   racing game rendered on graph paper. Palette = warm graph paper,
+   graphite pencil ink, faint engineering grid lines, asphalt greys,
+   and a set of distinct "chalk" car colors + a speed heatmap.
+   ============================================================ */
+
+:root {
+  /* ---- Paper (the sheet everything sits on) ---- */
+  --paper-0:            #FBF8F0;   /* brightest highlight / card face */
+  --paper-1:            #F5F1E6;   /* base graph-paper cream          */
+  --paper-2:            #ECE6D6;   /* recessed / infield tint         */
+  --paper-3:            #E0D9C6;   /* pressed / edge                  */
+
+  /* ---- Graphite (pencil ink; warm near-blacks → light strokes) ---- */
+  --graphite-900:       #201E1A;   /* darkest ink / primary text      */
+  --graphite-800:       #322F29;
+  --graphite-700:       #47433B;
+  --graphite-600:       #625C51;
+  --graphite-500:       #837B6D;   /* mid pencil                      */
+  --graphite-400:       #A69D8C;
+  --graphite-300:       #C4BBAA;   /* faint pencil / hairline         */
+  --graphite-200:       #DAD2C1;
+
+  /* ---- Grid (the graph-paper ruling) ---- */
+  --grid-line:          #C3CEDD;   /* faint engineering-blue ruling   */
+  --grid-line-major:    #A9B8CC;   /* every-5th heavier line          */
+  --grid-dot:           #93A2B8;   /* lattice points                  */
+
+  /* ---- Asphalt (drivable corridor, derived from D) ---- */
+  --asphalt-1:          #5E594F;   /* asphalt fill                    */
+  --asphalt-2:          #4A463D;   /* asphalt shade                   */
+  --wall:               #201E1A;   /* wall = fill boundary            */
+
+  /* ---- Racing accent (Graphite GP vermilion — the "GP" red) ---- */
+  --accent:             #E24A2B;
+  --accent-hover:       #C93C20;
+  --accent-press:       #B23319;
+  --accent-tint:        #F7D9CF;   /* washed accent surface           */
+
+  /* ---- Car colors (chalk hues; car 1 = the accent) ---- */
+  --car-1:              #E24A2B;   /* vermilion   */
+  --car-2:              #2E6FB5;   /* chalk blue  */
+  --car-3:              #2E9E5B;   /* chalk green */
+  --car-4:              #E8B23A;   /* chalk amber */
+  --car-5:              #7B4B9E;   /* chalk plum  */
+  --car-6:              #17999B;   /* chalk teal  */
+
+  /* ---- Speed heatmap (slow → fast) ---- */
+  --heat-0:             #2E6FB5;   /* slowest (blue)  */
+  --heat-1:             #17999B;   /* teal            */
+  --heat-2:             #E8B23A;   /* amber           */
+  --heat-3:             #E24A2B;   /* fastest (red)   */
+
+  /* ---- Semantic status ---- */
+  --ok:                 #2E9E5B;   /* valid track / green light       */
+  --warn:               #E8B23A;   /* run-out / caution               */
+  --danger:             #E24A2B;   /* crash / illegal move            */
+  --ok-tint:            #DCEEE2;
+  --warn-tint:          #F7EACB;
+  --danger-tint:        #F7D9CF;
+
+  /* ============================================================
+     Semantic aliases — reach for these in components/kits
+     ============================================================ */
+  --surface-page:       var(--paper-1);
+  --surface-card:       var(--paper-0);
+  --surface-sunken:     var(--paper-2);
+  --surface-infield:    var(--paper-2);
+  --surface-asphalt:    var(--asphalt-1);
+  --surface-ink:        var(--graphite-900);   /* inverse / dark panels */
+
+  --text-ink:           var(--graphite-900);
+  --text-body:          var(--graphite-800);
+  --text-muted:         var(--graphite-500);
+  --text-faint:         var(--graphite-400);
+  --text-on-ink:        var(--paper-1);
+  --text-on-accent:     var(--paper-0);
+  --text-link:          var(--accent);
+  --text-link-hover:    var(--accent-hover);
+
+  --border-hairline:    var(--graphite-300);
+  --border-strong:      var(--graphite-900);
+  --border-soft:        var(--graphite-200);
+
+  --focus-ring:         var(--accent);
+}

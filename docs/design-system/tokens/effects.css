@@ -1,0 +1,39 @@
+/* ============================================================
+   Graphite GP — Effects: shadows, elevation, motion, grid backgrounds
+   Paper is flat; prefer pencil hairline borders over heavy shadows.
+   Shadows are soft and low, as if paper lifted slightly off a desk.
+   ============================================================ */
+
+:root {
+  /* ---- Shadows (warm, low, subtle) ---- */
+  --shadow-0:  none;
+  --shadow-1:  0 1px 2px rgba(32,30,26,0.08);
+  --shadow-2:  0 2px 6px rgba(32,30,26,0.10);
+  --shadow-3:  0 8px 24px rgba(32,30,26,0.14);
+  --shadow-pop: 0 12px 40px rgba(32,30,26,0.20);
+
+  /* pencil-press: inner darkening for pressed states */
+  --shadow-inset: inset 0 1px 2px rgba(32,30,26,0.14);
+
+  /* ---- Motion ---- */
+  --ease-standard: cubic-bezier(0.2, 0, 0.1, 1);  /* @kind other */
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */
+  --ease-in:       cubic-bezier(0.4, 0, 1, 1);    /* @kind other */
+  --dur-fast:      120ms;  /* @kind other */
+  --dur-med:       200ms;  /* @kind other */
+  --dur-slow:      320ms;  /* @kind other */
+
+  /* ---- Graph-paper background (quad-ruled) ----
+     Use as: background: var(--paper-1); background-image: var(--bg-grid);
+     background-size: var(--cell) var(--cell); */
+  --bg-grid:
+    linear-gradient(to right,  var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+
+  /* dotted lattice (points at cell corners) */
+  --bg-dots:
+    radial-gradient(var(--grid-dot) 1.2px, transparent 1.4px);
+
+  /* ---- Focus ---- */
+  --focus-shadow: 0 0 0 3px rgba(226,74,43,0.35);
+}

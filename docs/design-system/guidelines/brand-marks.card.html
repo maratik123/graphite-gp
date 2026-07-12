@@ -1,0 +1,42 @@
+<!-- @dsCard group="Brand" viewport="700x230" name="Geometric marks" subtitle="Native iconography: car, velocity vector, wall, S/F, move pad" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-mono);background-color:var(--paper-1);
+    background-image:var(--bg-grid);background-size:var(--cell) var(--cell);padding:22px;color:var(--text-ink)}
+  .row{display:flex;gap:26px;align-items:center;justify-content:space-around}
+  .m{display:flex;flex-direction:column;align-items:center;gap:10px;font-size:10px;color:var(--text-muted)}
+  svg{display:block}
+</style></head>
+<body>
+  <div class="row">
+    <div class="m">
+      <svg width="60" height="60" viewBox="0 0 60 60"><circle cx="30" cy="30" r="9" fill="var(--car-1)" stroke="var(--graphite-900)" stroke-width="2"/></svg>
+      car · point
+    </div>
+    <div class="m">
+      <svg width="60" height="60" viewBox="0 0 60 60"><circle cx="14" cy="46" r="7" fill="var(--car-2)" stroke="var(--graphite-900)" stroke-width="2"/><line x1="14" y1="46" x2="48" y2="14" stroke="var(--graphite-900)" stroke-width="2.5"/><path d="M48 14 l-9 2 l4 6 z" fill="var(--graphite-900)"/></svg>
+      velocity vector
+    </div>
+    <div class="m">
+      <svg width="60" height="60" viewBox="0 0 60 60"><line x1="8" y1="20" x2="52" y2="20" stroke="var(--wall)" stroke-width="3.5"/></svg>
+      wall · half-grid
+    </div>
+    <div class="m">
+      <svg width="60" height="60" viewBox="0 0 60 60"><g>
+        <rect x="10" y="8" width="8" height="8" fill="var(--graphite-900)"/><rect x="26" y="8" width="8" height="8" fill="var(--paper-0)" stroke="var(--graphite-900)"/><rect x="42" y="8" width="8" height="8" fill="var(--graphite-900)"/>
+        <rect x="10" y="24" width="8" height="8" fill="var(--paper-0)" stroke="var(--graphite-900)"/><rect x="26" y="24" width="8" height="8" fill="var(--graphite-900)"/><rect x="42" y="24" width="8" height="8" fill="var(--paper-0)" stroke="var(--graphite-900)"/>
+      </g></svg>
+      S/F line
+    </div>
+    <div class="m">
+      <svg width="60" height="60" viewBox="0 0 60 60">
+        <rect x="24" y="6" width="12" height="12" fill="var(--paper-0)" stroke="var(--graphite-900)" stroke-width="1.5"/>
+        <rect x="6" y="24" width="12" height="12" fill="var(--paper-0)" stroke="var(--graphite-900)" stroke-width="1.5"/>
+        <rect x="24" y="24" width="12" height="12" fill="var(--accent)" stroke="var(--graphite-900)" stroke-width="1.5"/>
+        <rect x="42" y="24" width="12" height="12" fill="var(--paper-0)" stroke="var(--graphite-900)" stroke-width="1.5"/>
+        <rect x="24" y="42" width="12" height="12" fill="var(--paper-0)" stroke="var(--graphite-900)" stroke-width="1.5"/>
+      </svg>
+      move pad · 5 moves
+    </div>
+  </div>
+</body></html>

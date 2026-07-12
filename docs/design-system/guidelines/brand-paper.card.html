@@ -1,0 +1,21 @@
+<!-- @dsCard group="Brand" viewport="700x220" name="Graph-paper ground" subtitle="Quad-ruled grid + lattice dots — the primary background" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>
+  body{margin:0;font-family:var(--font-mono);padding:0}
+  .paper{height:220px;background-color:var(--paper-1);
+    background-image:var(--bg-grid);background-size:var(--cell) var(--cell);
+    display:flex;align-items:center;justify-content:center;position:relative}
+  .major{position:absolute;inset:0;background-image:
+    linear-gradient(to right,var(--grid-line-major) 1.5px,transparent 1.5px),
+    linear-gradient(to bottom,var(--grid-line-major) 1.5px,transparent 1.5px);
+    background-size:calc(var(--cell)*5) calc(var(--cell)*5)}
+  .dots{position:absolute;inset:0;background-image:var(--bg-dots);background-size:var(--cell) var(--cell);background-position:-1px -1px}
+  .tag{position:relative;background:var(--graphite-900);color:var(--paper-0);font-size:11px;padding:6px 12px;border-radius:var(--radius-1)}
+</style></head>
+<body>
+  <div class="paper">
+    <div class="major"></div>
+    <div class="dots"></div>
+    <div class="tag">--bg-grid · --bg-dots · cell 24px · every-5th major</div>
+  </div>
+</body></html>

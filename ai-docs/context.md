@@ -18,7 +18,7 @@ From this duality, "a wall never crosses a point", "a car never touches a wall",
 |-------|-------|------|
 | `gp-core` (`crates/core`) | **3a** | Pure, deterministic, integer-only physics core — `geom` (dual grid, supercover), `track` (the `TrackArtifact` contract), `sim` (`step`, `legal_move`, lap counter, crash, collisions). The shared dependency of render **and** AI. |
 | `gp-gen` (`crates/gen`) | **1** | Track generation — coarse-block ring (infield-first) + local repair, phases Ф1–Ф7. |
-| `gp-render` (`crates/render`) | **2** | Rendering + UX — asphalt/walls derived from the corridor `D`. |
+| `gp-render` (`crates/render`) | **2** | Rendering + UX — asphalt/walls derived from the corridor `D`. Visual language = the imported [design system](../docs/design-system/IMPORT.md); backend = **native Rust GUI** (tokens→consts, JSX components→widgets). |
 | `gp-ai` (`crates/ai`) | **4** | AI training — feedforward policy over honest local features, 5-action masked softmax. |
 | `gp-game` (`crates/game`) | **3b** | Game loop / orchestration — the runnable `graphite-gp` binary. |
 
@@ -29,10 +29,11 @@ Dependency edges: `gen · render · ai → core`; `game → all`; `core` depends
 
 `{ D, walls, sf, race_dir, s_field, centerline, Vmax, tempo, fastest_lap, speed_heatmap }` (see `crates/core/src/track.rs` + `docs/design.md` §2). The AI frame is derived from the `s`-field gradient (`t̂ = normalize(∇s)`); the racing-line `centerline` curve is render-only.
 
-## Status (2026-07-12)
+## Status (2026-07-13)
 
 - Design: **finalized** (`docs/design.md`), reviewed across 4 rounds.
 - Code: **scaffold** — module structure, `TrackArtifact` type, and stub APIs in place; algorithms are `todo!()` (marked `TODO(<block>)`). Whole workspace builds clean.
+- **Visual base:** the Claude Design "Graphite GP Design System" is imported to [`docs/design-system/`](../docs/design-system/IMPORT.md) and adopted as the canonical visual language; render target is a **native Rust GUI** (design tokens/components are a spec to port, not runnable web code).
 - **Next implementation step:** block 3a, starting with the exact integer `supercover` predicate + its C4 test table (`crates/core/src/geom.rs`) — the foundation of `legal_move` and the passability oracle.
 
 ## Load-bearing details worth knowing before touching a block
