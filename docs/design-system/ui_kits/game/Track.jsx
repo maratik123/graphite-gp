@@ -35,6 +35,12 @@ function TrackCanvas({
         <pattern id={gridId} width={CELL} height={CELL} patternUnits="userSpaceOnUse">
           <path d={`M${CELL} 0 L0 0 0 ${CELL}`} fill="none" stroke="var(--grid-line)" strokeWidth="1" />
         </pattern>
+        <pattern id={gridId + 'L'} width={CELL} height={CELL} patternUnits="userSpaceOnUse">
+          <path d={`M${CELL} 0 L0 0 0 ${CELL}`} fill="none" stroke="rgba(251,248,240,0.3)" strokeWidth="1" />
+        </pattern>
+        <clipPath id={gridId + 'C'}>
+          <path d={`${rr(OUT.x, OUT.y, OUT.w, OUT.h, OUT.r)} ${rr(INN.x, INN.y, INN.w, INN.h, INN.r)}`} clipRule="evenodd" />
+        </clipPath>
         <linearGradient id={heatId} x1="0" y1="1" x2="1" y2="0">
           <stop offset="0" stopColor="var(--heat-0)" />
           <stop offset="0.4" stopColor="var(--heat-1)" />
@@ -50,6 +56,11 @@ function TrackCanvas({
       {/* 1b. asphalt = corridor D (even-odd ring), tinted by heatmap when on */}
       <path d={`${rr(OUT.x, OUT.y, OUT.w, OUT.h, OUT.r)} ${rr(INN.x, INN.y, INN.w, INN.h, INN.r)}`}
         fillRule="evenodd" fill={showHeatmap ? `url(#${heatId})` : 'var(--asphalt-1)'} opacity={showHeatmap ? 0.9 : 1} />
+
+      {/* 1b-grid. graph-paper showing through the asphalt (light, clipped to corridor) */}
+      {showGrid && (
+        <rect x="0" y="0" width={W} height={H} fill={`url(#${gridId}L)`} clipPath={`url(#${gridId}C)`} />
+      )}
 
       {/* 1c. infield (the hole) — distinct so the loop reads */}
       <path d={rr(INN.x, INN.y, INN.w, INN.h, INN.r)} fill="var(--surface-infield)" />
