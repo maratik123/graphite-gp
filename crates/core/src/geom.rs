@@ -70,7 +70,10 @@ pub struct Corridor {
 impl Corridor {
     /// A new, empty corridor over the box `[origin, origin + (width, height))`.
     pub fn new(origin: Point, width: i32, height: i32) -> Self {
-        assert!(width >= 0 && height >= 0, "corridor dimensions must be non-negative");
+        assert!(
+            width >= 0 && height >= 0,
+            "corridor dimensions must be non-negative"
+        );
         Self {
             origin,
             width,
@@ -130,4 +133,144 @@ impl Corridor {
 /// TODO(3a): implement the strict, corner-aware supercover.
 pub fn supercover(_a: Point, _b: Point) -> Vec<Point> {
     todo!("strict supercover (design doc §3)")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Collect a supercover into a `HashSet` so comparisons ignore iteration
+    /// order (spec §4: the result is defined up to set equality).
+    fn cover_set(a: Point, b: Point) -> HashSet<Point> {
+        supercover(a, b).into_iter().collect()
+    }
+
+    /// Build an expected cell set from `(x, y)` literals.
+    fn cells(pts: &[(Coord, Coord)]) -> HashSet<Point> {
+        pts.iter().map(|&(x, y)| Point::new(x, y)).collect()
+    }
+
+    #[test]
+    fn axial_horizontal_no_diagonal() {
+        // (0,0)→(3,0): the straight run only, no diagonal neighbours (AC3).
+        assert_eq!(
+            cover_set(Point::new(0, 0), Point::new(3, 0)),
+            cells(&[(0, 0), (1, 0), (2, 0), (3, 0)]),
+        );
+    }
+
+    #[test]
+    fn axial_vertical_no_diagonal() {
+        // (0,0)→(0,3): the straight vertical run only (AC3).
+        assert_eq!(
+            cover_set(Point::new(0, 0), Point::new(0, 3)),
+            cells(&[(0, 0), (0, 1), (0, 2), (0, 3)]),
+        );
+    }
+
+    #[test]
+    fn dual_vertex_diagonal_all_four() {
+        // (0,0)→(1,1) passes through the dual vertex (½,½): all 4 sharing cells (AC2).
+        assert_eq!(
+            cover_set(Point::new(0, 0), Point::new(1, 1)),
+            cells(&[(0, 0), (1, 0), (0, 1), (1, 1)]),
+        );
+    }
+
+    #[test]
+    fn dual_vertex_symmetric() {
+        // Reversed endpoints yield the same four cells (order-independence, AC1/AC2).
+        assert_eq!(
+            cover_set(Point::new(1, 1), Point::new(0, 0)),
+            cells(&[(0, 0), (1, 0), (0, 1), (1, 1)]),
+        );
+    }
+
+    #[test]
+    fn primitive_slope_gcd1() {
+        // (0,0)→(2,1), gcd(2,1)=1: crosses interiors/edges without hitting a dual
+        // vertex; excludes the off-line corners (2,0) and (0,1) (AC1).
+        assert_eq!(
+            cover_set(Point::new(0, 0), Point::new(2, 1)),
+            cells(&[(0, 0), (1, 0), (1, 1), (2, 1)]),
+        );
+    }
+
+    #[test]
+    fn collinear_dual_vertices_gcd2() {
+        // (0,0)→(2,2), gcd=2: through collinear dual vertices (½,½) and (1½,1½);
+        // each contributes its full 4-cell tie. Excludes (2,0) and (0,2) (AC1/AC2).
+        assert_eq!(
+            cover_set(Point::new(0, 0), Point::new(2, 2)),
+            cells(&[(0, 0), (1, 0), (0, 1), (1, 1), (2, 1), (1, 2), (2, 2)]),
+        );
+    }
+
+    #[test]
+    fn single_corner_graze() {
+        // (1,0)→(0,1) grazes the dual vertex (½,½): the 4 cells around it (AC1).
+        assert_eq!(
+            cover_set(Point::new(1, 0), Point::new(0, 1)),
+            cells(&[(0, 0), (1, 0), (0, 1), (1, 1)]),
+        );
+    }
+
+    #[test]
+    fn long_diagonal_three_vertices() {
+        // (0,0)→(3,3) passes through three collinear dual vertices (AC1 reinforcement).
+        assert_eq!(
+            cover_set(Point::new(0, 0), Point::new(3, 3)),
+            cells(&[
+                (0, 0),
+                (0, 1),
+                (1, 0),
+                (1, 1),
+                (1, 2),
+                (2, 1),
+                (2, 2),
+                (2, 3),
+                (3, 2),
+                (3, 3),
+            ]),
+        );
+    }
+
+    #[test]
+    fn degenerate_single_cell() {
+        // a == b returns exactly {a} (AC5).
+        assert_eq!(
+            cover_set(Point::new(2, 2), Point::new(2, 2)),
+            cells(&[(2, 2)])
+        );
+    }
+
+    #[test]
+    fn no_duplicate_cells() {
+        // AC6: each cell appears exactly once. A HashSet compare alone would hide a
+        // double-push, so assert the raw Vec length equals its deduped length.
+        let v = supercover(Point::new(0, 0), Point::new(1, 1));
+        assert_eq!(v.len(), v.iter().collect::<HashSet<_>>().len());
+    }
+
+    #[test]
+    fn includes_both_endpoints() {
+        // AC5: both endpoint cells are always present, even on a long chord.
+        let (a, b) = (Point::new(0, 0), Point::new(3, 3));
+        let set = cover_set(a, b);
+        assert!(set.contains(&a) && set.contains(&b));
+    }
+
+    #[test]
+    fn order_independent_symmetry() {
+        // AC1: as a set, supercover(a,b) == supercover(b,a) across several chords.
+        for (a, b) in [
+            (Point::new(0, 0), Point::new(2, 1)),
+            (Point::new(0, 0), Point::new(2, 2)),
+            (Point::new(0, 0), Point::new(3, 3)),
+            (Point::new(1, 0), Point::new(0, 1)),
+        ] {
+            assert_eq!(cover_set(a, b), cover_set(b, a));
+        }
+    }
 }
