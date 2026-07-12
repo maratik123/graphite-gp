@@ -122,17 +122,50 @@ impl Corridor {
     }
 }
 
-/// Strict supercover of the segment `a → b`: every cell the segment touches,
-/// **including corner-clipped cells** (design doc §3, `legal_move`).
+/// Strict supercover of the segment `a → b`: every cell whose **closed** unit
+/// square `[c.x ± ½] × [c.y ± ½]` the closed segment touches — corner- and
+/// edge-grazes included (design doc §3 C4).
 ///
-/// This is what makes a fast chord unable to jump a wall or squeeze through a
-/// dual vertex pinched between two walls. It is used identically as the runtime
-/// legality rule and as the passability-oracle graph edge — one implementation,
-/// two callers.
+/// This strictness is what stops a fast chord from jumping a wall or squeezing
+/// through a dual vertex pinched between two walls. It is used identically as the
+/// runtime legality rule (`legal_move`) and as the passability-oracle graph edge —
+/// one implementation, two callers.
 ///
-/// TODO(3a): implement the strict, corner-aware supercover.
-pub fn supercover(_a: Point, _b: Point) -> Vec<Point> {
-    todo!("strict supercover (design doc §3)")
+/// # Contract
+///
+/// - **Closed squares.** A boundary or single-corner touch counts. When the
+///   segment crosses a dual vertex `(i + ½, j + ½)`, all four sharing cells are
+///   returned — the correctness-critical tie (e.g. `(0,0)→(1,1)` yields all of
+///   `(0,0),(1,0),(0,1),(1,1)`).
+/// - **Exact & integer.** Membership is the integer test `2·|cr| ≤ |dx| + |dy|`
+///   with `cr = dx·(c.y − a.y) − dy·(c.x − a.x)`, evaluated with no floating point
+///   anywhere (design doc §3a).
+/// - **Order-independent, duplicate-free.** The result is the exact cell set: as a
+///   set `supercover(a, b) == supercover(b, a)`, each cell is pushed exactly once
+///   (the bounding-box scan visits every cell once), and both endpoint cells are
+///   always present (a degenerate `a == b` yields exactly `{a}`).
+///
+/// # Overflow precondition
+///
+/// Endpoints are assumed separated by a bounded chord — one move's velocity, with
+/// `|v| ≪ 1.5×10⁹`. Within that domain the widened `i64` cross product never
+/// overflows (its operands are taken relative to `a`, so `|cr| ≤ 2·|dx|·|dy|`).
+/// Adversarial full-range `i32` endpoints lie outside the documented domain and
+/// are not supported.
+pub fn supercover(a: Point, b: Point) -> Vec<Point> {
+    let dx = i64::from(b.x) - i64::from(a.x);
+    let dy = i64::from(b.y) - i64::from(a.y);
+    let bound = dx.abs() + dy.abs();
+    let mut cover = Vec::new();
+    for cx in a.x.min(b.x)..=a.x.max(b.x) {
+        for cy in a.y.min(b.y)..=a.y.max(b.y) {
+            let cr = dx * (i64::from(cy) - i64::from(a.y)) - dy * (i64::from(cx) - i64::from(a.x));
+            if 2 * cr.abs() <= bound {
+                cover.push(Point::new(cx, cy));
+            }
+        }
+    }
+    cover
 }
 
 #[cfg(test)]
