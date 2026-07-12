@@ -6,4 +6,4 @@ Written by `/task` (Step 12 flips a row to ✅) and read by `/next`. New plans l
 
 | Date | Name | Status | Depends on | Notes |
 |------|------|--------|------------|-------|
-| _(none yet)_ | | | | |
+| 2026-07-13 | core-supercover | ✅ implemented (12 tests) | — | gp-core exact integer `supercover` predicate (SAT bbox-scan); foundation of `legal_move` + passability oracle. Closes #4. |

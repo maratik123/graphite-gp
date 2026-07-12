@@ -32,9 +32,9 @@ Dependency edges: `gen · render · ai → core`; `game → all`; `core` depends
 ## Status (2026-07-13)
 
 - Design: **finalized** (`docs/design.md`), reviewed across 4 rounds.
-- Code: **scaffold** — module structure, `TrackArtifact` type, and stub APIs in place; algorithms are `todo!()` (marked `TODO(<block>)`). Whole workspace builds clean.
+- Code: **scaffold + first physics predicate** — module structure, `TrackArtifact` type, and stub APIs in place; the exact integer `supercover` predicate (block 3a, `crates/core/src/geom.rs`) is now implemented with its full §3 C4 test table (12 unit tests); the remaining algorithms are still `todo!()` (marked `TODO(<block>)`). Whole workspace builds clean.
 - **Visual base:** the Claude Design "Graphite GP Design System" is imported to [`docs/design-system/`](../docs/design-system/IMPORT.md) and adopted as the canonical visual language; render target is a **native Rust GUI** (design tokens/components are a spec to port, not runnable web code).
-- **Next implementation step:** block 3a, starting with the exact integer `supercover` predicate + its C4 test table (`crates/core/src/geom.rs`) — the foundation of `legal_move` and the passability oracle.
+- **Next implementation step:** continue block 3a — `step` (state advance), the signed lap counter, crash resolution, and car-collision resolution in `crates/core/src/sim.rs`, then the passability oracle. (`supercover` — the first 3a predicate and the shared foundation of `legal_move` + the oracle graph edge — is done.)
 
 ## Load-bearing details worth knowing before touching a block
 
