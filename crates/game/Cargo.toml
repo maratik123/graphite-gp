@@ -1,0 +1,18 @@
+[package]
+name = "gp-game"
+description = "Block 3b — game loop & orchestration; the runnable graphite-gp binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "graphite-gp"
+path = "src/main.rs"
+
+[dependencies]
+gp-core = { workspace = true }
+gp-gen = { workspace = true }
+gp-render = { workspace = true }
+gp-ai = { workspace = true }

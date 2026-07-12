@@ -1,0 +1,11 @@
+[package]
+name = "gp-gen"
+description = "Block 1 — track generation: coarse-block ring (infield-first) + local repair."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+gp-core = { workspace = true }

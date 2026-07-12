@@ -1,0 +1,14 @@
+[package]
+name = "gp-ai"
+description = "Block 4 — AI training: feedforward policy over honest local features, 5-action masked softmax."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+gp-core = { workspace = true }
+
+# TODO(4): CPU, multi-env training. A tiny hand-rolled MLP or a lightweight
+# crate (e.g. candle / burn) — profile simulation-vs-network before any GPU.

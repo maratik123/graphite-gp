@@ -1,0 +1,10 @@
+[package]
+name = "gp-core"
+description = "Block 3a — pure, deterministic physics core: geometry (dual grid), track artifact, simulation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -1,0 +1,33 @@
+# graphite-gp — grid racing game (see docs/design.md)
+#
+# Workspace layout mirrors the 4-block architecture (design doc §6):
+#   crates/core    — block 3a: pure, deterministic physics core (shared dependency)
+#   crates/gen     — block 1:  track generation
+#   crates/render  — block 2:  rendering + UX
+#   crates/ai      — block 4:  AI training
+#   crates/game    — block 3b: game loop / orchestration (runnable binary)
+#
+# Build order (design doc §6): 3a -> (1 || 2) -> 4.
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/gen",
+    "crates/render",
+    "crates/ai",
+    "crates/game",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Marat Bukharov <marat.buharov@gmail.com>"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+gp-core = { path = "crates/core" }
+gp-gen = { path = "crates/gen" }
+gp-render = { path = "crates/render" }
+gp-ai = { path = "crates/ai" }

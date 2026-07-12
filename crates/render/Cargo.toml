@@ -1,0 +1,13 @@
+[package]
+name = "gp-render"
+description = "Block 2 — rendering + UX: asphalt and walls derived from the corridor D."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+gp-core = { workspace = true }
+
+# TODO(2): pick a rendering backend (e.g. macroquad / egui / raw canvas) and add it here.
