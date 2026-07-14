@@ -31,3 +31,28 @@ gp-core = { path = "crates/core" }
 gp-gen = { path = "crates/gen" }
 gp-render = { path = "crates/render" }
 gp-ai = { path = "crates/ai" }
+
+# Workspace-wide lint posture. Each crate opts in via `[lints] workspace = true`.
+# See `ai-docs/code-style.md` for the carve-out discipline behind the allows below.
+[workspace.lints.rust]
+missing_docs = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[workspace.lints.clippy]
+# `priority = -1` keeps these group denies below the specific allows further down,
+# so the targeted `= "allow"` entries win over the group.
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+large_stack_frames = "deny"
+large_stack_arrays = "deny"
+undocumented_unsafe_blocks = "deny"
+# `#[must_use]` is a deliberate, opt-in posture in this project — applied where it
+# earns its keep, not blanket — so the candidate suggestion is noise here.
+must_use_candidate = "allow"
+# Explicit `pub(crate)` is kept even inside private modules: reading visibility
+# locally is cheaper than re-deriving it from the module tree.
+redundant_pub_crate = "allow"
+# Same opt-in `#[must_use]` posture as `must_use_candidate`, for `-> Self` returns.
+return_self_not_must_use = "allow"
