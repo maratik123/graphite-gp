@@ -1,10 +1,10 @@
 //! Dual-grid geometry primitives (design doc §1).
 //!
 //! Core invariant: a [`Point`] is the center of a unit cell (integer
-//! coordinates); a [`Wall`] is a dual edge on the half-grid — the shared boundary
-//! between two 4-adjacent cells where one is drivable and one is not. From this
-//! duality, "a wall never passes through a point" and "a car never touches a
-//! wall" hold by construction.
+//! coordinates); a [`Wall`] is a dual edge on the boundary of the corridor `D` —
+//! anchored to a drivable cell plus the [`Side`] toward its non-drivable
+//! neighbour. From this duality, "a wall never passes through a point" and "a car
+//! never touches a wall" hold by construction.
 
 /// Integer grid coordinate.
 pub type Coord = i32;
@@ -37,24 +37,62 @@ impl Point {
     }
 }
 
-/// Orientation of a dual edge (a wall) on the half-grid.
+/// A horizontal or vertical orientation on the grid.
+///
+/// Carried by chords such as the start/finish line
+/// ([`StartFinish`](crate::track::StartFinish)); walls instead carry a 4-way
+/// [`Side`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Orient {
-    /// A horizontal edge — the boundary between a cell and its N/S neighbour.
+    /// Horizontal — spanning east–west.
     Horizontal,
-    /// A vertical edge — the boundary between a cell and its E/W neighbour.
+    /// Vertical — spanning north–south.
     Vertical,
 }
 
-/// A wall = one dual edge on the half-grid, anchored to the cell it borders plus
-/// which side. Walls are *derived* from the corridor boundary (design doc §1),
+/// One of a cell's four axis-aligned sides.
+///
+/// The outward direction from a drivable cell toward a non-drivable neighbour
+/// (design doc §1). Variant order mirrors [`Point::neighbors4`]: east, west,
+/// north, south.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Side {
+    /// The +x side — toward the eastern neighbour.
+    East,
+    /// The -x side — toward the western neighbour.
+    West,
+    /// The +y side — toward the northern neighbour (`y` increases northward).
+    North,
+    /// The -y side — toward the southern neighbour.
+    South,
+}
+
+impl Side {
+    /// All four sides, in [`Point::neighbors4`] order: east, west, north, south.
+    pub const ALL: [Self; 4] = [Self::East, Self::West, Self::North, Self::South];
+
+    /// The unit step `(dx, dy)` from a cell across this side to its neighbour.
+    pub const fn delta(self) -> (Coord, Coord) {
+        match self {
+            Self::East => (1, 0),
+            Self::West => (-1, 0),
+            Self::North => (0, 1),
+            Self::South => (0, -1),
+        }
+    }
+}
+
+/// A wall = one dual edge on the corridor boundary.
+///
+/// Anchored to the drivable cell it borders plus which [`Side`] of that cell the
+/// edge sits on. Walls are *derived* from the corridor boundary (design doc §1),
 /// never authored by hand.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Wall {
     /// The drivable cell this edge borders.
     pub cell: Point,
     /// Which side of `cell` the edge sits on.
-    pub orient: Orient,
+    pub side: Side,
 }
 
 /// The corridor `D` — the set of drivable points/cells (design doc §1).
