@@ -1,5 +1,7 @@
 # graphite-gp
 
+[![CI](https://github.com/maratik123/graphite-gp/actions/workflows/ci.yml/badge.svg)](https://github.com/maratik123/graphite-gp/actions/workflows/ci.yml)
+
 A grid-based **vector-racing game** (the classic "Racetrack" pencil game:
 integer position + velocity, accelerate ±1 per axis per turn) with procedurally
 generated closed tracks and self-taught AI opponents.
@@ -47,6 +49,12 @@ cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
 cargo test             # 12 gp-core supercover tests green
 ```
+
+MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
+test, clippy (`-D warnings`), and docs on every push/PR to `main`, plus an
+advisory Miri lane; the workspace lint policy (`clippy::pedantic`/`nursery` =
+`deny`) lives in the root `Cargo.toml` + `clippy.toml` (see
+[`ai-docs/code-style.md`](ai-docs/code-style.md) § Linter posture).
 
 ## License
 

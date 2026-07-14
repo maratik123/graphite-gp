@@ -1,0 +1,220 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Turn adjustable rustc lint warnings into hard errors for local crates across
+  # the build/test/docs compile lanes (respected as of Rust 1.97; MSRV is 1.97.0).
+  # Complements clippy's `-D warnings` and the workspace deny lint tables.
+  CARGO_BUILD_WARNINGS: deny
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            # Any future Rust artefact must be added here in the same PR that
+            # introduces it to keep the gate accurate. `clippy.toml` is included
+            # so a lint-config-only edit still triggers the Rust jobs.
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - 'Cargo.lock'
+              - 'clippy.toml'
+              - '.github/workflows/**'
+              - 'rust-toolchain*'
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      - name: Format
+        run: cargo fmt --all -- --check
+
+  build:
+    name: Build (compile)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      SCCACHE_CACHE_SIZE: "2G"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-shared-key: ${{ runner.os }}-stable-v2
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Build
+        run: cargo build --workspace --keep-going
+
+  test:
+    name: Test (run)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      SCCACHE_CACHE_SIZE: "2G"
+      WGPU_BACKEND: vulkan
+      WGPU_ADAPTER_NAME: llvmpipe
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-shared-key: ${{ runner.os }}-stable-v2
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Install Vulkan software stack
+        run: |
+          sudo apt-get update
+          # mesa-vulkan-drivers: Vulkan ICD (lavapipe) software rasteriser
+          # vulkan-tools: provides vulkaninfo for the diagnostics gate below
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+      - name: Vulkan diagnostics
+        run: vulkaninfo --summary
+      - name: Build tests
+        run: cargo build --workspace --tests --keep-going
+      - name: Test
+        run: cargo test --workspace --tests --no-fail-fast
+
+  clippy:
+    name: Clippy (lint)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      SCCACHE_CACHE_SIZE: "2G"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+          cache-shared-key: ${{ runner.os }}-stable-v2
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  docs:
+    name: Docs (build)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      SCCACHE_CACHE_SIZE: "2G"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-shared-key: ${{ runner.os }}-stable-v2
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Docs
+        run: cargo doc --no-deps --workspace --keep-going
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  miri:
+    name: Miri / Tree Borrows
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    # v1 policy: surface Miri findings in the CI summary without turning main or
+    # PR CI red. Advisory only — no `miri-pass` gate is wired into branch
+    # protection.
+    continue-on-error: true
+    env:
+      # `-Zmiri-tree-borrows`: aliasing model per design.
+      MIRIFLAGS: -Zmiri-tree-borrows
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust nightly with miri + rust-src
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          components: miri, rust-src
+          cache-shared-key: ${{ runner.os }}-nightly-miri-v1
+      - name: cargo miri setup
+        run: cargo miri setup
+      - name: cargo miri test (workspace)
+        run: cargo miri test --workspace
+
+  build-pass:
+    name: Build
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          c="${{ needs.changes.result }}"
+          r="${{ needs.build.result }}"
+          if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
+
+  test-pass:
+    name: Test
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          c="${{ needs.changes.result }}"
+          r="${{ needs.test.result }}"
+          if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
+
+  clippy-pass:
+    name: Clippy
+    needs: [changes, clippy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          c="${{ needs.changes.result }}"
+          r="${{ needs.clippy.result }}"
+          if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
+
+  docs-pass:
+    name: Docs
+    needs: [changes, docs]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          c="${{ needs.changes.result }}"
+          r="${{ needs.docs.result }}"
+          if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi

@@ -24,12 +24,12 @@ pub struct GenParams {
 
 impl GenParams {
     /// Global minimum width `n = ⌈m/2⌉` (design doc §1).
-    pub fn min_width(&self) -> u32 {
+    pub const fn min_width(&self) -> u32 {
         self.cars.div_ceil(2)
     }
 
     /// Start/finish width floor `≥ m` — cars start abreast across the corridor.
-    pub fn start_finish_width(&self) -> u32 {
+    pub const fn start_finish_width(&self) -> u32 {
         self.cars
     }
 }

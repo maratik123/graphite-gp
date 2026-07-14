@@ -1,0 +1,6 @@
+# Thresholds for the workspace `clippy::large_stack_frames` / `large_stack_arrays`
+# denies (see root `Cargo.toml` `[workspace.lints.clippy]`). 524288 = 512 KiB —
+# large enough not to fire on ordinary code, small enough to catch an accidental
+# oversized on-stack buffer or array before it reaches CI.
+stack-size-threshold = 524288
+array-size-threshold = 524288

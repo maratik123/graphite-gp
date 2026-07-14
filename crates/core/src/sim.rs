@@ -10,9 +10,13 @@ use crate::track::{RaceDir, StartFinish};
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct CarState {
+    /// Cell x-coordinate (grid column).
     pub x: i32,
+    /// Cell y-coordinate (grid row).
     pub y: i32,
+    /// Velocity x-component, in cells per turn.
     pub vx: i32,
+    /// Velocity y-component, in cells per turn.
     pub vy: i32,
 }
 
@@ -24,7 +28,9 @@ impl CarState {
 }
 
 /// The 5 von-Neumann acceleration actions (design doc §3): `(0,0)`, `(±1,0)`,
-/// `(0,±1)`. Diagonal acceleration in a single turn is forbidden — this is the
+/// `(0,±1)`.
+///
+/// Diagonal acceleration in a single turn is forbidden — this is the
 /// foundation of every braking-distance argument in the design.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Action {
@@ -42,22 +48,22 @@ pub enum Action {
 
 impl Action {
     /// All five actions, in a fixed order (matches the policy's logit order).
-    pub const ALL: [Action; 5] = [
-        Action::Coast,
-        Action::East,
-        Action::West,
-        Action::North,
-        Action::South,
+    pub const ALL: [Self; 5] = [
+        Self::Coast,
+        Self::East,
+        Self::West,
+        Self::North,
+        Self::South,
     ];
 
     /// The acceleration `(a, b)` this action applies to velocity.
     pub const fn accel(self) -> (i32, i32) {
         match self {
-            Action::Coast => (0, 0),
-            Action::East => (1, 0),
-            Action::West => (-1, 0),
-            Action::North => (0, 1),
-            Action::South => (0, -1),
+            Self::Coast => (0, 0),
+            Self::East => (1, 0),
+            Self::West => (-1, 0),
+            Self::North => (0, 1),
+            Self::South => (0, -1),
         }
     }
 }
@@ -115,6 +121,7 @@ impl Default for LapCounter {
 }
 
 impl LapCounter {
+    /// A new lap counter in the pre-race state (`raw()` is `-1`, `laps()` is `0`).
     pub fn new() -> Self {
         Self::default()
     }
@@ -125,7 +132,7 @@ impl LapCounter {
     }
 
     /// Raw signed crossing count (may be negative before the race starts).
-    pub fn raw(&self) -> i32 {
+    pub const fn raw(&self) -> i32 {
         self.counter
     }
 

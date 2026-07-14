@@ -16,8 +16,10 @@ pub enum RaceDir {
 }
 
 /// The start/finish line — a full chord cutting the annulus into a simply
-/// connected strip (design doc §3, lap counter). Being a *full* chord is what
-/// makes the signed-crossing lap counter provably sufficient.
+/// connected strip (design doc §3, lap counter).
+///
+/// Being a *full* chord is what makes the signed-crossing lap counter provably
+/// sufficient.
 #[derive(Clone, Debug)]
 pub struct StartFinish {
     /// The drivable points forming the chord across the corridor.

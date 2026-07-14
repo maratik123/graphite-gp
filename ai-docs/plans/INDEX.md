@@ -6,4 +6,5 @@ Written by `/task` (Step 12 flips a row to ✅) and read by `/next`. New plans l
 
 | Date | Name | Status | Depends on | Notes |
 |------|------|--------|------------|-------|
+| 2026-07-14 | import-ci-workflows | ✅ implemented (0 new tests; 12 gp-core green) | — | Bootstrap GitHub Actions CI from quartzite (single `ubuntu-latest` lane) + Dependabot + mandatory Vulkan env-init + MSRV 1.97.0 + `CARGO_BUILD_WARNINGS=deny` + workspace lint tables (pedantic/nursery=deny). No tracking issue. |
 | 2026-07-13 | core-supercover | ✅ implemented (12 tests) | — | gp-core exact integer `supercover` predicate (SAT bbox-scan); foundation of `legal_move` + passability oracle. Closes #4. |
