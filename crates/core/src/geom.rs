@@ -315,6 +315,29 @@ pub fn component_count(d: &Corridor) -> usize {
     count
 }
 
+/// The number of **bounded** 4-connected components of the complement `¬D`.
+///
+/// Counts holes of `¬D` (cells not in `D`) over the bounding box that do **not**
+/// touch the box border — infield holes fully enclosed by `D`, each of ≥1 cell. A
+/// complement component is *unbounded* (the outfield) iff any of its cells lies on
+/// the box border, since everything outside the box is one connected non-drivable
+/// region (design doc §2, Ф4 — "exactly one bounded hole" is then `== 1`). Works
+/// regardless of box margin; deterministic; `0` for an empty or fully-drivable
+/// corridor.
+pub fn bounded_complement_components(d: &Corridor) -> usize {
+    let mut visited = vec![false; d.area()];
+    let mut out = Vec::new();
+    let mut count = 0;
+    for p in d.box_points() {
+        out.clear();
+        let touches_boundary = flood_component(d, |q| !d.contains(q), &mut visited, p, &mut out);
+        if !out.is_empty() && !touches_boundary {
+            count += 1;
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,6 +372,13 @@ mod tests {
     /// Collect a `flood_fill` result into a `HashSet` (order is an impl detail).
     fn flood_set(d: &Corridor, seed: Point) -> HashSet<Point> {
         flood_fill(d, seed).into_iter().collect()
+    }
+
+    /// All `(x, y)` in the inclusive rectangle `[x0..=x1] × [y0..=y1]`.
+    fn rect(x0: Coord, x1: Coord, y0: Coord, y1: Coord) -> Vec<(Coord, Coord)> {
+        (y0..=y1)
+            .flat_map(|y| (x0..=x1).map(move |x| (x, y)))
+            .collect()
     }
 
     #[test]
@@ -391,6 +421,54 @@ mod tests {
         let d = corridor((0, 0), 5, 5, &[]);
         assert_eq!(component_count(&d), 0);
         assert!(flood_fill(&d, Point::new(2, 2)).is_empty());
+    }
+
+    #[test]
+    fn solid_rectangle_has_no_bounded_holes() {
+        // A solid filled block: ¬D is one region touching the border → 0 (AC2).
+        let d = corridor((0, 0), 5, 5, &rect(1, 3, 1, 3));
+        assert_eq!(bounded_complement_components(&d), 0);
+    }
+
+    #[test]
+    fn annulus_has_one_bounded_hole() {
+        // 3×3 ring (block minus its center) → the enclosed center is 1 hole (AC2).
+        let ring: Vec<_> = rect(1, 3, 1, 3)
+            .into_iter()
+            .filter(|&p| p != (2, 2))
+            .collect();
+        let d = corridor((0, 0), 5, 5, &ring);
+        assert_eq!(bounded_complement_components(&d), 1);
+    }
+
+    #[test]
+    fn two_hole_shape_has_two_bounded_holes() {
+        // A 5×3 block with two separate enclosed cells → 2 holes (AC2).
+        let body: Vec<_> = rect(1, 5, 1, 3)
+            .into_iter()
+            .filter(|&p| p != (2, 2) && p != (4, 2))
+            .collect();
+        let d = corridor((0, 0), 7, 5, &body);
+        assert_eq!(bounded_complement_components(&d), 2);
+    }
+
+    #[test]
+    fn empty_corridor_has_no_bounded_holes() {
+        // Whole box is the unbounded outfield (touches the border) → 0 (AC2).
+        let d = corridor((0, 0), 5, 5, &[]);
+        assert_eq!(bounded_complement_components(&d), 0);
+    }
+
+    #[test]
+    fn ring_flush_to_box_edges_has_one_bounded_hole() {
+        // A ring flush to all four box edges still encloses a bounded interior
+        // hole (unbounded ⟺ touches border, so a flush ring's hole is bounded).
+        let perimeter: Vec<_> = rect(0, 4, 0, 4)
+            .into_iter()
+            .filter(|&(x, y)| x == 0 || x == 4 || y == 0 || y == 4)
+            .collect();
+        let d = corridor((0, 0), 5, 5, &perimeter);
+        assert_eq!(bounded_complement_components(&d), 1);
     }
 
     #[test]
