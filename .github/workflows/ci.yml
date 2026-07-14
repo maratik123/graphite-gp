@@ -8,6 +8,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Turn adjustable rustc lint warnings into hard errors for local crates across
+  # the build/test/docs compile lanes (respected as of Rust 1.97; MSRV is 1.97.0).
+  # Complements clippy's `-D warnings` and the workspace deny lint tables.
+  CARGO_BUILD_WARNINGS: deny
 
 jobs:
   changes:
@@ -65,7 +69,7 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.10
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --keep-going
 
   test:
     name: Test (run)
@@ -96,8 +100,10 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
       - name: Vulkan diagnostics
         run: vulkaninfo --summary
+      - name: Build tests
+        run: cargo build --workspace --tests --keep-going
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --tests --no-fail-fast
 
   clippy:
     name: Clippy (lint)
@@ -140,7 +146,7 @@ jobs:
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.10
       - name: Docs
-        run: cargo doc --no-deps --workspace
+        run: cargo doc --no-deps --workspace --keep-going
         env:
           RUSTDOCFLAGS: "-D warnings"
 
