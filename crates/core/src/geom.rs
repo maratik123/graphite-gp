@@ -178,6 +178,22 @@ impl Corridor {
         let idx = (dy * self.width + dx) as usize;
         Some(idx)
     }
+
+    /// The number of cells in the bounding box (`width × height`).
+    // `width`/`height` are non-negative (asserted in `new`), so the product is
+    // non-negative and the `usize` cast cannot lose sign.
+    #[allow(clippy::cast_sign_loss)]
+    const fn area(&self) -> usize {
+        (self.width * self.height) as usize
+    }
+
+    /// Every cell point in the bounding box, in row-major (`y`-outer) order.
+    fn box_points(&self) -> impl Iterator<Item = Point> {
+        let origin = self.origin;
+        let (width, height) = (self.width, self.height);
+        (0..height)
+            .flat_map(move |dy| (0..width).map(move |dx| Point::new(origin.x + dx, origin.y + dy)))
+    }
 }
 
 /// Strict supercover of the segment `a → b`: every cell whose **closed** unit
@@ -226,6 +242,79 @@ pub fn supercover(a: Point, b: Point) -> Vec<Point> {
     cover
 }
 
+/// 4-connected flood from `seed` over cells satisfying `in_set`, confined to the
+/// bounding box.
+///
+/// Marks every reached cell in `visited` (indexed by [`Corridor::index`]) and
+/// pushes it to `out`. Returns whether the component touches the box border
+/// (`dx ∈ {0, w-1}` or `dy ∈ {0, h-1}`) — the "unbounded" flag the complement
+/// counter reads. A no-op returning `false` when `seed` is outside the box, is
+/// already visited, or fails `in_set`.
+fn flood_component(
+    d: &Corridor,
+    in_set: impl Fn(Point) -> bool,
+    visited: &mut [bool],
+    seed: Point,
+    out: &mut Vec<Point>,
+) -> bool {
+    let Some(seed_idx) = d.index(seed) else {
+        return false;
+    };
+    if visited[seed_idx] || !in_set(seed) {
+        return false;
+    }
+    visited[seed_idx] = true;
+    let mut touches_boundary = false;
+    let mut stack = vec![seed];
+    while let Some(p) = stack.pop() {
+        out.push(p);
+        let (dx, dy) = (p.x - d.origin().x, p.y - d.origin().y);
+        if dx == 0 || dy == 0 || dx == d.width() - 1 || dy == d.height() - 1 {
+            touches_boundary = true;
+        }
+        for n in p.neighbors4() {
+            if let Some(i) = d.index(n)
+                && !visited[i]
+                && in_set(n)
+            {
+                visited[i] = true;
+                stack.push(n);
+            }
+        }
+    }
+    touches_boundary
+}
+
+/// The 4-connected component of the corridor `D` reachable from `seed`.
+///
+/// Returns the drivable cells 4-reachable from `seed` without leaving `D` (the
+/// seed itself included when drivable); empty when `seed ∉ D`. Deterministic: for
+/// a given corridor and seed the returned order is fixed (design doc §1, §3a).
+pub fn flood_fill(d: &Corridor, seed: Point) -> Vec<Point> {
+    let mut visited = vec![false; d.area()];
+    let mut out = Vec::new();
+    flood_component(d, |p| d.contains(p), &mut visited, seed, &mut out);
+    out
+}
+
+/// The number of 4-connected components of the corridor `D`.
+///
+/// Counts maximal 4-connected clusters of drivable cells over the bounding box;
+/// `0` for an empty corridor. Deterministic (design doc §1, §3a).
+pub fn component_count(d: &Corridor) -> usize {
+    let mut visited = vec![false; d.area()];
+    let mut out = Vec::new();
+    let mut count = 0;
+    for p in d.box_points() {
+        out.clear();
+        flood_component(d, |q| d.contains(q), &mut visited, p, &mut out);
+        if !out.is_empty() {
+            count += 1;
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +329,68 @@ mod tests {
     /// Build an expected cell set from `(x, y)` literals.
     fn cells(pts: &[(Coord, Coord)]) -> HashSet<Point> {
         pts.iter().map(|&(x, y)| Point::new(x, y)).collect()
+    }
+
+    /// Build a corridor over the box `[origin, origin + (w, h))` with the given
+    /// `(x, y)` cells marked drivable.
+    fn corridor(
+        origin: (Coord, Coord),
+        w: Coord,
+        h: Coord,
+        drivable: &[(Coord, Coord)],
+    ) -> Corridor {
+        let mut d = Corridor::new(Point::new(origin.0, origin.1), w, h);
+        for &(x, y) in drivable {
+            d.set(Point::new(x, y), true);
+        }
+        d
+    }
+
+    /// Collect a `flood_fill` result into a `HashSet` (order is an impl detail).
+    fn flood_set(d: &Corridor, seed: Point) -> HashSet<Point> {
+        flood_fill(d, seed).into_iter().collect()
+    }
+
+    #[test]
+    fn flood_fill_single_block_is_whole_block() {
+        // A solid 2×2 block: flood from one cell returns exactly the block (AC1).
+        let d = corridor((0, 0), 5, 5, &[(1, 1), (2, 1), (1, 2), (2, 2)]);
+        assert_eq!(
+            flood_set(&d, Point::new(1, 1)),
+            cells(&[(1, 1), (2, 1), (1, 2), (2, 2)]),
+        );
+    }
+
+    #[test]
+    fn component_count_single_block_is_one() {
+        // One 4-connected cluster → count 1 (AC1).
+        let d = corridor((0, 0), 5, 5, &[(1, 1), (2, 1), (1, 2), (2, 2)]);
+        assert_eq!(component_count(&d), 1);
+    }
+
+    #[test]
+    fn two_disjoint_blocks_count_two_and_flood_isolates() {
+        // Two clusters with no 4-adjacency → count 2; flood from one returns only
+        // that cluster (AC1).
+        let d = corridor((0, 0), 5, 5, &[(0, 0), (1, 0), (3, 3), (4, 3)]);
+        assert_eq!(component_count(&d), 2);
+        assert_eq!(flood_set(&d, Point::new(0, 0)), cells(&[(0, 0), (1, 0)]));
+        assert_eq!(flood_set(&d, Point::new(3, 3)), cells(&[(3, 3), (4, 3)]));
+    }
+
+    #[test]
+    fn flood_fill_empty_when_seed_not_in_d() {
+        // Seed outside D → empty (AC1).
+        let d = corridor((0, 0), 5, 5, &[(1, 1)]);
+        assert!(flood_fill(&d, Point::new(3, 3)).is_empty());
+    }
+
+    #[test]
+    fn empty_corridor_has_no_components() {
+        // No drivable cells → count 0, flood empty (AC1).
+        let d = corridor((0, 0), 5, 5, &[]);
+        assert_eq!(component_count(&d), 0);
+        assert!(flood_fill(&d, Point::new(2, 2)).is_empty());
     }
 
     #[test]
