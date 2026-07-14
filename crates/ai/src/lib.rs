@@ -10,8 +10,9 @@ use gp_core::track::TrackArtifact;
 
 /// Honest input features for one car (design doc §5): kinematics in the
 /// centerline frame, signed lateral distances, speed-scaled look-ahead
-/// curvature and free distance, and rivals' *relative* velocity. Everything is a
-/// function of the locally perceivable state — nothing global.
+/// curvature and free distance, and rivals' *relative* velocity.
+///
+/// Everything is a function of the locally perceivable state — nothing global.
 #[derive(Clone, Debug, Default)]
 pub struct Features {
     /// Flat feature vector (~25–40 values, normalized per design doc §5).
@@ -29,8 +30,9 @@ pub fn extract_features(_track: &TrackArtifact, _me: CarState, _rivals: &[CarSta
 }
 
 /// Sample an action from the policy: `features → MLP (2×64 … 3×128) → 5 logits`,
-/// mask illegal actions to `−inf`, softmax at `temperature`, then sample. Falls
-/// back to [`Action::Coast`] if all five are illegal.
+/// mask illegal actions to `−inf`, softmax at `temperature`, then sample.
+///
+/// Falls back to [`Action::Coast`] if all five are illegal.
 ///
 /// Temperature is the skill dial: low = a strong, smooth pilot; high = a noisy,
 /// error-prone one — a spread of difficulty from a single network.

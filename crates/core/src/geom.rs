@@ -12,11 +12,14 @@ pub type Coord = i32;
 /// An integer grid point = the center of one unit cell.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Point {
+    /// Horizontal cell coordinate (grid column), increasing eastward.
     pub x: Coord,
+    /// Vertical cell coordinate (grid row), increasing northward.
     pub y: Coord,
 }
 
 impl Point {
+    /// The grid point at integer coordinates `(x, y)`.
     pub const fn new(x: Coord, y: Coord) -> Self {
         Self { x, y }
     }
@@ -24,12 +27,12 @@ impl Point {
     /// The 4-connected neighbours. Movement connectivity is 4-conn throughout
     /// (design doc §1): it fixes the Manhattan metric and forbids diagonal
     /// "needle's-eye" slips between two walls.
-    pub const fn neighbors4(self) -> [Point; 4] {
+    pub const fn neighbors4(self) -> [Self; 4] {
         [
-            Point::new(self.x + 1, self.y),
-            Point::new(self.x - 1, self.y),
-            Point::new(self.x, self.y + 1),
-            Point::new(self.x, self.y - 1),
+            Self::new(self.x + 1, self.y),
+            Self::new(self.x - 1, self.y),
+            Self::new(self.x, self.y + 1),
+            Self::new(self.x, self.y - 1),
         ]
     }
 }
@@ -69,26 +72,38 @@ pub struct Corridor {
 
 impl Corridor {
     /// A new, empty corridor over the box `[origin, origin + (width, height))`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width` or `height` is negative — corridor dimensions must be
+    /// non-negative.
     pub fn new(origin: Point, width: i32, height: i32) -> Self {
         assert!(
             width >= 0 && height >= 0,
             "corridor dimensions must be non-negative"
         );
+        // `width`/`height` are asserted `>= 0` immediately above, so the product
+        // is non-negative and the `usize` cast cannot lose sign.
+        #[allow(clippy::cast_sign_loss)]
+        let cell_count = (width * height) as usize;
         Self {
             origin,
             width,
             height,
-            cells: vec![false; (width * height) as usize],
+            cells: vec![false; cell_count],
         }
     }
 
-    pub fn origin(&self) -> Point {
+    /// The bounding-box origin — its minimum-coordinate corner.
+    pub const fn origin(&self) -> Point {
         self.origin
     }
-    pub fn width(&self) -> i32 {
+    /// The bounding-box width, in cells (columns); always `>= 0`.
+    pub const fn width(&self) -> i32 {
         self.width
     }
-    pub fn height(&self) -> i32 {
+    /// The bounding-box height, in cells (rows); always `>= 0`.
+    pub const fn height(&self) -> i32 {
         self.height
     }
 
@@ -109,16 +124,21 @@ impl Corridor {
         self.cells.iter().filter(|&&c| c).count()
     }
 
+    /// Whether `D` has no drivable points.
     pub fn is_empty(&self) -> bool {
         self.cells.iter().all(|&c| !c)
     }
 
-    fn index(&self, p: Point) -> Option<usize> {
+    const fn index(&self, p: Point) -> Option<usize> {
         let (dx, dy) = (p.x - self.origin.x, p.y - self.origin.y);
         if dx < 0 || dy < 0 || dx >= self.width || dy >= self.height {
             return None;
         }
-        Some((dy * self.width + dx) as usize)
+        // `dx`,`dy` lie in `[0, width) × [0, height)` by the guard above, so the
+        // flat index is non-negative and the `usize` cast cannot lose sign.
+        #[allow(clippy::cast_sign_loss)]
+        let idx = (dy * self.width + dx) as usize;
+        Some(idx)
     }
 }
 
