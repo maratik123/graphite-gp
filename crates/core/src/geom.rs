@@ -468,6 +468,30 @@ pub fn geodesic_layers(d: &Corridor, seed: Point) -> Vec<Vec<Point>> {
     layers
 }
 
+/// The exact set of dual boundary edges (walls) of the corridor `D`.
+///
+/// For every drivable cell and every [`Side`] whose neighbour is not in `D`,
+/// emits one [`Wall`] anchored to that cell and side. Because a `D ↔ ¬D` adjacency
+/// has exactly one drivable side, each boundary edge is emitted **exactly once**,
+/// and no edge lies between two `D` cells (design doc §1 duality). Feeds
+/// [`TrackArtifact`](crate::track::TrackArtifact)'s walls; deterministic (design §3a).
+pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
+    let mut walls = Vec::new();
+    for cell in d.box_points() {
+        if !d.contains(cell) {
+            continue;
+        }
+        for side in Side::ALL {
+            let (dx, dy) = side.delta();
+            let neighbour = Point::new(cell.x + dx, cell.y + dy);
+            if !d.contains(neighbour) {
+                walls.push(Wall { cell, side });
+            }
+        }
+    }
+    walls
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -729,6 +753,78 @@ mod tests {
             ControlFlow::<()>::Continue(())
         });
         assert_eq!(second, geodesic_layers(&d, Point::new(1, 3)));
+    }
+
+    /// A boundary `Wall` at `(x, y)` on `side`.
+    fn wall(x: Coord, y: Coord, side: Side) -> Wall {
+        Wall {
+            cell: Point::new(x, y),
+            side,
+        }
+    }
+
+    /// Collect `walls_from_boundary` into a `HashSet` (edge order is an impl detail).
+    fn wall_set(d: &Corridor) -> HashSet<Wall> {
+        walls_from_boundary(d).into_iter().collect()
+    }
+
+    #[test]
+    fn walls_of_solid_2x2_block_are_eight_outward_edges() {
+        // A solid 2×2 block: each cell contributes its two outward sides — the
+        // square's 8-edge perimeter, no interior edges between two D cells (AC4).
+        let d = corridor((0, 0), 5, 5, &[(1, 1), (2, 1), (1, 2), (2, 2)]);
+        let expected: HashSet<Wall> = [
+            wall(1, 1, Side::West),
+            wall(1, 1, Side::South),
+            wall(2, 1, Side::East),
+            wall(2, 1, Side::South),
+            wall(1, 2, Side::West),
+            wall(1, 2, Side::North),
+            wall(2, 2, Side::East),
+            wall(2, 2, Side::North),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(wall_set(&d), expected);
+        // Each edge exactly once: raw Vec length equals its deduped length
+        // (mirrors the `no_duplicate_cells` supercover test).
+        let v = walls_from_boundary(&d);
+        assert_eq!(v.len(), v.iter().collect::<HashSet<_>>().len());
+        assert_eq!(v.len(), 8);
+    }
+
+    #[test]
+    fn walls_of_ring_are_outer_and_inner_edges_each_once() {
+        // The 3×3 ring: outer perimeter edges plus the four inner edges facing the
+        // enclosed hole (2,2) — each D↔¬D pair once, none between two D cells (AC4).
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let expected: HashSet<Wall> = [
+            // bottom row
+            wall(1, 1, Side::West),
+            wall(1, 1, Side::South),
+            wall(2, 1, Side::North), // inner (faces the hole)
+            wall(2, 1, Side::South),
+            wall(3, 1, Side::East),
+            wall(3, 1, Side::South),
+            // middle row (both cells straddle the hole)
+            wall(1, 2, Side::East), // inner
+            wall(1, 2, Side::West),
+            wall(3, 2, Side::East),
+            wall(3, 2, Side::West), // inner
+            // top row
+            wall(1, 3, Side::West),
+            wall(1, 3, Side::North),
+            wall(2, 3, Side::North),
+            wall(2, 3, Side::South), // inner
+            wall(3, 3, Side::East),
+            wall(3, 3, Side::North),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(wall_set(&d), expected);
+        let v = walls_from_boundary(&d);
+        assert_eq!(v.len(), v.iter().collect::<HashSet<_>>().len());
+        assert_eq!(v.len(), 16);
     }
 
     #[test]
