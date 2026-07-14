@@ -6,6 +6,8 @@
 //! neighbour. From this duality, "a wall never passes through a point" and "a car
 //! never touches a wall" hold by construction.
 
+use std::ops::ControlFlow;
+
 /// Integer grid coordinate.
 pub type Coord = i32;
 
@@ -338,6 +340,134 @@ pub fn bounded_complement_components(d: &Corridor) -> usize {
     count
 }
 
+/// Reusable scratch buffers for repeated in-`D` geodesic BFS queries.
+///
+/// Owns a generation-stamped visited buffer plus two frontier buffers, all sized
+/// once to a corridor's bounding box, so successive [`geodesic_bfs`] queries reset
+/// in O(1) (bump the generation) instead of reallocating a full-box buffer per
+/// query (design doc §3; AC6). Bind one scratch to the single corridor it queries
+/// — [`geodesic_bfs`] `debug_assert!`s a matching box.
+///
+/// [`geodesic_bfs`]: CorridorScratch::geodesic_bfs
+#[derive(Clone, Debug)]
+pub struct CorridorScratch {
+    width: i32,
+    height: i32,
+    /// `stamp[i] == generation` ⟺ cell `i` was visited by the current query.
+    stamp: Vec<u32>,
+    /// The current query's stamp value; bumped once per [`geodesic_bfs`] call.
+    ///
+    /// [`geodesic_bfs`]: CorridorScratch::geodesic_bfs
+    generation: u32,
+    /// The frontier being visited (cells at the current geodesic distance).
+    frontier: Vec<Point>,
+    /// Scratch for the next frontier being built (double-buffered with `frontier`).
+    next_frontier: Vec<Point>,
+}
+
+impl CorridorScratch {
+    /// A scratch sized to `d`'s bounding box, ready to query `d`.
+    ///
+    /// Bind the returned scratch to `d`; reusing it against a differently-sized
+    /// corridor trips a `debug_assert!` in [`geodesic_bfs`].
+    ///
+    /// [`geodesic_bfs`]: CorridorScratch::geodesic_bfs
+    pub fn new(d: &Corridor) -> Self {
+        Self {
+            width: d.width(),
+            height: d.height(),
+            stamp: vec![0; d.area()],
+            generation: 0,
+            frontier: Vec::new(),
+            next_frontier: Vec::new(),
+        }
+    }
+
+    /// Advance to a fresh generation, clearing the stamp on `u32` wrap.
+    ///
+    /// The reset is O(1) on the common path; the `O(area)` fill happens at most
+    /// once per ~4·10⁹ queries (`checked_add` wrap → refill, restart at `1`).
+    fn bump_generation(&mut self) -> u32 {
+        let next = self.generation.checked_add(1).unwrap_or_else(|| {
+            self.stamp.fill(0);
+            1
+        });
+        self.generation = next;
+        next
+    }
+
+    /// 4-connected geodesic BFS over `D` from `seed`, one distance layer at a time.
+    ///
+    /// Confined to `D` — it never steps to a `¬D` cell, so it provably never
+    /// crosses a wall (design doc §3) — it calls `visit(distance, &layer)` for each
+    /// layer of `D`-cells at strictly increasing 4-conn geodesic distance from
+    /// `seed`; every equal-distance cell shares one layer (ties grouped, for the
+    /// caller's seeded pick — design doc §3). Returns `Some(b)` when `visit` breaks
+    /// via [`ControlFlow::Break`] carrying `b` — an early stop, e.g. the first layer
+    /// holding a free cell — or `None` when BFS exhausts the component or
+    /// `seed ∉ D`. Reuses
+    /// `self`'s buffers via an O(1) generation-stamp reset (AC6). Intra-layer order
+    /// is fixed and reproducible (AC5), but callers must treat a layer only as an
+    /// unordered tie set.
+    pub fn geodesic_bfs<B>(
+        &mut self,
+        d: &Corridor,
+        seed: Point,
+        mut visit: impl FnMut(usize, &[Point]) -> ControlFlow<B>,
+    ) -> Option<B> {
+        debug_assert!(
+            self.width == d.width() && self.height == d.height(),
+            "CorridorScratch is bound to a differently-sized corridor"
+        );
+        let seed_idx = d.index(seed)?;
+        if !d.contains(seed) {
+            return None;
+        }
+        let generation = self.bump_generation();
+        self.frontier.clear();
+        self.next_frontier.clear();
+        self.stamp[seed_idx] = generation;
+        self.frontier.push(seed);
+        let mut distance = 0;
+        while !self.frontier.is_empty() {
+            if let ControlFlow::Break(b) = visit(distance, &self.frontier) {
+                return Some(b);
+            }
+            self.next_frontier.clear();
+            for &p in &self.frontier {
+                for n in p.neighbors4() {
+                    if let Some(i) = d.index(n)
+                        && self.stamp[i] != generation
+                        && d.contains(n)
+                    {
+                        self.stamp[i] = generation;
+                        self.next_frontier.push(n);
+                    }
+                }
+            }
+            std::mem::swap(&mut self.frontier, &mut self.next_frontier);
+            distance += 1;
+        }
+        None
+    }
+}
+
+/// All 4-connected geodesic distance layers of `D` from `seed`, eagerly collected.
+///
+/// A convenience wrapper over [`CorridorScratch::geodesic_bfs`] that allocates its
+/// own scratch and materializes every layer: element `k` is the set of `D`-cells at
+/// 4-conn geodesic distance `k` from `seed` (empty when `seed ∉ D`). For repeated
+/// queries prefer one reused [`CorridorScratch`] (AC6). Deterministic (design §3a).
+pub fn geodesic_layers(d: &Corridor, seed: Point) -> Vec<Vec<Point>> {
+    let mut scratch = CorridorScratch::new(d);
+    let mut layers = Vec::new();
+    scratch.geodesic_bfs(d, seed, |_distance, layer| {
+        layers.push(layer.to_vec());
+        ControlFlow::<()>::Continue(())
+    });
+    layers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,6 +599,136 @@ mod tests {
             .collect();
         let d = corridor((0, 0), 5, 5, &perimeter);
         assert_eq!(bounded_complement_components(&d), 1);
+    }
+
+    /// The 3×3 ring `rect(1,3,1,3)` minus its center `(2,2)` — a rectangular
+    /// annulus reused across the geodesic and wall tests.
+    fn ring_3x3() -> Vec<(Coord, Coord)> {
+        rect(1, 3, 1, 3)
+            .into_iter()
+            .filter(|&p| p != (2, 2))
+            .collect()
+    }
+
+    /// Collect the geodesic layers as ordered per-layer `HashSet`s (distance order
+    /// is contractual; intra-layer order is an impl detail).
+    fn layer_sets(d: &Corridor, seed: Point) -> Vec<HashSet<Point>> {
+        geodesic_layers(d, seed)
+            .into_iter()
+            .map(|layer| layer.into_iter().collect())
+            .collect()
+    }
+
+    #[test]
+    fn geodesic_layers_straight_corridor_are_distance_bands() {
+        // A straight 1-wide corridor: each layer is exactly one cell, the next step
+        // along the run (AC3 — strictly increasing distance bands).
+        let d = corridor((0, 0), 6, 3, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
+        assert_eq!(
+            layer_sets(&d, Point::new(0, 1)),
+            vec![
+                cells(&[(0, 1)]),
+                cells(&[(1, 1)]),
+                cells(&[(2, 1)]),
+                cells(&[(3, 1)]),
+            ],
+        );
+    }
+
+    #[test]
+    fn geodesic_layers_annulus_ties_share_a_layer() {
+        // Seed at the bottom-mid of the 3×3 ring: the two arms climb at equal
+        // distance, so each of layers 1–3 holds two equidistant cells (AC3 tie),
+        // and the opposite midpoint (2,3) is reached from both arms at distance 4.
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let layers = layer_sets(&d, Point::new(2, 1));
+        assert_eq!(
+            layers,
+            vec![
+                cells(&[(2, 1)]),
+                cells(&[(1, 1), (3, 1)]),
+                cells(&[(1, 2), (3, 2)]),
+                cells(&[(1, 3), (3, 3)]),
+                cells(&[(2, 3)]),
+            ],
+        );
+        // The equal-distance tie: both arms' cells share one layer.
+        assert_eq!(layers[1].len(), 2);
+    }
+
+    #[test]
+    fn geodesic_layers_empty_when_seed_not_in_d() {
+        // Seed outside D → no layers (AC3 boundary case).
+        let d = corridor((0, 0), 5, 5, &[(1, 1)]);
+        assert!(geodesic_layers(&d, Point::new(3, 3)).is_empty());
+        let mut scratch = CorridorScratch::new(&d);
+        let out: Option<()> =
+            scratch.geodesic_bfs(&d, Point::new(3, 3), |_, _| ControlFlow::Break(()));
+        assert_eq!(out, None);
+    }
+
+    #[test]
+    fn geodesic_layers_deterministic() {
+        // Identical input → byte-identical layers, order included (AC5).
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let seed = Point::new(2, 1);
+        assert_eq!(geodesic_layers(&d, seed), geodesic_layers(&d, seed));
+    }
+
+    #[test]
+    fn geodesic_bfs_break_stops_and_returns_payload() {
+        // ControlFlow::Break at distance 2 returns Some(payload) and visits no
+        // further layer (AC3 early-stop path). Straight corridor → one cell/layer.
+        let d = corridor((0, 0), 6, 3, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
+        let mut scratch = CorridorScratch::new(&d);
+        let mut layers_seen = 0usize;
+        let result = scratch.geodesic_bfs(&d, Point::new(0, 1), |distance, layer| {
+            layers_seen += 1;
+            if distance == 2 {
+                ControlFlow::Break(layer[0])
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        assert_eq!(result, Some(Point::new(2, 1)));
+        assert_eq!(layers_seen, 3); // layers 0, 1, 2 visited, then broke
+    }
+
+    #[test]
+    fn scratch_reuse_yields_identical_layers() {
+        // AC6: two successive queries on one reused scratch give identical layers —
+        // the first query's stamps do not pollute the second.
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let seed = Point::new(2, 1);
+        let mut scratch = CorridorScratch::new(&d);
+        let mut first = Vec::new();
+        scratch.geodesic_bfs(&d, seed, |_, layer| {
+            first.push(layer.to_vec());
+            ControlFlow::<()>::Continue(())
+        });
+        let mut second = Vec::new();
+        scratch.geodesic_bfs(&d, seed, |_, layer| {
+            second.push(layer.to_vec());
+            ControlFlow::<()>::Continue(())
+        });
+        assert_eq!(first, second);
+        assert_eq!(first, geodesic_layers(&d, seed));
+    }
+
+    #[test]
+    fn scratch_reuse_second_seed_unpolluted() {
+        // AC6: after a query from one seed, a query from a different seed on the
+        // same scratch matches a fresh computation (no stale-stamp pollution).
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let mut scratch = CorridorScratch::new(&d);
+        // Drive a full first query to stamp the buffer; its output is irrelevant.
+        scratch.geodesic_bfs(&d, Point::new(2, 1), |_, _| ControlFlow::<()>::Continue(()));
+        let mut second = Vec::new();
+        scratch.geodesic_bfs(&d, Point::new(1, 3), |_, layer| {
+            second.push(layer.to_vec());
+            ControlFlow::<()>::Continue(())
+        });
+        assert_eq!(second, geodesic_layers(&d, Point::new(1, 3)));
     }
 
     #[test]
