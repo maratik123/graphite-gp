@@ -3,7 +3,7 @@
 //! Core invariant: a [`Point`] is the center of a unit cell (integer
 //! coordinates); a [`Wall`] is a dual edge on the boundary of the corridor `D` —
 //! anchored to a drivable cell plus the [`Side`] toward its non-drivable
-//! neighbour. From this duality, "a wall never passes through a point" and "a car
+//! neighbor. From this duality, "a wall never passes through a point" and "a car
 //! never touches a wall" hold by construction.
 //!
 //! The corridor-graph helpers ([`Side`], [`flood_fill`], [`component_count`],
@@ -28,13 +28,15 @@ pub struct Point {
 
 impl Point {
     /// The grid point at integer coordinates `(x, y)`.
+    #[inline]
     pub const fn new(x: Coord, y: Coord) -> Self {
         Self { x, y }
     }
 
-    /// The 4-connected neighbours. Movement connectivity is 4-conn throughout
+    /// The 4-connected neighbors. Movement connectivity is 4-conn throughout
     /// (design doc §1): it fixes the Manhattan metric and forbids diagonal
     /// "needle's-eye" slips between two walls.
+    #[inline]
     pub const fn neighbors4(self) -> [Self; 4] {
         [
             Self::new(self.x.saturating_add(1), self.y),
@@ -86,6 +88,7 @@ pub struct Size {
 
 impl Size {
     /// A grid extent of `width` × `height` cells.
+    #[inline]
     pub const fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
@@ -98,13 +101,12 @@ impl Size {
     /// first. This is the same bounded-domain treatment as [`supercover`]'s
     /// overflow precondition (`docs/design.md` §3 C4); not a panic-index entry.
     ///
-    /// # Overflow precondition
-    ///
-    /// Holds for grid-realistic, [`Corridor`]-backed (allocatable) dimensions.
-    /// `Size` is a public, standalone-constructible type — a `Size { width:
-    /// usize::MAX, .. }` built directly by struct literal, bypassing
-    /// [`Corridor::new`], is representable but lies outside this documented
-    /// domain and is not supported (its `area()` would overflow).
+    /// **Overflow precondition:** holds for grid-realistic, [`Corridor`]-backed
+    /// (allocatable) dimensions. `Size` is a public, standalone-constructible
+    /// type — a `Size { width: usize::MAX, .. }` built directly by struct literal,
+    /// bypassing [`Corridor::new`], is representable but lies outside this
+    /// documented domain and is not supported (its `area()` would overflow).
+    #[inline]
     #[allow(
         clippy::arithmetic_side_effects,
         reason = "bounded by allocatability: a Corridor of this many cells must \
@@ -117,6 +119,7 @@ impl Size {
     }
 
     /// Whether the box has zero area (either dimension is `0`).
+    #[inline]
     pub const fn is_empty(self) -> bool {
         self.width == 0 || self.height == 0
     }
@@ -157,16 +160,15 @@ impl Rect {
     /// coordinate-overflowing inputs all yield `None`. Widening happens only in the
     /// checked `offset` conversion — there is no `as` cast in the index path.
     ///
-    /// # Overflow precondition
-    ///
-    /// The final `dy * width + dx` multiply-add is guarded by the immediately
-    /// preceding `dx < width && dy < height`, so the result is always strictly
-    /// `< width * height` (== [`Size::area`]) — the same grid-realistic,
-    /// allocatable-dimensions domain as `area`'s. `Rect` is a public,
-    /// standalone-constructible type — a `Rect` built by struct literal with
-    /// adversarially large, unallocatable `width`/`height` near `usize::MAX`,
+    /// **Overflow precondition:** the final `dy * width + dx` multiply-add is
+    /// guarded by the immediately preceding `dx < width && dy < height`, so the
+    /// result is always strictly `< width * height` (== [`Size::area`]) — the same
+    /// grid-realistic, allocatable-dimensions domain as `area`'s. `Rect` is a
+    /// public, standalone-constructible type — a `Rect` built by struct literal
+    /// with adversarially large, unallocatable `width`/`height` near `usize::MAX`,
     /// bypassing [`Corridor::new`], lies outside this documented domain and is
     /// not supported.
+    #[inline]
     #[allow(
         clippy::arithmetic_side_effects,
         reason = "dx < width && dy < height (checked immediately above) bounds the \
@@ -179,6 +181,7 @@ impl Rect {
     }
 
     /// Whether `p` lies inside the box.
+    #[inline]
     pub fn contains(&self, p: Point) -> bool {
         self.index(p).is_some()
     }
@@ -201,11 +204,11 @@ impl Rect {
     /// `width - 1`), so it is correct and underflow-free at `width`/`height` of `0`
     /// (a zero-dim box has no border cells).
     ///
-    /// # Overflow precondition
-    ///
-    /// `dx + 1` / `dy + 1` are guarded by the preceding `dx < w && dy < h`, so
-    /// `dx ≤ w − 1` (resp. `dy ≤ h − 1`) and the sum cannot overflow `usize` for
-    /// any grid-realistic, allocatable box — the same domain as [`Size::area`].
+    /// **Overflow precondition:** `dx + 1` / `dy + 1` are guarded by the preceding
+    /// `dx < w && dy < h`, so `dx ≤ w − 1` (resp. `dy ≤ h − 1`) and the sum cannot
+    /// overflow `usize` for any grid-realistic, allocatable box — the same domain
+    /// as [`Size::area`].
+    #[inline]
     #[allow(
         clippy::arithmetic_side_effects,
         reason = "dx < w && dy < h (checked immediately above) bounds dx+1/dy+1 \
@@ -249,26 +252,31 @@ impl Corridor {
     }
 
     /// The bounding-box origin — its minimum-coordinate corner.
+    #[inline]
     pub const fn origin(&self) -> Point {
         self.rect.origin
     }
     /// The bounding-box width, in cells (columns).
+    #[inline]
     pub const fn width(&self) -> usize {
         self.rect.size.width
     }
     /// The bounding-box height, in cells (rows).
+    #[inline]
     pub const fn height(&self) -> usize {
         self.rect.size.height
     }
 
-    /// Is `p` a drivable point of `D`?
+    /// Whether `p` is a drivable point of `D`.
+    #[inline]
     pub fn contains(&self, p: Point) -> bool {
         // Delegates only the *index* to `rect`; in-box ≠ drivable, so this is not
         // `Rect::contains`.
         self.rect.index(p).is_some_and(|i| self.cells[i])
     }
 
-    /// Mark `p` drivable / not drivable. No-op if `p` is outside the box.
+    /// Marks `p` drivable / not drivable. No-op if `p` is outside the box.
+    #[inline]
     pub fn set(&mut self, p: Point, drivable: bool) {
         if let Some(i) = self.index(p) {
             self.cells[i] = drivable;
@@ -314,7 +322,7 @@ impl Corridor {
 /// runtime legality rule (`legal_move`) and as the passability-oracle graph edge —
 /// one implementation, two callers.
 ///
-/// # Contract
+/// The predicate guarantees:
 ///
 /// - **Closed squares.** A boundary or single-corner touch counts. When the
 ///   segment crosses a dual vertex `(i + ½, j + ½)`, all four sharing cells are
@@ -328,13 +336,21 @@ impl Corridor {
 ///   (the bounding-box scan visits every cell once), and both endpoint cells are
 ///   always present (a degenerate `a == b` yields exactly `{a}`).
 ///
-/// # Overflow precondition
+/// **Overflow precondition:** endpoints are assumed separated by a bounded chord —
+/// one move's velocity, with `|v| ≪ 1.5×10⁹`. Within that domain the widened `i64`
+/// cross product never overflows (its operands are taken relative to `a`, so
+/// `|cr| ≤ 2·|dx|·|dy|`). Adversarial full-range `i32` endpoints lie outside the
+/// documented domain and are not supported.
 ///
-/// Endpoints are assumed separated by a bounded chord — one move's velocity, with
-/// `|v| ≪ 1.5×10⁹`. Within that domain the widened `i64` cross product never
-/// overflows (its operands are taken relative to `a`, so `|cr| ≤ 2·|dx|·|dy|`).
-/// Adversarial full-range `i32` endpoints lie outside the documented domain and
-/// are not supported.
+/// # Examples
+///
+/// ```
+/// use gp_core::geom::{supercover, Point};
+///
+/// // A straight horizontal edge covers each cell it spans, endpoints included.
+/// let cells = supercover(Point::new(0, 0), Point::new(2, 0));
+/// assert_eq!(cells.len(), 3);
+/// ```
 #[allow(
     clippy::arithmetic_side_effects,
     reason = "bounded-chord precondition above: |v| << 1.5e9 per move, so the \
@@ -376,7 +392,7 @@ mod tests {
 
     #[test]
     fn axial_horizontal_no_diagonal() {
-        // (0,0)→(3,0): the straight run only, no diagonal neighbours (AC3).
+        // (0,0)→(3,0): the straight run only, no diagonal neighbors (AC3).
         assert_eq!(
             cover_set(Point::new(0, 0), Point::new(3, 0)),
             cells(&[(0, 0), (1, 0), (2, 0), (3, 0)]),
@@ -499,7 +515,7 @@ mod tests {
 
     #[test]
     fn neighbors4_saturates_at_i32_max_without_panic() {
-        // AC4: the east/north neighbours of an i32::MAX-cornered point saturate
+        // AC4: the east/north neighbors of an i32::MAX-cornered point saturate
         // rather than overflow; the non-saturating axis is a const-operand
         // literal (i32::MAX - 1), not flagged by arithmetic_side_effects.
         let p = Point::new(i32::MAX, i32::MAX);
@@ -516,7 +532,7 @@ mod tests {
 
     #[test]
     fn neighbors4_saturates_at_i32_min_without_panic() {
-        // AC4: the west/south neighbours of an i32::MIN-cornered point saturate
+        // AC4: the west/south neighbors of an i32::MIN-cornered point saturate
         // rather than underflow; the non-saturating axis is a const-operand
         // literal (i32::MIN + 1), not flagged by arithmetic_side_effects.
         let p = Point::new(i32::MIN, i32::MIN);
