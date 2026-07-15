@@ -107,6 +107,76 @@ impl Size {
     }
 }
 
+/// An axis-aligned integer-grid box: a [`Size`] extent anchored at `origin`.
+///
+/// Owns the flat-index and bounds arithmetic over the half-open cell rectangle
+/// `[origin, origin + (width, height))`. Every query is total and panic-free for
+/// any [`Point`] — out-of-box, negative-delta, and coordinate-overflowing inputs
+/// all resolve without a cast or an `#[allow]`. Mirrors [`Point`]'s derive set.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Rect {
+    /// The minimum-coordinate corner (the box's lower-left cell).
+    pub origin: Point,
+    /// The box extent, in cells.
+    pub size: Size,
+}
+
+impl Rect {
+    /// The non-negative `(dx, dy)` cell offset of `p` from `origin`, or `None`.
+    ///
+    /// `checked_sub` folds the i32 subtraction-overflow case (adversarial coords,
+    /// e.g. `i32::MAX - (-10)`) to `None`; `usize::try_from` folds a negative delta
+    /// (`p` left of / below `origin`) to `None`. Together this replaces both a
+    /// `dx < 0 || dy < 0` guard and a `cast_sign_loss` `#[allow]`, with no `as`.
+    fn offset(&self, p: Point) -> Option<(usize, usize)> {
+        Some((
+            usize::try_from(p.x.checked_sub(self.origin.x)?).ok()?,
+            usize::try_from(p.y.checked_sub(self.origin.y)?).ok()?,
+        ))
+    }
+
+    /// The row-major (`y`-outer) flat index of `p`, or `None` when `p` is outside
+    /// the box.
+    ///
+    /// Total and panic-free for every [`Point`]: out-of-box, negative-delta, and
+    /// coordinate-overflowing inputs all yield `None`. Widening happens only in the
+    /// checked `offset` conversion — there is no `as` cast in the index path.
+    pub fn index(&self, p: Point) -> Option<usize> {
+        let (dx, dy) = self.offset(p)?;
+        (dx < self.size.width && dy < self.size.height).then(|| dy * self.size.width + dx)
+    }
+
+    /// Whether `p` lies inside the box.
+    pub fn contains(&self, p: Point) -> bool {
+        self.index(p).is_some()
+    }
+
+    /// Every cell point in the box, in row-major (`y`-outer, `x`-inner) order.
+    ///
+    /// Empty when either dimension is `0`. The endpoints saturate at `i32::MAX`
+    /// rather than overflow, so iteration is total; for every in-domain grid the
+    /// order and contents are identical to a direct `origin.x + dx` walk.
+    pub fn points(&self) -> impl Iterator<Item = Point> {
+        let origin = self.origin;
+        let x1 = i32::try_from(self.size.width).map_or(i32::MAX, |w| origin.x.saturating_add(w));
+        let y1 = i32::try_from(self.size.height).map_or(i32::MAX, |h| origin.y.saturating_add(h));
+        (origin.y..y1).flat_map(move |y| (origin.x..x1).map(move |x| Point::new(x, y)))
+    }
+
+    /// Whether `p` lies on the box's border (any of its four edges).
+    ///
+    /// `false` for any out-of-box point. Uses the `dx + 1 == width` form (never
+    /// `width - 1`), so it is correct and underflow-free at `width`/`height` of `0`
+    /// (a zero-dim box has no border cells).
+    pub fn on_border(&self, p: Point) -> bool {
+        let Some((dx, dy)) = self.offset(p) else {
+            return false;
+        };
+        let (w, h) = (self.size.width, self.size.height);
+        dx < w && dy < h && (dx == 0 || dy == 0 || dx + 1 == w || dy + 1 == h)
+    }
+}
+
 /// The corridor `D` — the set of drivable points/cells (design doc §1).
 ///
 /// Backed by a dense bitmap over a bounding box (`origin` + `width`×`height`) for
@@ -423,5 +493,122 @@ mod tests {
         assert_eq!(s, Size::new(0, 0));
         assert!(s.is_empty());
         assert_eq!(s.area(), 0);
+    }
+
+    /// Build a `Rect` at `(ox, oy)` with a `w × h` extent, by struct literal
+    /// (AC2 forbids a speculative `Rect::new`).
+    fn rect_at(ox: Coord, oy: Coord, w: usize, h: usize) -> Rect {
+        Rect {
+            origin: Point::new(ox, oy),
+            size: Size::new(w, h),
+        }
+    }
+
+    #[test]
+    fn rect_index_in_box_is_row_major() {
+        // AC2/AC3/AC10: exact row-major flat index for cells of an off-origin box
+        // (origin (2,3), size 4×5): index = dy * width + dx.
+        let r = rect_at(2, 3, 4, 5);
+        assert_eq!(r.index(Point::new(2, 3)), Some(0)); // dx=0, dy=0
+        assert_eq!(r.index(Point::new(3, 3)), Some(1)); // dx=1, dy=0
+        assert_eq!(r.index(Point::new(2, 4)), Some(4)); // dx=0, dy=1
+        assert_eq!(r.index(Point::new(3, 4)), Some(5)); // dx=1, dy=1
+        assert_eq!(r.index(Point::new(5, 7)), Some(19)); // dx=3, dy=4 (last cell)
+    }
+
+    #[test]
+    fn rect_index_out_of_box_is_none() {
+        // AC3/AC10: out-of-box points → None with no explicit sign guard.
+        let r = rect_at(2, 3, 4, 5);
+        assert_eq!(r.index(Point::new(1, 3)), None); // dx < 0 (left of origin)
+        assert_eq!(r.index(Point::new(2, 2)), None); // dy < 0 (below origin)
+        assert_eq!(r.index(Point::new(6, 3)), None); // dx == width
+        assert_eq!(r.index(Point::new(2, 8)), None); // dy == height
+    }
+
+    #[test]
+    fn rect_index_overflowing_point_is_none_without_panic() {
+        // AC3/AC10: a coordinate-overflowing delta (i32::MAX - negative origin)
+        // resolves to None via `checked_sub`, never panicking.
+        let r = rect_at(-10, -10, 4, 5);
+        assert_eq!(r.index(Point::new(i32::MAX, 0)), None);
+        assert_eq!(r.index(Point::new(0, i32::MAX)), None);
+    }
+
+    #[test]
+    fn rect_contains_mirrors_index_is_some() {
+        // AC2/AC10: contains is exactly index(..).is_some().
+        let r = rect_at(2, 3, 4, 5);
+        for p in [
+            Point::new(2, 3),
+            Point::new(5, 7),
+            Point::new(1, 3),
+            Point::new(6, 8),
+            Point::new(i32::MAX, 0),
+        ] {
+            assert_eq!(r.contains(p), r.index(p).is_some());
+        }
+    }
+
+    #[test]
+    fn rect_points_are_row_major() {
+        // AC2/AC10: points() walks y-outer / x-inner over the box.
+        assert_eq!(
+            rect_at(0, 0, 2, 2).points().collect::<Vec<_>>(),
+            vec![
+                Point::new(0, 0),
+                Point::new(1, 0),
+                Point::new(0, 1),
+                Point::new(1, 1),
+            ],
+        );
+        // Off-origin box: absolute coords, same row-major order.
+        assert_eq!(
+            rect_at(2, 3, 2, 2).points().collect::<Vec<_>>(),
+            vec![
+                Point::new(2, 3),
+                Point::new(3, 3),
+                Point::new(2, 4),
+                Point::new(3, 4),
+            ],
+        );
+    }
+
+    #[test]
+    fn rect_points_empty_for_zero_dim() {
+        // AC2/AC10: a zero in either dimension yields no points.
+        assert!(rect_at(0, 0, 0, 5).points().next().is_none());
+        assert!(rect_at(0, 0, 5, 0).points().next().is_none());
+        assert!(rect_at(0, 0, 0, 0).points().next().is_none());
+    }
+
+    #[test]
+    fn rect_on_border_zero_dim_has_no_border() {
+        // AC4/AC10: a zero-dim box has no border cells (dx + 1 == width form, no
+        // width - 1 underflow).
+        assert!(!rect_at(0, 0, 0, 0).on_border(Point::new(0, 0)));
+        assert!(!rect_at(0, 0, 3, 0).on_border(Point::new(0, 0)));
+        assert!(!rect_at(0, 0, 0, 3).on_border(Point::new(0, 0)));
+    }
+
+    #[test]
+    fn rect_on_border_single_cell_is_border() {
+        // AC4/AC10: the sole cell of a 1×1 box is on the border.
+        assert!(rect_at(4, 4, 1, 1).on_border(Point::new(4, 4)));
+    }
+
+    #[test]
+    fn rect_on_border_edges_and_corners_true_interior_false() {
+        // AC4/AC10: every non-center cell of a 3×3 box is on the border; the
+        // center is not; an out-of-box point is not.
+        let r = rect_at(0, 0, 3, 3);
+        assert!(r.on_border(Point::new(0, 0))); // corner
+        assert!(r.on_border(Point::new(2, 2))); // corner
+        assert!(r.on_border(Point::new(1, 0))); // edge
+        assert!(r.on_border(Point::new(0, 1))); // edge
+        assert!(r.on_border(Point::new(2, 1))); // edge (dx + 1 == width)
+        assert!(!r.on_border(Point::new(1, 1))); // strict interior
+        assert!(!r.on_border(Point::new(5, 5))); // out of box
+        assert!(!r.on_border(Point::new(-1, 0))); // negative delta → None
     }
 }
