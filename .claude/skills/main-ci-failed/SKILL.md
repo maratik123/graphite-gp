@@ -203,10 +203,27 @@ git checkout -b fix/main-ci-<run-id>
 git branch --show-current   # MUST return fix/main-ci-<run-id> — not main
 ```
 
-Now root-cause the failure from the log + reproducer output. Two paths:
+Now root-cause the failure from the log + reproducer output. Three paths:
 
-- **Inline-fix classes** (`fmt`, `clippy`, `doc`, `actionlint`) — mechanical / lint-shaped failures. Edit the offending file(s); re-run the reproducer until green. Stage explicitly by name (never `git add -A` / `git add .`).
-- **Delegation classes** (`test`, `build`) when the failure is a genuine regression: **delegate to `/bugfix`**. `/bugfix` owns the full Trace → Root cause → Fix → self-review → push loop and exits with the fix landed on the current branch (`fix/main-ci-<run-id>`). After `/bugfix` exits, return to this skill at Step 7 to open the PR — `/bugfix` may push but does not open PRs.
+- **Mechanical single-command fixes — STAY INLINE** with the orchestrator: `fmt` (`cargo fmt`), an auto-`--fix`-able `clippy` lint, an `actionlint`-guided workflow-YAML one-liner, a `doc` typo. These are deterministic and need no code-writing reasoning — spawning a sonnet subagent to run `cargo fmt` is pure latency/context overhead. Edit the offending file(s); re-run the reproducer until green. Stage explicitly by name (never `git add -A` / `git add .`).
+- **Substantive code-writing — DELEGATE to `code-writer`** (Mode B). A `clippy` or `doc` failure whose fix needs a real code change — a logic restructure to satisfy a lint, rewriting a broken doctest — is genuine code-writing, so hand it to the `code-writer` subagent. It authors the fix from the class + reproducer + log context (NOT a transcribed diff), stays within the failing surface, re-runs the reproducer + gates, and returns **WITHOUT committing** (the orchestrator owns Step 5 self-review and the Step-6 commit):
+
+  ```
+  Agent(subagent_type="code-writer", prompt="
+    Single-fix delegate mode (Mode B). Author the fix for this main-CI <class> failure. Do NOT commit; return a summary of edits + gate results.
+
+    Failing class: <clippy|doc>
+    Log excerpt / lint name: <verbatim failing-step evidence>
+    Local reproducer (currently RED): <reproducer command from the per-class table>
+
+    Author the concrete edits (reason them out — not a transcribed diff), stay within the failing surface (no scope expansion), then re-run the reproducer until GREEN plus:
+      cargo clippy --workspace --all-targets -- -D warnings
+      cargo fmt
+      RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps --workspace   (doc class)
+    Return WITHOUT committing: the edits (file:line + one-liner each) and gate results.
+  ")
+  ```
+- **Genuine `test` / `build` regressions — route to `/bugfix`** (unchanged). `/bugfix` owns the full Trace → Root cause → Fix → self-review → push loop and exits with the fix landed on the current branch (`fix/main-ci-<run-id>`). After `/bugfix` exits, return to this skill at Step 7 to open the PR — `/bugfix` may push but does not open PRs.
 - **`other`** — pause and surface to user.
 
 > **"Main is so broken local builds also fail."** When `cargo build` on a clean checkout of `main` HEAD fails before any fix is even attempted (and the failure is unrelated to the class — it's a deeper regression), delegate to `/bugfix` for the deeper regression first, then re-enter `/main-ci-failed` once local is green. Audit-trail: surface the failing main run URL to `/bugfix` so its trace file records it.
@@ -364,7 +381,7 @@ After the new PR merges, /pr-merged will clean up ai-docs/main-ci/<run-id>.progr
 | Step 1 | Progress file at `ai-docs/main-ci/<run-id>.progress.md` opened |
 | Step 2 | Class assigned; reproducer command chosen |
 | Step 3 | Local reproducer ran; PASS or NO-REPRODUCE explicitly recorded |
-| Step 4 | Branch is now `fix/main-ci-<run-id>` (verified); fix applied (inline) OR delegation to `/bugfix` triggered; `actionlint` clean if any workflow YAML touched |
+| Step 4 | Branch is now `fix/main-ci-<run-id>` (verified); fix applied (inline mechanical) OR delegated to `code-writer` (substantive clippy/doc) OR delegated to `/bugfix` (test/build); `actionlint` clean if any workflow YAML touched |
 | Step 5 | `self-review` APPROVE (≤ 3 attempts) |
 | Step 6 | All `cargo` gates clean; branch is NOT main (re-verified); single commit; staged explicitly |
 | Step 7 | `git push -u origin <branch>` succeeded; `gh pr create` opened the new PR; PR body contains `**Tracked in run:** <run-id>` |

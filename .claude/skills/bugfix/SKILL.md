@@ -199,11 +199,30 @@ Before Edit — make a plan:
 
 ## Step 5: Fix
 
-Now open Edit.
+Delegate the fix's **code-writing** to the `code-writer` subagent (Mode B — single-fix delegate). The orchestrator does NOT open `Edit` for the fix itself; it hands `code-writer` the Step-4 plan plus the Step-2 root cause and Step-3 failing test, and `code-writer` **authors** the concrete edits (it does NOT transcribe a finished diff), runs the gates, and returns **WITHOUT committing** — the orchestrator owns Step 6.5 self-review and the commit, so the fix is reviewed before it lands.
 
-**One-file rule:** if fix requires changes in >3 files — you're fixing a symptom, not the root cause. STOP, go back to Step 2.
+```
+Agent(subagent_type="code-writer", prompt="
+  Single-fix delegate mode (Mode B). Author the fix for this bug. Do NOT commit; return a summary of edits + gate results.
 
-**One-attempt rule:** if a new bug appeared in the same place after the fix — STOP. Draw a full system diagram, show it to the user.
+  Fix intent / target (Step 4 plan): <file(s), function, ~lines, the change to make>
+  Root cause (Step 2, user-confirmed): <root-cause statement from the trace>
+  Failing test (Step 3, currently RED): <test name + the invariant it locks>
+
+  Author the concrete edits (reason them out — this is NOT transcription of a pre-written diff), stay within the named target (no scope expansion), then run:
+    cargo test <test_name>   — must turn GREEN
+    cargo test               — full suite; confirm nothing else broke
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo fmt
+  Return WITHOUT committing: the edits (file:line + one-liner each), gate results, and — if a NEW bug appeared in the SAME place after the fix — surface that signal explicitly.
+")
+```
+
+After `code-writer` returns, the **orchestrator** applies the bail rules below — they are user-facing control flow the orchestrator retains; do NOT push them into the subagent's prompt:
+
+**One-file rule:** if the fix touched >3 files — you're fixing a symptom, not the root cause. STOP, go back to Step 2.
+
+**One-attempt rule:** if `code-writer`'s return surfaced a new bug in the same place after the fix — STOP. Draw a full system diagram, show it to the user.
 
 **Write progress at this step boundary** before further tool calls: rewrite `**current_step:**` to `Step 5: Fix`; append a `## Decisions log` bullet recording the file(s) and lines touched (one line, prefixed `Step 5:`).
 
