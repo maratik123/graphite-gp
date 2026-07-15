@@ -117,6 +117,7 @@ These are invariants. Violating any of them is a defect:
 4. **Apply the optimization target.** Question-leverage filter: if the `design` Subagent could resolve this ambiguity by convention or design choice, it is not design-affecting and goes to `## Open questions` (or just into the spec as a sensible default with a Key Decisions row).
 5. **Self-contained spec.** A reader of `spec_path` should understand the task without re-reading the issue body or the Q&A log.
 6. **Don't rewrite the issue body.** The spec is a derived artifact; the issue is the user's original problem statement.
+7. **Verify external facts before embedding them (PROC-1).** Issue bodies and user descriptions are *candidate-truth*, not ground-truth. Before writing any live external fact — a crate version, a schema, an API surface — into the spec, verify it against the live source (`crates.io` `max_stable_version`, the crate's docs, the repo's own `Cargo.toml` / `cargo tree`) per AGENTS.md § *Dependency Versions*; embed the verified fact, never an unverified claim carried over from the issue. (The Rule-5 dep-presence row below is the mechanical subset of this principle.)
 
 ## Rule-5 substring blacklist (mirrored)
 
@@ -130,11 +131,11 @@ printf '%s\n' "<draft questions> <draft spec body>" | grep -iE 'backward.compat|
 
 | Forbidden substring (case-insensitive) | Documented answer to apply silently |
 |----------------------------------------|--------------------------------------|
-| `backward compat`, `back-compat`, `backcompat`, `compat shim`, `compat layer` | AGENTS.md § *API Stability*: pre-crates.io, free to break — no shims |
+| `backward compat`, `back-compat`, `backcompat`, `compat shim`, `compat layer` | AGENTS.md § *API Stability*: game app, never published to crates.io — free to break, no shims |
 | `deprecat` (matches *deprecate*, *deprecated*, *deprecation*) | AGENTS.md § *API Stability*: no `#[deprecated]` wrappers |
 | `keep old`, `preserve existing`, `existing API stay`, `keep the old name` | AGENTS.md § *API Stability*: rename freely |
 | `should X panic`, `panic or return`, `should it panic`, `panic vs return`, `should this panic` | AGENTS.md § *API Naming* (see `ai-docs/api-naming.md`): non-panicking by default; `try_*` returning `Result`/`Option` |
-| `for users`, `for downstream`, `existing callers` | AGENTS.md § *API Stability*: no downstream clients yet |
+| `for users`, `for downstream`, `existing callers` | AGENTS.md § *API Stability*: game app, never published — no downstream clients |
 | `would add`, `introduce <X> as a dep`, `pull in <X>`, `avoid <X> as a dep`, `<X> is not currently a dependency` | AGENTS.md § *Dependency Versions* AXIOM (presence dimension): run `grep -r '<X>' --include='Cargo.toml' .` + `cargo tree --invert <X>` before writing. Drop the claim if hits exist; rewrite naming the actual concern. |
 | `float in gp-core`, `f32` / `f64` in `geom` / `sim`, `use floating point`, `should this be a float` | AGENTS.md § *Code Style* (`docs/design.md` §3a): `gp-core` is integer-only & deterministic — no floats in `geom` / `sim`. Use integer arithmetic; do not ask. |
 | `blocked label`, `Blocked by #` | `.claude/skills/task/SKILL.md` § *⚡ Fourth*: `/task` reconciles `blocked`-labelled gh issues automatically (enumerate blockers → query state → remove stale label or pause for direction). Spec-writer must NOT surface the `blocked`-label question — the orchestrator owns it. |

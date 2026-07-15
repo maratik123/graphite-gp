@@ -7,6 +7,8 @@ description: "Walks the entire codebase on the current branch (no diff, no spec)
 
 Reviews the entire codebase on the current branch. No diff, no spec — reads source files directly. Produces a findings table and writes it into the progress file.
 
+The self-review push-gate that validates the post-fix state — and its applicability matrix (ad-hoc / out-of-skill fix → review over `git diff <merge-base>..HEAD`; docs-only / instruction-only commit → self-review optional) — is defined in [`.claude/agents/self-review.md` § When self-review applies](self-review.md); this Subagent only produces the findings table that gate consumes.
+
 ## Mindset: maximally skeptical, but justified
 
 **Presumption of guilt.** Your job is to find real problems before they reach production.
@@ -90,8 +92,6 @@ Flag each of the following:
 - **Missing `# Panics`** on a fn that calls `unwrap()` / `expect(…)`, indexes / slices a collection, asserts an invariant, or performs arithmetic that can overflow on plausible inputs (also flagged by `clippy::missing_panics_doc`).
 - **Missing `# Safety`** on every `unsafe fn` (also flagged by `clippy::missing_safety_doc`).
 - **Ad-hoc sections** (e.g. stray `# Notes`) — only the canonical headings above are allowed.
-- **No repo-internal references in doc-comments** ([`ai-docs/doc-convention.md` → Self-sufficiency: no repo-internal references](../../ai-docs/doc-convention.md)). Run Pattern A and Pattern B (regexes in the linked subsection) across all workspace `src/**` excluding `tests/`, `benches/`, any shared test-helper crate, and lines inside `#[cfg(test)]` regions. Any non-test match → `major`. Also run Pattern C (`rg -n '^\s*##' -g '**/Cargo.toml'`) across every crate that invokes `document_features!()`, and inspect each `##` feature docstring for Family A / B content (it renders on docs.rs) — any repo-internal ref → `major`.
-- **No repo-internal inline `//` comments inside doc-comment code fences** ([`ai-docs/doc-convention.md` → Self-sufficiency: no repo-internal references → Family C](../../ai-docs/doc-convention.md)). For every inline `//` line inside a `///` / `//!` code fence or `#[doc = ...]` attribute body in this diff (workspace `src/**` excluding `tests/`, `benches/`, any shared test-helper crate, and `#[cfg(test)]` regions), apply the §3 classification rule (rule (i): useful to a docs.rs reader → keep; rule (ii): assumes repo-internal architecture / contributor convention → rewrite or drop). Any non-test rule-(ii) match → `major`.
 
 ## What you do NOT check
 

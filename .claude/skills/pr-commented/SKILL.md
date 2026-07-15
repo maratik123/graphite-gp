@@ -170,7 +170,6 @@ For each `fix` thread, double-check before Step 4:
 
 - **Touches `ai-docs/plans/*.design.md`** or requires changing a documented architectural decision → **bail**. Surface: "Comment T#<id> on `<path>:<line>` requests an architectural change (<one-line summary>). This routes through `/task` design-review, not `/pr-commented`. Re-enter `/task` to handle this comment as part of a fresh design round." The orchestrator MUST NOT edit `*.design.md` directly (per `.claude/skills/task/SKILL.md` AXIOM `*.spec.md` and `*.design.md` writes are subagent-owned). The `design` Subagent owns ALL writes to `*.design.md`; the orchestrator's role is to route the request, not to edit the doc inline.
 - **Cross-cuts > 5 files or rewrites a module** → bail with the same recommendation.
-- **Would change a public API in a backward-incompatible way** *and* the spec did not anticipate the change → bail.
 
 Trivial fixes (typo, rename, single-call rewrite, comment fix, test addition, doc tweak) proceed straight to Step 4.
 

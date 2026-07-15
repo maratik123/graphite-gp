@@ -9,6 +9,15 @@ Reviews implementation code for a task. Reads the diff since implementation star
 
 Used in the automated self-review loop inside `/task` — runs after Verify, before the task is declared done. Also reused by `/project-review` to approve the post-fix state.
 
+## When self-review applies (invocation matrix)
+
+This agent enforces the AGENTS.md § Workflow AXIOM "every code-producing commit on a feature branch with an open PR must pass `self-review` before `git push`". The per-skill instances (`/task` Step 10, `/pr-commented`, `/pr-ci-failed`, `/main-ci-failed`, `/bugfix`) each pass a recorded `base_commit`. Two cases outside those steps refine *whether* it runs and *over what diff*:
+
+| If the commit is... | Action |
+|---|---|
+| An ad-hoc / out-of-skill fix on a feature branch with an open PR (no owning skill step, so no recorded `base_commit`) | Spawn `self-review` manually and review over `git diff <merge-base>..HEAD` — the whole branch diff — before `git push`. |
+| A docs-only / instruction-file-only commit (no `.rs` diff) | Self-review is **optional** — still required if the diff touches any user-facing artefact. |
+
 ## Mindset: maximally skeptical, but justified
 
 **Presumption of guilt.** Your job is to find problems before the user does.
@@ -107,8 +116,6 @@ REJECT on any of:
 - **Missing `# Panics`** on a fn that calls `unwrap()` / `expect(…)`, indexes / slices a collection, asserts an invariant, or performs arithmetic that can overflow on plausible inputs (also flagged by `clippy::missing_panics_doc`).
 - **Missing `# Safety`** on every `unsafe fn` (also flagged by `clippy::missing_safety_doc`).
 - **Ad-hoc sections** (e.g. stray `# Notes`) — only the canonical headings above are allowed.
-- **No repo-internal references in doc-comments** ([`ai-docs/doc-convention.md` → Self-sufficiency: no repo-internal references](../../ai-docs/doc-convention.md)). For every `///` / `//!` / `#[doc = "..."]` line added or modified by this diff in a non-test source file (excluding any shared test-helper crate), re-run Pattern A and Pattern B from the linked subsection. Any match → REJECT (`major`) with the matched line and the family. **When the diff modifies a `[features]` table in a `Cargo.toml` whose crate invokes `document_features!()`, also run Pattern C (`rg -n '^\s*##' -g '**/Cargo.toml'`) and inspect each `##` feature docstring for Family A / B content (it renders on docs.rs) — any repo-internal ref there → REJECT (`major`).**
-- **No repo-internal inline `//` comments inside doc-comment code fences** ([`ai-docs/doc-convention.md` → Self-sufficiency: no repo-internal references → Family C](../../ai-docs/doc-convention.md)). For every `///` / `//!` / `#[doc = ...]` line added or modified by this diff, apply the §3 classification rule (rule (i) keep; rule (ii) rewrite or drop). Any non-test rule-(ii) match → REJECT (`major`).
 
 ### 7. Objection quality (round > 1 only)
 
