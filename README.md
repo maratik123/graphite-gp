@@ -41,15 +41,18 @@ in place; `crates/core/src/geom/` implements the exact integer `supercover`
 predicate (full §3 C4 test table) plus the corridor-graph helpers — 4-conn
 flood-fill / connected-component counting, `bounded_complement_components` (the
 §2 Ф4 infield-hole test), in-`D` geodesic BFS, and `walls_from_boundary` (dual
-edges). The remaining algorithms (`step`, generation pipeline, oracle, feature
-extraction, policy) are still `todo!()`. See the `TODO(<block>)` markers.
+edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
+value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
+production panics** (`Rect::index` is total via `checked_sub` + `try_from`). The
+remaining algorithms (`step`, generation pipeline, oracle, feature extraction,
+policy) are still `todo!()`. See the `TODO(<block>)` markers.
 
 ## Build
 
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 32 gp-core tests green (supercover + corridor-graph helpers)
+cargo test             # 45 gp-core tests green (supercover + corridor-graph + Size/Rect)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
