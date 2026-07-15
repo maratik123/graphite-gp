@@ -82,8 +82,19 @@ impl Action {
 /// oracle's graph edge — one code path.
 pub fn legal_move(d: &Corridor, s: CarState, a: Action) -> bool {
     let (ax, ay) = a.accel();
-    let (vx2, vy2) = (s.vx + ax, s.vy + ay);
-    let p1 = Point::new(s.x + vx2, s.y + vy2);
+    let Some(vx2) = s.vx.checked_add(ax) else {
+        return false;
+    };
+    let Some(vy2) = s.vy.checked_add(ay) else {
+        return false;
+    };
+    let Some(px) = s.x.checked_add(vx2) else {
+        return false;
+    };
+    let Some(py) = s.y.checked_add(vy2) else {
+        return false;
+    };
+    let p1 = Point::new(px, py);
     if !d.contains(p1) {
         return false;
     }
@@ -178,4 +189,43 @@ pub fn resolve_crash(_d: &Corridor, _s: CarState) -> CarState {
 /// TODO(3a): BFS-outward nearest-free placement.
 pub fn resolve_collisions(_d: &Corridor, _cars: &mut [CarState]) {
     todo!("car-collision resolution (design doc §3)")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legal_move_false_for_every_action_on_i32_max_overflow_without_panic() {
+        // AC4: a state at x/y = i32::MAX with vx/vy already at i32::MAX overflows
+        // the checked_add chain (either at vx+ax or at x+vx2) for every one of the
+        // 5 actions; legal_move/legal_mask must return false, never panic.
+        let d = Corridor::new(Point::new(0, 0), 5, 5);
+        let s = CarState {
+            x: i32::MAX,
+            y: 0,
+            vx: i32::MAX,
+            vy: 0,
+        };
+        for a in Action::ALL {
+            assert!(!legal_move(&d, s, a));
+        }
+        assert_eq!(legal_mask(&d, s), [false; 5]);
+    }
+
+    #[test]
+    fn legal_move_false_for_every_action_on_i32_min_underflow_without_panic() {
+        // AC4: the i32::MIN-symmetric underflow case (vx/vy already at i32::MIN).
+        let d = Corridor::new(Point::new(0, 0), 5, 5);
+        let s = CarState {
+            x: i32::MIN,
+            y: 0,
+            vx: i32::MIN,
+            vy: 0,
+        };
+        for a in Action::ALL {
+            assert!(!legal_move(&d, s, a));
+        }
+        assert_eq!(legal_mask(&d, s), [false; 5]);
+    }
 }

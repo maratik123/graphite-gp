@@ -37,10 +37,10 @@ impl Point {
     /// "needle's-eye" slips between two walls.
     pub const fn neighbors4(self) -> [Self; 4] {
         [
-            Self::new(self.x + 1, self.y),
-            Self::new(self.x - 1, self.y),
-            Self::new(self.x, self.y + 1),
-            Self::new(self.x, self.y - 1),
+            Self::new(self.x.saturating_add(1), self.y),
+            Self::new(self.x.saturating_sub(1), self.y),
+            Self::new(self.x, self.y.saturating_add(1)),
+            Self::new(self.x, self.y.saturating_sub(1)),
         ]
     }
 }
@@ -97,6 +97,21 @@ impl Size {
     /// [`Corridor`] of that cell count could not allocate its backing `Vec<bool>`
     /// first. This is the same bounded-domain treatment as [`supercover`]'s
     /// overflow precondition (`docs/design.md` §3 C4); not a panic-index entry.
+    ///
+    /// # Overflow precondition
+    ///
+    /// Holds for grid-realistic, [`Corridor`]-backed (allocatable) dimensions.
+    /// `Size` is a public, standalone-constructible type — a `Size { width:
+    /// usize::MAX, .. }` built directly by struct literal, bypassing
+    /// [`Corridor::new`], is representable but lies outside this documented
+    /// domain and is not supported (its `area()` would overflow).
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "bounded by allocatability: a Corridor of this many cells must \
+                  first allocate a Vec<bool> of that length, so a usize-overflowing \
+                  product is unreachable via Corridor::new — see the doc precondition \
+                  for the (unsupported) direct-struct-literal exception"
+    )]
     pub const fn area(self) -> usize {
         self.width * self.height
     }
@@ -141,6 +156,23 @@ impl Rect {
     /// Total and panic-free for every [`Point`]: out-of-box, negative-delta, and
     /// coordinate-overflowing inputs all yield `None`. Widening happens only in the
     /// checked `offset` conversion — there is no `as` cast in the index path.
+    ///
+    /// # Overflow precondition
+    ///
+    /// The final `dy * width + dx` multiply-add is guarded by the immediately
+    /// preceding `dx < width && dy < height`, so the result is always strictly
+    /// `< width * height` (== [`Size::area`]) — the same grid-realistic,
+    /// allocatable-dimensions domain as `area`'s. `Rect` is a public,
+    /// standalone-constructible type — a `Rect` built by struct literal with
+    /// adversarially large, unallocatable `width`/`height` near `usize::MAX`,
+    /// bypassing [`Corridor::new`], lies outside this documented domain and is
+    /// not supported.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "dx < width && dy < height (checked immediately above) bounds the \
+                  product strictly below width*height == Size::area, itself bounded \
+                  by allocatability (see Size::area's doc precondition)"
+    )]
     pub fn index(&self, p: Point) -> Option<usize> {
         let (dx, dy) = self.offset(p)?;
         (dx < self.size.width && dy < self.size.height).then(|| dy * self.size.width + dx)
@@ -168,6 +200,18 @@ impl Rect {
     /// `false` for any out-of-box point. Uses the `dx + 1 == width` form (never
     /// `width - 1`), so it is correct and underflow-free at `width`/`height` of `0`
     /// (a zero-dim box has no border cells).
+    ///
+    /// # Overflow precondition
+    ///
+    /// `dx + 1` / `dy + 1` are guarded by the preceding `dx < w && dy < h`, so
+    /// `dx ≤ w − 1` (resp. `dy ≤ h − 1`) and the sum cannot overflow `usize` for
+    /// any grid-realistic, allocatable box — the same domain as [`Size::area`].
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "dx < w && dy < h (checked immediately above) bounds dx+1/dy+1 \
+                  strictly below w+1/h+1, so the add cannot overflow in the \
+                  allocatable-dimensions domain (see Size::area's doc precondition)"
+    )]
     pub fn on_border(&self, p: Point) -> bool {
         let Some((dx, dy)) = self.offset(p) else {
             return false;
@@ -291,6 +335,13 @@ impl Corridor {
 /// overflows (its operands are taken relative to `a`, so `|cr| ≤ 2·|dx|·|dy|`).
 /// Adversarial full-range `i32` endpoints lie outside the documented domain and
 /// are not supported.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "bounded-chord precondition above: |v| << 1.5e9 per move, so the \
+              i64-widened cross product (|cr| <= 2*|dx|*|dy|) cannot overflow \
+              within the documented domain; a giant-chord overflow test is \
+              infeasible (~1e18-cell scan)"
+)]
 pub fn supercover(a: Point, b: Point) -> Vec<Point> {
     let dx = i64::from(b.x) - i64::from(a.x);
     let dy = i64::from(b.y) - i64::from(a.y);
@@ -447,10 +498,53 @@ mod tests {
     }
 
     #[test]
+    fn neighbors4_saturates_at_i32_max_without_panic() {
+        // AC4: the east/north neighbours of an i32::MAX-cornered point saturate
+        // rather than overflow; the non-saturating axis is a const-operand
+        // literal (i32::MAX - 1), not flagged by arithmetic_side_effects.
+        let p = Point::new(i32::MAX, i32::MAX);
+        assert_eq!(
+            p.neighbors4(),
+            [
+                Point::new(i32::MAX, i32::MAX),     // east: saturated self
+                Point::new(i32::MAX - 1, i32::MAX), // west: in-domain
+                Point::new(i32::MAX, i32::MAX),     // north: saturated self
+                Point::new(i32::MAX, i32::MAX - 1), // south: in-domain
+            ]
+        );
+    }
+
+    #[test]
+    fn neighbors4_saturates_at_i32_min_without_panic() {
+        // AC4: the west/south neighbours of an i32::MIN-cornered point saturate
+        // rather than underflow; the non-saturating axis is a const-operand
+        // literal (i32::MIN + 1), not flagged by arithmetic_side_effects.
+        let p = Point::new(i32::MIN, i32::MIN);
+        assert_eq!(
+            p.neighbors4(),
+            [
+                Point::new(i32::MIN + 1, i32::MIN), // east: in-domain
+                Point::new(i32::MIN, i32::MIN),     // west: saturated self
+                Point::new(i32::MIN, i32::MIN + 1), // north: in-domain
+                Point::new(i32::MIN, i32::MIN),     // south: saturated self
+            ]
+        );
+    }
+
+    #[test]
     fn size_area_is_width_times_height() {
         // AC1/AC10: area of a normal box is the product of its dimensions.
         assert_eq!(Size::new(3, 4).area(), 12);
         assert_eq!(Size::new(1, 1).area(), 1);
+    }
+
+    #[test]
+    fn size_area_large_in_domain_dims() {
+        // AC3: a large-but-in-domain product (50_000 x 50_000) exercises the
+        // documented overflow-precondition bound well beyond the tiny 3x4
+        // fixture, while staying portable on 32-bit targets too
+        // (usize::MAX >= 4_294_967_295 > 2_500_000_000).
+        assert_eq!(Size::new(50_000, 50_000).area(), 2_500_000_000);
     }
 
     #[test]
@@ -497,6 +591,17 @@ mod tests {
         assert_eq!(r.index(Point::new(2, 4)), Some(4)); // dx=0, dy=1
         assert_eq!(r.index(Point::new(3, 4)), Some(5)); // dx=1, dy=1
         assert_eq!(r.index(Point::new(5, 7)), Some(19)); // dx=3, dy=4 (last cell)
+    }
+
+    #[test]
+    fn rect_index_large_in_domain_dims() {
+        // AC3: a large-but-in-domain box (50_000 x 50_000) drives a large
+        // dy*width product through the documented overflow-precondition bound
+        // (49_999*50_000 = 2_499_950_000, + 12_345), plus a small in-box sanity
+        // cell.
+        let r = rect_at(0, 0, 50_000, 50_000);
+        assert_eq!(r.index(Point::new(12_345, 49_999)), Some(2_499_962_345));
+        assert_eq!(r.index(Point::new(1, 1)), Some(50_001));
     }
 
     #[test]

@@ -100,6 +100,11 @@ pub fn flood_fill(d: &Corridor, seed: Point) -> Vec<Point> {
 ///
 /// Counts maximal 4-connected clusters of drivable cells over the bounding box;
 /// `0` for an empty corridor. Deterministic (design doc §1, §3a).
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "count <= cell count <= area (the box is iterated by d.box_points(), \
+              so count is bounded by the allocated cell count) — cannot overflow usize"
+)]
 pub fn component_count(d: &Corridor) -> usize {
     let mut visited = vec![false; d.area()];
     let mut out = Vec::new();
@@ -108,6 +113,7 @@ pub fn component_count(d: &Corridor) -> usize {
         out.clear();
         flood_component(d, |q| d.contains(q), &mut visited, p, &mut out);
         if !out.is_empty() {
+            // bound: count <= cell count <= area (see fn doc precondition)
             count += 1;
         }
     }
@@ -123,6 +129,11 @@ pub fn component_count(d: &Corridor) -> usize {
 /// region (design doc §2, Ф4 — "exactly one bounded hole" is then `== 1`). Works
 /// regardless of box margin; deterministic; `0` for an empty or fully-drivable
 /// corridor.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "count <= cell count <= area (the box is iterated by d.box_points(), \
+              so count is bounded by the allocated cell count) — cannot overflow usize"
+)]
 pub fn bounded_complement_components(d: &Corridor) -> usize {
     let mut visited = vec![false; d.area()];
     let mut out = Vec::new();
@@ -131,6 +142,7 @@ pub fn bounded_complement_components(d: &Corridor) -> usize {
         out.clear();
         let touches_boundary = flood_component(d, |q| !d.contains(q), &mut visited, p, &mut out);
         if !out.is_empty() && !touches_boundary {
+            // bound: count <= cell count <= area (see fn doc precondition)
             count += 1;
         }
     }
@@ -206,6 +218,12 @@ impl CorridorScratch {
     /// `self`'s buffers via an O(1) generation-stamp reset (AC6). Intra-layer order
     /// is fixed and reproducible (AC5), but callers must treat a layer only as an
     /// unordered tie set.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "distance <= cell count <= area (each cell is stamped/visited at \
+                  most once per query, so the layer count cannot exceed the \
+                  allocated cell count) — cannot overflow usize"
+    )]
     pub fn geodesic_bfs<B>(
         &mut self,
         d: &Corridor,
@@ -243,6 +261,7 @@ impl CorridorScratch {
                 }
             }
             std::mem::swap(&mut self.frontier, &mut self.next_frontier);
+            // bound: distance <= cell count <= area (see fn doc precondition)
             distance += 1;
         }
         None
@@ -280,8 +299,16 @@ pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
         }
         for side in Side::ALL {
             let (dx, dy) = side.delta();
-            let neighbour = Point::new(cell.x + dx, cell.y + dy);
-            if !d.contains(neighbour) {
+            // NOTE: does not reuse the saturating `Point::neighbors4` — a
+            // saturated self-neighbour would test `d.contains(cell) == true`
+            // and wrongly suppress a real boundary wall. A coordinate-overflowing
+            // neighbour is off the representable grid, hence ∉ D, hence its side
+            // must emit a wall — checked_add maps `None` to exactly that.
+            let neighbour_in_d = match (cell.x.checked_add(dx), cell.y.checked_add(dy)) {
+                (Some(x), Some(y)) => d.contains(Point::new(x, y)),
+                (None, _) | (_, None) => false,
+            };
+            if !neighbour_in_d {
                 walls.push(Wall { cell, side });
             }
         }
@@ -557,6 +584,25 @@ mod tests {
             ControlFlow::<()>::Continue(())
         });
         assert_eq!(second, geodesic_layers(&d, Point::new(1, 3)));
+    }
+
+    #[test]
+    fn walls_of_lone_cell_at_i32_min_origin_emits_all_four_without_panic() {
+        // AC4: a 1×1 box anchored at i32::MIN. The west/south neighbours underflow
+        // i32 (cell.x - 1, cell.y - 1); the checked-add chain must map that
+        // off-grid case to "emit wall" (not panic, not skip — an underflowing
+        // neighbour is unambiguously ∉ D). East/north are off-box in the ordinary
+        // (non-overflowing) sense, confirming both paths emit correctly.
+        let d = corridor((i32::MIN, i32::MIN), 1, 1, &[(i32::MIN, i32::MIN)]);
+        let expected: HashSet<Wall> = [
+            wall(i32::MIN, i32::MIN, Side::East),
+            wall(i32::MIN, i32::MIN, Side::West),
+            wall(i32::MIN, i32::MIN, Side::North),
+            wall(i32::MIN, i32::MIN, Side::South),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(wall_set(&d), expected);
     }
 
     #[test]
