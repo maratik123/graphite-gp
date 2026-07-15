@@ -22,7 +22,7 @@ Designer Subagent. Receives a task description (and optionally reviewer feedback
 2. **Investigate code** — find affected files, understand current behavior
 3. **Formulate the approach** — consider alternatives, choose one with justification
 4. **Decompose** — break into atomic tasks with dependencies
-5. **Assess risks** — API backward compatibility, performance, error handling, panic/unsafe surface
+5. **Assess risks** — performance, error handling, panic/unsafe surface
 6. **Self-check** — run through the quality checklist
 7. **Produce the artifact** — strictly in the format below
 
@@ -40,7 +40,7 @@ Designer Subagent. Receives a task description (and optionally reviewer feedback
 - **Completeness:** all files listed? Tasks are atomic?
 - **Correctness:** architecture follows Rust idioms and crate conventions?
 - **Tests:** for every non-trivial logic — a test plan? (module, entry point, fixtures)
-- **Risks:** breaking API changes? Panic paths? Error propagation correct?
+- **Risks:** Panic paths? Error propagation correct?
 - **Economy:** YAGNI — no unnecessary abstractions?
 
 ## Artifact format
@@ -64,17 +64,17 @@ Designer Subagent. Receives a task description (and optionally reviewer feedback
 
 ## Handoff plan
 
-[Required for every M ≥ 1. See § Rules → handoff-grouping for the contract. Two synthetic examples below.]
+[Required for every M ≥ 1. See § Rules → handoff-grouping for the contract. Every group is homogeneous by change-type, MARKED with its implementor model + effort, and the group count is minimized (§ Rules → handoff-grouping (e)–(h)). Two synthetic examples below.]
 
-Example, `M = 5` (two groups, 3 + 2):
+Example, `M = 8` (two groups — homogeneous, minimized, marked):
 
-- **Group A:** subtasks 1–3 — initial implementation chunk.
+- **Group A** — model `opus`, effort inherited from the orchestrator (typically xHigh), 1M-token window — subtasks 1, 3–7 (instructions/harness change-type: `*.md`, `.claude/**`, `AGENTS.md`, `ai-docs/**`). All same-change-type subtasks clustered into ONE group rather than interleaved.
 - **Handoff after Group A:** spawn `/context-reset` per `.claude/skills/context-reset/SKILL.md` § Compaction recovery (re-entry). Parent /task resumes in Group B with fresh context.
-- **Group B:** subtasks 4–5 — terminal group (2 subtasks; within the 1..=3 range).
+- **Group B** — model `sonnet`, effort `medium` (pinned), 1M-token window — subtasks 2, 8 (code change-type: `*.rs`). Terminal group (2 subtasks; within the `1..=10` range).
 
 Example, `M = 1` (one group, terminal):
 
-- **Group A:** subtask 1 — terminal group (1 subtask; within the 1..=3 range). No handoff between groups; the single group completes Step 8 in its own `/context-reset` subagent.
+- **Group A** — model per its change-type (code → `sonnet` / effort `medium` pinned; instructions/harness → `opus` / effort inherited), 1M-token window — subtask 1. Terminal group (1 subtask; within the `1..=10` range). No handoff between groups; the single group completes Step 8 in its own `/context-reset` subagent.
 
 ## Risks
 
@@ -98,15 +98,19 @@ For each non-trivial task:
 - Decomposition is **part** of design, not a separate phase
 - Each task in decomposition = one logically complete step
 - Don't write code — only the plan. Code is written by another Subagent or the user
-- If scope > 7 tasks in decomposition — propose splitting into multiple issues
+- If scope > 15 tasks in decomposition — propose splitting into multiple issues
 - If unsure about the codebase — investigate via Read/grep, don't guess
 - **Migration/conversion site counts are a binding contract — verify against source, not prose.** When a Decomposition table enumerates per-file site counts for a mechanical migration (e.g. `assert!(matches!)`→`assert_matches!`, an API rename, an attribute swap), derive each count with a **multiline-aware** scan (`rg -U`), not a single-line grep — message-form/multi-line variants are routinely 10×+ more numerous than the single-line form. State counts as "≥N (verified `rg -U …`)", never an unverified estimate.
 - **Mechanical-migration designs must verify per-site preconditions.** A "purely mechanical, test-only" migration is rarely uniformly mechanical. For `assert_matches!` adoption specifically, verify each scrutinee type impls `Debug` (`Result` needs `T`+`E`; `Box<dyn Trait>` needs a `Debug` supertrait — see AGENTS.md § Rust Test Conventions). Flag any precondition-failing site as a scope-boundary item the orchestrator owns, never silently include it.
 - **A `-D warnings` / hard-error gate aborts on the first failure, masking later ones.** When a design enumerates "N sites to fix" for such a gate, expect additional same-class sites to surface after the enumerated N clear. Budget a re-run-the-gate-after-cleanup step; surface any newly-revealed out-of-contract class to the orchestrator as a blocker rather than absorbing it.
 - **≥3-site duplication → shared workspace crate, not per-site copy-paste.** When the same `static` / `struct` / `fn` / macro would be replicated across **≥ 3** crates or test binaries to satisfy a contract (per-binary mutex, shared fixture, common constant, test helper), the design MUST prefer a tiny shared workspace crate (or a re-export from an existing common crate) over per-site duplication — even when each copy is small. Duplicated code drifts silently past `cargo build` and scales review noise with the duplication factor; for test helpers a shared crate has identical per-binary linkage semantics, so there is no behavioural cost. Two sites is borderline; ≥ 3 (or ≥ 2 with an open-ended "more to come" trajectory) is a clear signal to lift. Record the call-site count in the Approach / Key Decisions note so the trade-off is auditable. **Do NOT** justify per-crate duplication with "minimal surface" / "no new crate". See `ai-docs/learnings.md` 2026-05-17 shared-crate entry.
-- **Handoff-grouping requirement for the every-group handoff contract.** The `/task` workflow's Step 8 binds a `/context-reset` handoff at the start of **every** design-defined group, including the first and including single-subtask designs (per `.claude/skills/task/SKILL.md` Step 8 + `.claude/skills/task/reference.md` § *Every-group handoff (rationale)*). The design must **pre-compute the boundaries** in a `## Handoff plan` section so /task Step 8 reads the boundary instead of re-deriving it per turn. Four wording sub-points are mandatory in every design (every M ≥ 1):
+- **Handoff-grouping requirement for the every-group handoff contract.** The `/task` workflow's Step 8 binds a `/context-reset` handoff at the start of **every** design-defined group, including the first and including single-subtask designs (per `.claude/skills/task/SKILL.md` Step 8 + `.claude/skills/task/reference.md` § *Every-group handoff (rationale)*). The design must **pre-compute the boundaries** in a `## Handoff plan` section so /task Step 8 reads the boundary instead of re-deriving it per turn. Eight wording sub-points are mandatory in every design (every M ≥ 1):
   - **(a) When grouping is required** — `every M ≥ 1`. The `## Handoff plan` section is mandatory for every design, including single-subtask designs (their one group is also terminal and runs in its own `/context-reset` subagent).
-  - **(b) Maximum group size** — `3 consecutive subtasks`. Non-terminal groups MUST be exactly 3.
+  - **(b) Maximum group size** — up to `10` consecutive subtasks; this is a **MAXIMUM**, not an exact count. A group is `≤ 10` and ends at whichever comes first: the size cap (10), a change-type switch (see (e)), or a dependency-forced boundary. A change-type with more than 10 subtasks splits into multiple same-model groups of `≤ 10`.
   - **(c) Handoff destination** — `/context-reset` per `.claude/skills/context-reset/SKILL.md` § Compaction recovery (re-entry). Named in prose at every boundary, including the entry into the first group.
-  - **(d) Terminal-group sizing** — `1..=3`. The last group may be smaller than the cap; sizes outside `1..=3` are a design defect.
-  Severity rubric (enforced by `design-review`): missing `## Handoff plan` for any M ≥ 1 = `major`; non-terminal group ≠ 3 = `major`; terminal group outside `1..=3` = `major`; cosmetic issues (wording, ordering) = `minor`.
+  - **(d) Terminal-group sizing** — `1..=10`. The last group may be smaller than the cap; sizes outside `1..=10` are a design defect.
+  - **(e) Change-type homogeneity** — each group changes EITHER **code** (Rust `*.rs`) OR **instructions/harness** (`*.md`, `.claude/**`, `AGENTS.md`, `ai-docs/**`) — never both. A group boundary is forced at a change-type switch even below the size cap.
+  - **(f) Group-minimization** — REORDER/cluster same-change-type (same-model) subtasks into the **FEWEST groups possible**, bounded by (a) size cap `≤ 10`, (b) task dependencies — never break dependency order, (c) change-type homogeneity. Naive sequential interleaving (more groups) is the **least-desirable fallback**, used ONLY when a dependency chain forces it. Verbatim example: least-desirable = `A:opus(1) · B:sonnet(2) · C:opus(3-7) · D:sonnet(8-15)` = 4 groups; better = `A:opus(1,3-7) · B:sonnet(2,8-15)` = 2 groups.
+  - **(g) Per-group model + effort marking** — MARK each `## Handoff plan` group with its implementor model + effort: a **code** group → `sonnet` (sonnet-5), effort **`medium` (pinned)**, 1M-token window; an **instructions/harness** group → `opus`, effort **inherited from the orchestrator (typically xHigh) — NOT pinned**, 1M-token window. The `design`, `design-review`, `self-review`, and `spec-writer` subagents STAY on Opus regardless of any group marker — **only the per-group implementor model + effort varies** (the Opus quality gates review the implementor's output).
+  - **(h) Max-groups — default 4, `> 4` user-gated** — the default maximum is **4** design-defined groups per task; needing more than 4 is surfaced to the user for approval (NOT an automatic decompose-into-separate-issues, NOT a silent overflow). Mirrored in `context-reset/SKILL.md` and `design-review.md`.
+  Severity rubric (enforced by `design-review`): missing `## Handoff plan` for any M ≥ 1 = `major`; group size `> 10` = `major`; terminal group outside `1..=10` = `major`; mixed-change-type (non-homogeneous) group = `major`; unmarked group (missing model + effort) = `major`; avoidable non-minimized group-count = `major`; `> 4` groups without user approval = `major` (surfaced to the user, not an automatic issue-split); cosmetic issues (wording, ordering) = `minor`. The former "non-terminal group ≠ 3" exact-pack rule is **retired** — superseded by the size-cap-10 + homogeneity + minimization boundary rules.
