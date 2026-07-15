@@ -6,6 +6,12 @@
 
 use crate::geom::{Corridor, Point, supercover};
 use crate::track::{RaceDir, StartFinish};
+use enumflags2::bitflags;
+
+/// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
+/// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
+/// guideline C-REEXPORT).
+pub use enumflags2::BitFlags;
 
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -33,7 +39,13 @@ impl CarState {
 ///
 /// Diagonal acceleration in a single turn is forbidden — this is the
 /// foundation of every braking-distance argument in the design.
+#[bitflags]
+#[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+// `#[bitflags]`-generated code triggers `clippy::use_self` (nursery) against
+// the enum's own declaration span; no `Self`-eligible code exists in this
+// hand-written block.
+#[allow(clippy::use_self)]
 pub enum Action {
     /// `(0, 0)` — hold velocity. Always available; the basis of V=1 liveness.
     Coast,
