@@ -43,7 +43,9 @@ flood-fill / connected-component counting, `bounded_complement_components` (the
 §2 Ф4 infield-hole test), in-`D` geodesic BFS, and `walls_from_boundary` (dual
 edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
 value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
-production panics** (`Rect::index` is total via `checked_sub` + `try_from`). The
+production panics** (`Rect::index` is total via `checked_sub` + `try_from`). All
+integer arithmetic is **overflow- and signedness-safe**, machine-enforced by a
+workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The
 remaining algorithms (`step`, generation pipeline, oracle, feature extraction,
 policy) are still `todo!()`. See the `TODO(<block>)` markers.
 
@@ -52,7 +54,7 @@ policy) are still `todo!()`. See the `TODO(<block>)` markers.
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 45 gp-core tests green (supercover + corridor-graph + Size/Rect)
+cargo test             # 52 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
