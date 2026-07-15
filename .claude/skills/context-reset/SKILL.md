@@ -37,10 +37,10 @@ When triggered (every design-defined group OR compaction detected):
 
 1. `cargo build` — ensure code compiles
 2. Update `ai-docs/plans/YYYY-MM-DD-name.progress.md` (format below)
-3. Launch ONE `Agent` Tool call per **group** (per the design's `## Handoff plan`). **Read the group's marked implementor model + effort** from its Handoff-plan entry and spawn the `general-purpose` implementor with that **inline override** — the marker, not a fixed default, governs the spawn:
-   - **code** group (marked `sonnet`) → `Agent(subagent_type="general-purpose", model="sonnet", …)` run at effort **`medium` (pinned)**, 1M-token window.
+3. Launch ONE `Agent` Tool call per **group** (per the design's `## Handoff plan`). **Read the group's marked implementor model + effort** from its Handoff-plan entry — the marker, not a fixed default, governs which subagent is spawned:
+   - **code** group (marked `sonnet`) → `Agent(subagent_type="code-writer", …)`. Model (`sonnet`) and effort (`medium`) are **frontmatter-pinned** in `.claude/agents/code-writer.md`; pass NO inline `model=`/effort override — there is no per-invocation `effort` parameter, so the frontmatter pin is the only lever that enforces the medium tier. 1M-token window.
    - **instructions/harness** group (marked `opus`) → `Agent(subagent_type="general-purpose", model="opus", …)` with effort **NOT set** (inherited from the orchestrator, typically xHigh), 1M-token window.
-   The Subagent owns all subtasks in its group and runs them sequentially in-context, committing after each: `prompt="Read ai-docs/plans/YYYY-MM-DD-name.progress.md and complete Group <X>'s subtasks <N>–<M>, then return"`. Only this per-group implementor spawn takes the override; the quality-gate subagents (`design` / `design-review` / `self-review` / `spec-writer`) stay on Opus.
+   The Subagent owns all subtasks in its group and runs them sequentially in-context, committing after each: `prompt="Read ai-docs/plans/YYYY-MM-DD-name.progress.md and complete Group <X>'s subtasks <N>–<M>, then return"` (`code-writer` Mode A for a code group). Only the **instructions/harness** spawn takes an inline `model=` override (`model="opus"`); the **code** group's model + effort come from `code-writer`'s frontmatter, never an inline override. The quality-gate subagents (`design` / `design-review` / `self-review` / `spec-writer`) stay on Opus.
 4. Do NOT spawn one Agent per subtask. The group is the unit of fan-out; the subtask is the unit of commit.
 5. Do NOT continue in current context
 
