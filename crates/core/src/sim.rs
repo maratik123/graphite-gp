@@ -100,7 +100,7 @@ pub fn legal_move(d: &Corridor, s: CarState, a: Action) -> bool {
     if !d.contains(p1) {
         return false;
     }
-    supercover(s.pos(), p1).iter().all(|&c| d.contains(c))
+    supercover(s.pos(), p1).all(|c| d.contains(c))
 }
 
 /// The legal-action mask for `s`, in [`Action::ALL`] order. Consumed by the
