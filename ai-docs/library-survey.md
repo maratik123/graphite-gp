@@ -28,13 +28,13 @@ Because the adopt-now set is empty, **AC3 is vacuously satisfied** — there is 
 | Candidate | Verdict | Target crate | One-line rationale | Tracking |
 |---|---|---|---|---|
 | `roaring` | reject | `gp-core` | Wrong tool for small, dense, bounded grid corridors; a `Vec<bool>` / plain bitset over the corridor rect is simpler and faster than a compressed roaring bitmap. | — |
-| `enumflags2` | defer-to-issue | `gp-core` (`legal_mask`) | `legal_mask` returns `[bool; 5]` today; a typed 5-action bitflag is cleaner and enables `#[repr]`-backed masks, but is preventive until the action set is locked. | [Near-term issue](#near-term-github-issues) |
-| `indexmap` / `IndexSet` | defer-to-issue | `gp-gen` | Deterministic-iteration set for track generation (ring/repair frontier), avoiding `std::HashSet`'s nondeterministic order; no production set exists in the core yet. | [Near-term issue](#near-term-github-issues) |
+| `enumflags2` | defer-to-issue | `gp-core` (`legal_mask`) | `legal_mask` returns `[bool; 5]` today; a typed 5-action bitflag is cleaner and enables `#[repr]`-backed masks, but is preventive until the action set is locked. | [#51](https://github.com/maratik123/graphite-gp/issues/51) |
+| `indexmap` / `IndexSet` | defer-to-issue | `gp-gen` | Deterministic-iteration set for track generation (ring/repair frontier), avoiding `std::HashSet`'s nondeterministic order; no production set exists in the core yet. | [#50](https://github.com/maratik123/graphite-gp/issues/50) |
 | `thiserror` | reject (for now) | `gp-core` / `gp-gen` | No error enum exists yet; AGENTS.md § Code Style already mandates `thiserror` on the **first** error type — adopt then; nothing to refactor now. | — |
 | `itertools` | reject | `gp-core` | Marginal: would add a dependency to the otherwise dep-free core for a single grid-walk call-site; std iterator adapters already suffice. | — |
 | `anyhow` | reject (for now) | `gp-game` | Library crates (core/gen/render/ai) use typed errors, not `anyhow`; the binary's top-level orchestration could use it once it has fallible flows — none exist yet. | — |
 | `smallvec` | defer-to-issue | `gp-render` / `gp-ai` | Small-vector optimization for hot per-cell / per-step buffers; the target hot paths are not built yet. | Report-only this PR |
-| `rand` / `rand_chacha` | defer-to-issue | `gp-gen` | Seeded, reproducible RNG for track generation and replay determinism; `rand_chacha` gives a portable, version-stable stream across platforms. | [Near-term issue](#near-term-github-issues) |
+| `rand` / `rand_chacha` | defer-to-issue | `gp-gen` | Seeded, reproducible RNG for track generation and replay determinism; `rand_chacha` gives a portable, version-stable stream across platforms. | [#49](https://github.com/maratik123/graphite-gp/issues/49) |
 | `serde` | defer-to-issue | `gp-gen` / `gp-game` | Track / replay (de)serialization and save format; no persisted format is defined yet. | Report-only this PR |
 | `glam` | defer-to-issue | `gp-render` / `gp-ai` | Float vector/matrix math for rendering and policy features; the integer core never uses it (`docs/design.md` §3a). | Report-only this PR |
 | `rayon` | defer-to-issue | `gp-ai` / `gp-gen` | Data-parallel self-play / batch generation; premature before a profiled bottleneck exists (determinism must be preserved). | Report-only this PR |
@@ -45,9 +45,9 @@ Because the adopt-now set is empty, **AC3 is vacuously satisfied** — there is 
 
 Per Key Decision Q2 (near-term only), exactly three issues are filed by this PR for the imminent next-crate candidates. The render / AI-stack candidates (`smallvec`, `serde`, `glam`, `rayon`, `candle` / `burn`, `macroquad` / `egui`) stay **report-only** — they target code that does not exist yet, so no issue is filed for them this PR.
 
-- **`gp-gen` — seeded replay RNG (`rand` / `rand_chacha`):** _issue link pending (filed in subtask 2)_
-- **`gp-gen` — deterministic-order set (`IndexSet`):** _issue link pending (filed in subtask 2)_
-- **`gp-core` — `enumflags2` for `legal_mask`:** _issue link pending (filed in subtask 2)_
+- **`gp-gen` — seeded replay RNG (`rand` / `rand_chacha`):** [#49](https://github.com/maratik123/graphite-gp/issues/49)
+- **`gp-gen` — deterministic-order set (`IndexSet`):** [#50](https://github.com/maratik123/graphite-gp/issues/50)
+- **`gp-core` — `enumflags2` for `legal_mask`:** [#51](https://github.com/maratik123/graphite-gp/issues/51)
 
 ## Notes
 
