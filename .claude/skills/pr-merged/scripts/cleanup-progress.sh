@@ -19,6 +19,12 @@
 #      issue) from false-matching.
 #   5. `basename <spec>.spec.md` -> spec-base name
 #   6. Delete ai-docs/plans/<spec-base>.progress.md (if it exists)
+#   6a. Branch-name fallback -- only runs when step 6 did NOT delete a file
+#      (ISSUE_NUM empty, or SPEC_PATH empty): `${PREV_BRANCH#*/}` strips the
+#      first `<prefix>/` (the /task branch convention is `<prefix>/<spec-base>`,
+#      single slash) to recover <spec-base>, then deletes
+#      ai-docs/plans/<spec-base>.progress.md if it exists. Covers /task PRs
+#      that have no tracking issue at all.
 #   7. Delete ai-docs/pr-comments/pr-<PR_NUM>.progress.md (the fallback path
 #      used by /pr-commented for PRs not produced by /task)
 #   8. Delete ai-docs/ci-fixes/pr-<PR_NUM>.progress.md (the fallback path
@@ -51,13 +57,15 @@
 #   manual non-/task PR, or `/task` PR whose body convention drifted, or a
 #   /main-ci-failed-produced PR which has no upstream tracking issue):
 #   prints a one-line warning to STDERR naming the PR and branch, skips the
-#   /task-progress-file deletion, proceeds to the fallback + secondary
-#   probe paths.
+#   issue/spec-driven progress-file deletion, then attempts the
+#   branch-name fallback (step 6a) before proceeding to the pr-comments /
+#   ci-fixes fallback + secondary probe paths.
 # - `SPEC_PATH` empty (issue number derived but no spec carries
 #   `Tracked in: #<ISSUE_NUM>` -- e.g. PR closes a satellite issue without
 #   its own /task spec): prints a one-line warning to STDERR naming the
-#   issue number, skips the /task-progress-file deletion, proceeds to the
-#   fallback + secondary probe paths.
+#   issue number, skips the issue/spec-driven progress-file deletion, then
+#   attempts the branch-name fallback (step 6a) before proceeding to the
+#   pr-comments / ci-fixes fallback + secondary probe paths.
 # - `RUN_ID` empty (PR body has no `**Tracked in run:** <run-id>` line --
 #   the common case: every /task PR, every /pr-ci-failed PR, every manual
 #   PR. Only /main-ci-failed-produced PRs carry the line.): silent
@@ -100,6 +108,8 @@ ISSUE_NUM=$(printf '%s' "${PR_BODY}" \
   | head -n1 \
   | grep -oE '[0-9]+$')
 
+SPEC_DRIVEN_DELETE=0
+
 if [ -z "${ISSUE_NUM}" ]; then
   printf 'pr-merged: PR #%s body has no Closes/Fixes/Resolves #N line; skipping spec-driven progress-file cleanup for %s.\n' "${PR_NUM}" "${PREV_BRANCH}" >&2
 else
@@ -107,8 +117,24 @@ else
   if [ -n "${SPEC_PATH}" ]; then
     SPEC_BASE=$(basename "${SPEC_PATH}" .spec.md)
     rm -f "ai-docs/plans/${SPEC_BASE}.progress.md"
+    SPEC_DRIVEN_DELETE=1
   else
     printf 'pr-merged: no /task spec matches Tracked in: #%s (derived from PR #%s, branch %s); skipping spec-driven progress-file cleanup.\n' "${ISSUE_NUM}" "${PR_NUM}" "${PREV_BRANCH}" >&2
+  fi
+fi
+
+# Fallback: PRs with no tracking issue (ISSUE_NUM empty) or no matching spec
+# (SPEC_PATH empty) still have a /task-produced progress file on disk --
+# derive its name from the branch instead of the issue/spec linkage. The
+# /task branch convention is `<prefix>/<spec-base>` (single slash), and the
+# progress file shares that <spec-base>. Only fires when the spec-driven
+# path above did NOT already delete a file, so the primary success path is
+# left undisturbed.
+if [ "${SPEC_DRIVEN_DELETE}" -eq 0 ]; then
+  BRANCH_BASE="${PREV_BRANCH#*/}"
+  if [ -f "ai-docs/plans/${BRANCH_BASE}.progress.md" ]; then
+    rm -f "ai-docs/plans/${BRANCH_BASE}.progress.md"
+    printf 'pr-merged: deleted ai-docs/plans/%s.progress.md via branch-name fallback (PR #%s had no tracking-issue linkage).\n' "${BRANCH_BASE}" "${PR_NUM}"
   fi
 fi
 
