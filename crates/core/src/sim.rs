@@ -6,6 +6,12 @@
 
 use crate::geom::{Corridor, Point, supercover};
 use crate::track::{RaceDir, StartFinish};
+use enumflags2::bitflags;
+
+/// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
+/// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
+/// guideline C-REEXPORT).
+pub use enumflags2::BitFlags;
 
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -33,7 +39,13 @@ impl CarState {
 ///
 /// Diagonal acceleration in a single turn is forbidden — this is the
 /// foundation of every braking-distance argument in the design.
+#[bitflags]
+#[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+// `#[bitflags]`-generated code triggers `clippy::use_self` (nursery) against
+// the enum's own declaration span; no `Self`-eligible code exists in this
+// hand-written block.
+#[allow(clippy::use_self)]
 pub enum Action {
     /// `(0, 0)` — hold velocity. Always available; the basis of V=1 liveness.
     Coast,
@@ -105,8 +117,11 @@ pub fn legal_move(d: &Corridor, s: CarState, a: Action) -> bool {
 
 /// The legal-action mask for `s`, in [`Action::ALL`] order. Consumed by the
 /// player UI, the AI policy (as the pre-softmax `−inf` mask), and the oracle.
-pub fn legal_mask(d: &Corridor, s: CarState) -> [bool; 5] {
-    Action::ALL.map(|a| legal_move(d, s, a))
+pub fn legal_mask(d: &Corridor, s: CarState) -> BitFlags<Action> {
+    Action::ALL
+        .into_iter()
+        .filter(|&a| legal_move(d, s, a))
+        .collect()
 }
 
 /// Advances one car by one (assumed-legal) action, returning the new state.
@@ -215,7 +230,7 @@ mod tests {
         for a in Action::ALL {
             assert!(!legal_move(&d, s, a));
         }
-        assert_eq!(legal_mask(&d, s), [false; 5]);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
     }
 
     #[test]
@@ -231,6 +246,30 @@ mod tests {
         for a in Action::ALL {
             assert!(!legal_move(&d, s, a));
         }
-        assert_eq!(legal_mask(&d, s), [false; 5]);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+    }
+
+    #[test]
+    fn legal_mask_contains_exactly_the_legal_actions() {
+        // AC2: legal_mask contains exactly the actions for which legal_move is
+        // true. Carve a corridor so the car at the center has only Coast/East/West
+        // drivable — North/South lead off the carved shape — a proper subset of
+        // Action::ALL, so the check is non-vacuous in both directions.
+        let mut d = Corridor::new(Point::new(0, 0), 3, 3);
+        d.set(Point::new(1, 1), true);
+        d.set(Point::new(2, 1), true);
+        d.set(Point::new(0, 1), true);
+        let s = CarState {
+            x: 1,
+            y: 1,
+            vx: 0,
+            vy: 0,
+        };
+        let mask = legal_mask(&d, s);
+        for a in Action::ALL {
+            assert_eq!(mask.contains(a), legal_move(&d, s, a));
+        }
+        assert!(!mask.is_empty());
+        assert_ne!(mask, BitFlags::all());
     }
 }

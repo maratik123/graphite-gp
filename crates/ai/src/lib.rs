@@ -5,7 +5,7 @@
 //! softmax → sampled action. Bots move through the exact same `legal_move` /
 //! crash / collision layers as the player.
 
-use gp_core::sim::{Action, CarState};
+use gp_core::sim::{Action, BitFlags, CarState};
 use gp_core::track::TrackArtifact;
 
 /// Honest input features for one car (design doc §5): kinematics in the
@@ -38,6 +38,6 @@ pub fn extract_features(_track: &TrackArtifact, _me: CarState, _rivals: &[CarSta
 /// error-prone one — a spread of difficulty from a single network.
 ///
 /// TODO(4): the MLP forward pass + masked sampling.
-pub fn policy_action(_features: &Features, _mask: [bool; 5], _temperature: f32) -> Action {
+pub fn policy_action(_features: &Features, _mask: BitFlags<Action>, _temperature: f32) -> Action {
     todo!("policy forward + masked sampling (design doc §5)")
 }

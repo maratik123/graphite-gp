@@ -54,7 +54,7 @@ policy) are still `todo!()`. See the `TODO(<block>)` markers.
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 52 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety)
+cargo test             # 53 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
