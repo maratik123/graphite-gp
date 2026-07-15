@@ -48,16 +48,14 @@ Search: `ast-index` first (see [`.claude/rules/ast-index.md`](.claude/rules/ast-
 
 ## API Stability
 
-> **AXIOM — Pre-publish: clean breaks. No compat shims.**
-> The project has **not** been published to crates.io and has no downstream clients. Public API may be freely renamed, removed, or restructured without backward-compat shims, deprecation layers, or `#[deprecated]` wrappers.
+> **AXIOM — No API-stability contract. Clean breaks, always. No compat shims.**
+> graphite-gp is a **game application**, not a library — it is **never** published to crates.io and has **no** downstream clients. There is no external API-stability contract to preserve, now or in the future. Public API may be freely renamed, removed, or restructured at any time without backward-compat shims, deprecation layers, or `#[deprecated]` wrappers.
 >
 > | If you're tempted to... | Do this instead |
 > |---|---|
 > | Add `pub use OldName as NewName;` "for compat" | **REMOVE** the alias — make the clean rename |
 > | Wrap removed fn with `#[deprecated] pub fn old() -> _ { new() }` | **DELETE** the wrapper — call sites update directly |
 > | Keep both old and new APIs side-by-side temporarily | Pick one — old is gone |
-
-Revisit this rule before the first `cargo publish`.
 
 ## API Naming
 
