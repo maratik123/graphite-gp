@@ -335,6 +335,13 @@ impl Corridor {
 /// overflows (its operands are taken relative to `a`, so `|cr| ≤ 2·|dx|·|dy|`).
 /// Adversarial full-range `i32` endpoints lie outside the documented domain and
 /// are not supported.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "bounded-chord precondition above: |v| << 1.5e9 per move, so the \
+              i64-widened cross product (|cr| <= 2*|dx|*|dy|) cannot overflow \
+              within the documented domain; a giant-chord overflow test is \
+              infeasible (~1e18-cell scan)"
+)]
 pub fn supercover(a: Point, b: Point) -> Vec<Point> {
     let dx = i64::from(b.x) - i64::from(a.x);
     let dy = i64::from(b.y) - i64::from(a.y);
