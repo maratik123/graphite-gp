@@ -184,52 +184,44 @@ impl Rect {
 /// Ф4). Points outside the box are, by definition, not in `D`.
 #[derive(Clone, Debug, Default)]
 pub struct Corridor {
-    origin: Point,
-    width: i32,
-    height: i32,
+    rect: Rect,
     cells: Vec<bool>,
 }
 
 impl Corridor {
     /// A new, empty corridor over the box `[origin, origin + (width, height))`.
     ///
-    /// # Panics
-    ///
-    /// Panics if `width` or `height` is negative — corridor dimensions must be
-    /// non-negative.
-    pub fn new(origin: Point, width: i32, height: i32) -> Self {
-        assert!(
-            width >= 0 && height >= 0,
-            "corridor dimensions must be non-negative"
-        );
-        // `width`/`height` are asserted `>= 0` immediately above, so the product
-        // is non-negative and the `usize` cast cannot lose sign.
-        #[allow(clippy::cast_sign_loss)]
-        let cell_count = (width * height) as usize;
-        Self {
+    /// Unsigned `width`/`height` make a negative dimension unrepresentable, so no
+    /// validation is needed and the constructor is infallible.
+    pub fn new(origin: Point, width: usize, height: usize) -> Self {
+        let rect = Rect {
             origin,
-            width,
-            height,
-            cells: vec![false; cell_count],
+            size: Size::new(width, height),
+        };
+        Self {
+            cells: vec![false; rect.size.area()],
+            rect,
         }
     }
 
     /// The bounding-box origin — its minimum-coordinate corner.
     pub const fn origin(&self) -> Point {
-        self.origin
+        self.rect.origin
     }
-    /// The bounding-box width, in cells (columns); always `>= 0`.
-    pub const fn width(&self) -> i32 {
-        self.width
+    /// The bounding-box width, in cells (columns).
+    pub const fn width(&self) -> usize {
+        self.rect.size.width
     }
-    /// The bounding-box height, in cells (rows); always `>= 0`.
-    pub const fn height(&self) -> i32 {
-        self.height
+    /// The bounding-box height, in cells (rows).
+    pub const fn height(&self) -> usize {
+        self.rect.size.height
     }
 
     /// Is `p` a drivable point of `D`?
     pub fn contains(&self, p: Point) -> bool {
-        self.index(p).is_some_and(|i| self.cells[i])
+        // Delegates only the *index* to `rect`; in-box ≠ drivable, so this is not
+        // `Rect::contains`.
+        self.rect.index(p).is_some_and(|i| self.cells[i])
     }
 
     /// Mark `p` drivable / not drivable. No-op if `p` is outside the box.
@@ -249,32 +241,23 @@ impl Corridor {
         self.cells.iter().all(|&c| !c)
     }
 
-    const fn index(&self, p: Point) -> Option<usize> {
-        let (dx, dy) = (p.x - self.origin.x, p.y - self.origin.y);
-        if dx < 0 || dy < 0 || dx >= self.width || dy >= self.height {
-            return None;
-        }
-        // `dx`,`dy` lie in `[0, width) × [0, height)` by the guard above, so the
-        // flat index is non-negative and the `usize` cast cannot lose sign.
-        #[allow(clippy::cast_sign_loss)]
-        let idx = (dy * self.width + dx) as usize;
-        Some(idx)
+    fn index(&self, p: Point) -> Option<usize> {
+        self.rect.index(p)
     }
 
     /// The number of cells in the bounding box (`width × height`).
-    // `width`/`height` are non-negative (asserted in `new`), so the product is
-    // non-negative and the `usize` cast cannot lose sign.
-    #[allow(clippy::cast_sign_loss)]
     const fn area(&self) -> usize {
-        (self.width * self.height) as usize
+        self.rect.size.area()
     }
 
     /// Every cell point in the bounding box, in row-major (`y`-outer) order.
     fn box_points(&self) -> impl Iterator<Item = Point> {
-        let origin = self.origin;
-        let (width, height) = (self.width, self.height);
-        (0..height)
-            .flat_map(move |dy| (0..width).map(move |dx| Point::new(origin.x + dx, origin.y + dy)))
+        self.rect.points()
+    }
+
+    /// Whether `p` lies on the bounding-box border.
+    fn on_border(&self, p: Point) -> bool {
+        self.rect.on_border(p)
     }
 }
 

@@ -68,8 +68,7 @@ fn flood_component(
     let mut stack = vec![seed];
     while let Some(p) = stack.pop() {
         out.push(p);
-        let (dx, dy) = (p.x - d.origin().x, p.y - d.origin().y);
-        if dx == 0 || dy == 0 || dx == d.width() - 1 || dy == d.height() - 1 {
+        if d.on_border(p) {
             touches_boundary = true;
         }
         for n in p.neighbors4() {
@@ -149,8 +148,8 @@ pub fn bounded_complement_components(d: &Corridor) -> usize {
 /// [`geodesic_bfs`]: CorridorScratch::geodesic_bfs
 #[derive(Clone, Debug)]
 pub struct CorridorScratch {
-    width: i32,
-    height: i32,
+    width: usize,
+    height: usize,
     /// `stamp[i] == generation` ⟺ cell `i` was visited by the current query.
     stamp: Vec<u32>,
     /// The current query's stamp value; bumped once per [`geodesic_bfs`] call.
@@ -304,8 +303,8 @@ mod tests {
     /// `(x, y)` cells marked drivable.
     fn corridor(
         origin: (Coord, Coord),
-        w: Coord,
-        h: Coord,
+        w: usize,
+        h: usize,
         drivable: &[(Coord, Coord)],
     ) -> Corridor {
         let mut d = Corridor::new(Point::new(origin.0, origin.1), w, h);
