@@ -280,8 +280,16 @@ pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
         }
         for side in Side::ALL {
             let (dx, dy) = side.delta();
-            let neighbour = Point::new(cell.x + dx, cell.y + dy);
-            if !d.contains(neighbour) {
+            // NOTE: does not reuse the saturating `Point::neighbors4` — a
+            // saturated self-neighbour would test `d.contains(cell) == true`
+            // and wrongly suppress a real boundary wall. A coordinate-overflowing
+            // neighbour is off the representable grid, hence ∉ D, hence its side
+            // must emit a wall — checked_add maps `None` to exactly that.
+            let neighbour_in_d = match (cell.x.checked_add(dx), cell.y.checked_add(dy)) {
+                (Some(x), Some(y)) => d.contains(Point::new(x, y)),
+                (None, _) | (_, None) => false,
+            };
+            if !neighbour_in_d {
                 walls.push(Wall { cell, side });
             }
         }
@@ -557,6 +565,25 @@ mod tests {
             ControlFlow::<()>::Continue(())
         });
         assert_eq!(second, geodesic_layers(&d, Point::new(1, 3)));
+    }
+
+    #[test]
+    fn walls_of_lone_cell_at_i32_min_origin_emits_all_four_without_panic() {
+        // AC4: a 1×1 box anchored at i32::MIN. The west/south neighbours underflow
+        // i32 (cell.x - 1, cell.y - 1); the checked-add chain must map that
+        // off-grid case to "emit wall" (not panic, not skip — an underflowing
+        // neighbour is unambiguously ∉ D). East/north are off-box in the ordinary
+        // (non-overflowing) sense, confirming both paths emit correctly.
+        let d = corridor((i32::MIN, i32::MIN), 1, 1, &[(i32::MIN, i32::MIN)]);
+        let expected: HashSet<Wall> = [
+            wall(i32::MIN, i32::MIN, Side::East),
+            wall(i32::MIN, i32::MIN, Side::West),
+            wall(i32::MIN, i32::MIN, Side::North),
+            wall(i32::MIN, i32::MIN, Side::South),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(wall_set(&d), expected);
     }
 
     #[test]
