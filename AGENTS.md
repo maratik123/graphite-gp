@@ -82,7 +82,7 @@ Thin by design — this project grows its own style rules through the learning l
 - **Magic numbers:** numeric literals with semantic meaning → module-level `const SCREAMING_SNAKE_CASE`, not inline. Self-evident constants (`0`, `1`, `-1`, `2`) and test fixtures exempt.
 - **Documentation:** every public item has at least a one-line `///`; broken intra-doc links are denied. See [`ai-docs/doc-convention.md`](ai-docs/doc-convention.md).
 - **Error types:** `thiserror` for new error enum/struct; hand-rolled `Display`/`Error` only where the derive cannot express it.
-- **File size:** target 200–400 lines per `.rs` file excluding `#[cfg(test)]`; refactor larger files before merge unless exempt (single `match`/state machine, `macro_rules!`).
+- **File size:** soft 500/800, hard 1000/1500 (excl./incl. `#[cfg(test)]`) — refactor before merge unless exempt (codegen output, single `match`/state machine, `macro_rules!`); per-fn `clippy::too_many_lines` (>100); counter-rule — don't over-split (one-struct-per-file is not Rust idiom).
 
 See [`ai-docs/code-style.md`](ai-docs/code-style.md) for the canonical (growing) reference.
 
