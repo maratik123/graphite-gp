@@ -19,6 +19,16 @@ Strict clippy: `cargo clippy --workspace --all-targets -- -D warnings`. No blank
 ## Rust idioms
 Prefer idiomatic Rust over literal ports. Comparison/combinator helpers (`.min`/`.max`/`.clamp`/`Option::or`/`Option::filter`) over explicit `if`/`match`. **`gp-core` is integer-only and deterministic** — no floating point in `geom`/`sim` (design doc §3a); floats are confined to `gp-render` and `gp-ai` feature/curve code.
 
+## Integer safety
+`gp-core` targets zero production panics; integer arithmetic and conversions MUST be overflow- and signedness-safe by construction.
+
+- Reach for the explicit-semantics method that matches intent: `checked_*` → `Option`/`None` on out-of-range; `saturating_*` → clamp to bound; `wrapping_*`/`overflowing_*` → explicit modular; `strict_*` → always-panic (even in release) for a true invariant; `abs_diff` → unsigned magnitude of a difference; `carrying_*`/`borrowing_*` → multi-word chains.
+- Prefer `usize::try_from(i32)?` / `u32::try_from(...)` over `as` casts wherever an out-of-domain input could overflow or lose sign — `try_from` folds the negative-value guard into the conversion (no explicit `< 0` check, no `#[allow(clippy::cast_sign_loss)]`).
+- Raw `+`/`-`/`*`/`/` are allowed only where operands are knowingly bounded so no overflow, signedness issue, or division-by-zero can occur — and that safety rests on an assumption, so it MUST be covered by a test that exercises the bound.
+- Do NOT defer overflow/signedness safety as "out of scope" when the surrounding change is already hardening the same code path.
+
+Mechanically enforced by `clippy::arithmetic_side_effects = "deny"` (workspace-wide) plus pedantic's cast lints — every raw op / unsafe cast is flagged at commit/CI time; bounded-counter exceptions are allow-listed with a justifying comment. See [Lints that mechanically enforce…](#lints-that-mechanically-enforce-parts-of-this-convention).
+
 ## Magic numbers
 Semantic numeric literals → module-level `const SCREAMING_SNAKE_CASE`. Self-evident constants (`0`, `1`, `-1`, `2`) and test fixtures exempt.
 
@@ -69,5 +79,6 @@ CI runs `cargo clippy --workspace --all-targets -- -D warnings` (with `CARGO_BUI
 - `clippy::doc_markdown` (via pedantic) — flags un-backticked `CamelCase` identifiers in prose. Owned by [`doc-convention.md`](doc-convention.md).
 - `clippy::too_many_lines` (via pedantic, > 100) — canonical fn-level size signal. Owned by [File size](#file-size).
 - `large_stack_frames` / `large_stack_arrays` (`deny`) — size-aware thresholds from the root `clippy.toml` (`stack-size-threshold` / `array-size-threshold`). Owned by [Linter posture](#linter-posture).
+- `clippy::arithmetic_side_effects = "deny"` — raw `+`/`-`/`*`/`/` on integers flagged unless allow-listed with a justifying comment. Owned by [Integer safety](#integer-safety).
 - `-D warnings` posture — every clippy warning is an error. Owned by [Linter posture](#linter-posture).
 - `cargo fmt -- --check` (rustfmt enforcement) — line length, whitespace, layout. Owned by [Source files](#source-files).

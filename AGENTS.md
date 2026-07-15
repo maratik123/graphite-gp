@@ -88,14 +88,15 @@ See [`ai-docs/code-style.md`](ai-docs/code-style.md) for the canonical (growing)
 
 ## Dependency Versions
 
-> **AXIOM — Query live state BEFORE asserting any claim about an external dep or the project's own dep graph. Memory is stale.**
+> **AXIOM — Query live state BEFORE asserting any claim about an external dep, the project's own dep graph, or an external tool's flags/behavior. Memory is stale.**
 >
 > | If you're about to write... | Verify first with |
 > |---|---|
 > | A specific version of crate `X` | `curl -sS "https://crates.io/api/v1/crates/X" \| jq -r '.crate.max_stable_version'` |
 > | A claim that `X` is / isn't / would-be-added-as a dep in this project | `grep -r '<X>' --include='Cargo.toml' .` AND `cargo tree --invert <X>` (catches transitive presence) |
+> | A specific flag / subcommand / capability of an external tool (`cargo`, `gh`, `actionlint`, …) — e.g. "`cargo test` supports `--keep-going`" | `cargo <cmd> --help` (or run the command), or read the offline docs at `~/.rustup/toolchains/stable-*/share/doc/`. **Never assert a tool flag from memory.** |
 >
-> If your draft contains substrings like *"would add"*, *"introduce X as a dep"*, *"pull in X"*, *"avoid X as a dep"*, *"X is not currently a dependency"* — **STOP**, run the `grep` + `cargo tree --invert` check, and either rewrite with the actual trade-off (perf / feature-gate / test-prod parity / binary-size) or drop the claim.
+> If your draft contains substrings like *"would add"*, *"introduce X as a dep"*, *"pull in X"*, *"avoid X as a dep"*, *"X is not currently a dependency"*, *"supports `--flag`"*, *"takes `--flag`"*, *"passing `--flag`"* — **STOP**, run the relevant check above (`grep` + `cargo tree --invert` for deps; `--help` for tool flags), and either rewrite with the verified fact or drop the claim.
 >
 > See [`ai-docs/dependency-versions.md`](ai-docs/dependency-versions.md) for the lookup recipes. Apply the pinning rule to the **observed** version, never the remembered one.
 
