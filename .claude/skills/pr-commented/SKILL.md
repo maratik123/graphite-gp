@@ -177,9 +177,28 @@ Trivial fixes (typo, rename, single-call rewrite, comment fix, test addition, do
 
 ### Step 4 — Fix (single commit per invocation)
 
-- Apply every `fix`-classified change in-place. Stage explicitly by name (never `git add -A` / `git add .`).
-- Update the progress file's per-thread rows as you go (set `Diff SHA: <pending>` for now).
-- Run gates **before** commit:
+- **Delegate the `fix`-classified code-writing to `code-writer`** (Mode B — single-fix delegate). The orchestrator does NOT open `Edit` for the fixes; it hands `code-writer` the set of `fix` threads (each thread's `path:line`, verbatim reviewer comment, and the concrete change requested). `code-writer` **authors** all the fix edits (NOT a transcribed diff), stays within each thread's target (no scope expansion), runs the gates, and returns **WITHOUT committing** — the orchestrator owns the single commit below and the Step-5 self-review.
+
+  ```
+  Agent(subagent_type="code-writer", prompt="
+    Single-fix delegate mode (Mode B). Author every fix-classified review-comment change for PR #<N> round <M>. Do NOT commit; return a summary of edits + gate results.
+
+    Fix threads (author a change for each; stay within each thread's target — no scope expansion):
+    - <path:line> — <verbatim reviewer comment> — requested change: <one-liner>
+    - …
+
+    Author the concrete edits (reason them out — not a transcribed diff), then run:
+      cargo build
+      cargo test
+      cargo clippy --workspace --all-targets -- -D warnings
+      cargo fmt
+      RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps --workspace   (only if public API changed)
+      actionlint <changed-workflow-file>                             (only if a .github/workflows/*.yml changed)
+    Return WITHOUT committing: per-thread edits (file:line + one-liner each) and gate results.
+  ")
+  ```
+- Update the progress file's per-thread rows from `code-writer`'s return (set `Diff SHA: <pending>` for now).
+- **Orchestrator: stage explicitly by name (never `git add -A` / `git add .`) and re-confirm the gates before the single commit:**
   - `cargo build` — refreshes `Cargo.lock`.
   - `cargo test` — full suite.
   - `cargo fmt -- --check`.
@@ -303,7 +322,7 @@ Re-invoke /pr-commented after the reviewer responds to the open threads.
 | Step 0 | All four sources fetched; resolved threads kept for context |
 | Step 2 | Every thread has a category; `objection` rows have user confirmation; pause-triggered threads resolved |
 | Step 3 | No fix touches `*.design.md`; no fix > 5 files / > ~30 lines |
-| Step 4 | `cargo build` / `test` / `fmt --check` / `clippy --workspace --all-targets -- -D warnings` clean; `cargo doc` clean if API changed; `actionlint` clean if workflows changed; single commit; staged explicitly |
+| Step 4 | Fix edits authored by `code-writer` (Mode B, no commit); `cargo build` / `test` / `fmt --check` / `clippy --workspace --all-targets -- -D warnings` clean; `cargo doc` clean if API changed; `actionlint` clean if workflows changed; single commit orchestrator-owned; staged explicitly |
 | Step 5 | `self-review` APPROVE (≤ 3 attempts) |
 | Step 6 | `git push` succeeded; `gh pr view` read; per-thread replies posted; only `fix` / `already-fixed` / uncontroversial `defer` resolved; `objection` / `clarify` unresolved |
 | Step 7 | Progress file closed for this round; summary printed |
