@@ -36,10 +36,14 @@ Semantic numeric literals → module-level `const SCREAMING_SNAKE_CASE`. Self-ev
 `thiserror` for new error enum/struct; hand-rolled `Display`/`Error` only where the derive cannot express it.
 
 ## Deterministic collections
-`gp-core` physics is deterministic (integer-only; `docs/design.md §3a`), and track generation / replay / AI training must reproduce bit-for-bit. **Production code MUST NOT use `std::collections::HashMap` / `HashSet`** — their iteration order is randomised (per-process `RandomState` seed), which silently breaks reproducibility. Prefer:
+`gp-core` physics is deterministic (integer-only; `docs/design.md §3a`), and track generation / replay / AI training must reproduce bit-for-bit — including **across platforms and toolchain versions**: a replay stores only the seed and *regenerates* its track (`docs/design.md §2 [N4]`, `§5 [M3]` — the seeded integer path is bit-deterministic; only `f32` bot features may diverge, and those are mitigated separately). **Production code MUST NOT rely on `std::collections::HashMap` / `HashSet` iteration order.** That order is the `hashbrown` table (slot) layout — std documents every `HashMap`/`HashSet` iterator as *"arbitrary order"* and guarantees nothing about it across releases, so relying on it silently breaks cross-toolchain reproducibility.
 
-- `indexmap::IndexMap` / `IndexSet` when insertion-order iteration + hashing is wanted;
-- `std::collections::BTreeMap` / `BTreeSet` when sorted-key iteration is wanted.
+For order that reaches output, pick by the order semantics you need (both keep membership O(1)):
+
+- `std::collections::BTreeMap` / `BTreeSet` — sorted-key iteration, zero-dependency, stable across toolchains. Needs `Ord` on the key; `gp-core`'s integer `Point` derives `Eq + Hash` but **not** `Ord` yet, so this costs a small, deliberate derive addition.
+- `indexmap::IndexMap` / `IndexSet` — insertion-order iteration, independent of any hasher. Needs only `Eq + Hash` (`Point` already has them) but adds the `indexmap` dependency.
+
+**A fixed / seeded `BuildHasher` (`HashMap::with_hasher`) is NOT an escape hatch.** It pins the hash *values*, not the *slot layout* that determines iteration order, so a `HashMap`/`HashSet` iterated into output still diverges after a `hashbrown` / toolchain bump. Seeding removes only the per-process `RandomState`; same-binary determinism ≠ cross-build reproducibility. A fixed-hasher `HashMap`/`HashSet` used purely for **membership** (`contains` / `insert`, never iterated into output) is the sole production-safe use — but `IndexSet` / `BTreeSet` already give O(1) membership without the footgun, so prefer them.
 
 Test-only `HashSet` / `HashMap` under `#[cfg(test)]` (order-independent membership asserts) are **unaffected** — the ban is on production iteration determinism, not on test scratch collections.
 
