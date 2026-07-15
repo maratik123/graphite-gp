@@ -208,19 +208,36 @@ Run the mapped local reproducer command. Capture exit code and the last ~100 lin
 
 ### Step 4 — Diagnose and fix
 
-Root-cause the failure from the log + reproducer output. Two paths:
+Root-cause the failure from the log + reproducer output. Three paths:
 
-- **Inline-fix classes** (`fmt`, `clippy`, `doc`, `actionlint`) — mechanical / lint-shaped failures. Edit the offending file(s); re-run the reproducer until green. Stage explicitly by name (never `git add -A` / `git add .`).
-- **Delegation classes** (`test`, `build`) when the failure is a genuine regression (root cause unclear from the log alone, or the fix requires a multi-file change): **delegate to `/bugfix`**. `/bugfix` owns the full Trace → Root cause → Fix → self-review → push loop and exits with the fix landed. `/pr-ci-failed` exits at delegation. Audit-trail: surface the failing run URL to `/bugfix` so its trace file records it.
-- **`other`** — pause and surface to user. May map to either path.
+- **Mechanical single-command fixes — STAY INLINE** with the orchestrator: `fmt` (`cargo fmt`), an auto-`--fix`-able `clippy` lint, an `actionlint`-guided workflow-YAML one-liner, a `doc` typo. Deterministic, no code-writing reasoning — spawning a sonnet subagent to run `cargo fmt` is pure latency/context overhead. Edit the offending file(s); re-run the reproducer until green. Stage explicitly by name (never `git add -A` / `git add .`).
+- **Substantive code-writing — DELEGATE to `code-writer`** (Mode B). A `clippy` or `doc` failure whose fix needs a real code change — a logic restructure to satisfy a lint, rewriting a broken doctest — is genuine code-writing, so hand it to the `code-writer` subagent. It authors the fix from the class + reproducer + log context (NOT a transcribed diff), stays within the failing surface, re-runs the reproducer + gates, and returns **WITHOUT committing** (the orchestrator owns Step 5 self-review and the Step-6 commit):
 
-For inline-fix classes only, continue to Step 5–7 below.
+  ```
+  Agent(subagent_type="code-writer", prompt="
+    Single-fix delegate mode (Mode B). Author the fix for this PR-CI <class> failure. Do NOT commit; return a summary of edits + gate results.
+
+    Failing class: <clippy|doc>
+    Log excerpt / lint name: <verbatim failing-step evidence>
+    Local reproducer (currently RED): <reproducer command from the per-class table>
+
+    Author the concrete edits (reason them out — not a transcribed diff), stay within the failing surface (no scope expansion), then re-run the reproducer until GREEN plus:
+      cargo clippy --workspace --all-targets -- -D warnings
+      cargo fmt
+      RUSTDOCFLAGS=\"-D warnings\" cargo doc --no-deps --workspace   (doc class)
+    Return WITHOUT committing: the edits (file:line + one-liner each) and gate results.
+  ")
+  ```
+- **Genuine `test` / `build` regressions — route to `/bugfix`** (unchanged) when the root cause is unclear from the log alone, or the fix requires a multi-file change. `/bugfix` owns the full Trace → Root cause → Fix → self-review → push loop and exits with the fix landed. `/pr-ci-failed` exits at that delegation. Audit-trail: surface the failing run URL to `/bugfix` so its trace file records it.
+- **`other`** — pause and surface to user. May map to any path.
+
+For the mechanical-inline and `code-writer`-delegated paths, continue to Step 5–7 below; the `/bugfix` path exits this skill at delegation.
 
 > **Workflow YAML edit gate.** If the fix touches `.github/workflows/*.yml`, run `actionlint <file>` locally **before** `git add` (AGENTS.md `## Build & Test` axiom — the same gate `/task` enforces). Non-negotiable.
 
 **Spec Amendment recipe** — fires BEFORE Step 5 when the fix diff touches `ai-docs/plans/*.spec.md` (or `done/*.spec.md`). See [`reference.md` § Spec Amendment recipe (pr-ci-failed surface)](reference.md#spec-amendment-recipe-pr-ci-failed-surface) for the detection trigger, sub-flow, and FORBIDDEN-reasoning list.
 
-**Write progress at this step boundary** before further tool calls: rewrite this round's `**current_step:**` to `Round M Step 4 — fix applied (inline)` or `Round M Step 4 — delegated to /bugfix`; append a `### Decisions log (round M)` bullet recording the fix path (one line, prefixed `Step 4:`). If the Spec Amendment recipe fired, append a second bullet recording the design / design-review verdicts (prefixed `Step 4 (spec amendment):`).
+**Write progress at this step boundary** before further tool calls: rewrite this round's `**current_step:**` to `Round M Step 4 — fix applied (inline)`, `Round M Step 4 — delegated to code-writer`, or `Round M Step 4 — delegated to /bugfix`; append a `### Decisions log (round M)` bullet recording the fix path (one line, prefixed `Step 4:`). If the Spec Amendment recipe fired, append a second bullet recording the design / design-review verdicts (prefixed `Step 4 (spec amendment):`).
 
 ### Step 5 — Self-review (mandatory; loops with Step 4, cap 3)
 
@@ -331,7 +348,7 @@ Re-invoke /pr-ci-failed after the next CI run if it turns red again.
 | Step 1 | Progress file located (or fallback created); round section appended |
 | Step 2 | Class assigned; reproducer command chosen |
 | Step 3 | Local reproducer ran; PASS or NO-REPRODUCE explicitly recorded |
-| Step 4 | Fix applied (inline) OR delegation to `/bugfix` triggered; `actionlint` clean if any workflow YAML touched |
+| Step 4 | Fix applied (inline mechanical) OR delegated to `code-writer` (substantive clippy/doc) OR delegated to `/bugfix` (test/build); `actionlint` clean if any workflow YAML touched |
 | Step 5 | `self-review` APPROVE (≤ 3 attempts) |
 | Step 6 | `cargo build` / `test` / `fmt --check` / `clippy --workspace --all-targets -- -D warnings` clean; `cargo doc` clean if API changed; single commit; staged explicitly |
 | Step 7 | `git push` succeeded; `gh pr view` read; `gh pr edit` ran iff body contradicts diff |
