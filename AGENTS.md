@@ -32,8 +32,19 @@ cargo clippy --workspace --all-targets -- -D warnings   # strict lint (covers te
 cargo fmt                                                # fix formatting
 cargo fmt --check                                       # check only
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace   # doc gate
+actionlint .github/workflows/<file>.yml                 # required gate for any new/modified workflow file
 cargo run -p gp-game                                    # run the graphite-gp binary
 ```
+
+> **AXIOM — `actionlint` MUST pass before `git add` on any modified `.github/workflows/*.yml`.**
+> Required gate, **same status as `cargo build` and `cargo clippy --workspace --all-targets -- -D warnings`.** Never bypass.
+>
+> | If you see... | Action |
+> |---|---|
+> | `M .github/workflows/<name>.yml` in `git status` | Run `actionlint <file>` (pass every changed workflow file in one invocation) **before** `git add` |
+> | `actionlint` reports any error | Fix it. **NEVER** bypass. |
+>
+> What `actionlint` catches that `cargo` cannot: runner-version mismatches, deprecated action versions, expression-syntax errors, shell-quoting issues.
 
 > **AXIOM — Every project instruction file Claude loads per invocation MUST stay below 40,000 chars.**
 > Harness-enforced soft cap; crossing it imposes measurable per-invocation cost on every subagent spawn, `/task`, and review pass. Project-side **35,000-char early warning** gives one full `/task` cycle of headroom. Applies to `AGENTS.md`, `CLAUDE.md`, every `.claude/skills/**/*.md`, every `.claude/agents/**.md`, every `.claude/rules/*.md`, and `ai-docs/{code-style,doc-convention,context,agent-writing-style,corrections-log}.md`.
@@ -84,6 +95,8 @@ See [`ai-docs/code-style.md`](ai-docs/code-style.md) for the canonical (growing)
 > | A specific version of crate `X` | `curl -sS "https://crates.io/api/v1/crates/X" \| jq -r '.crate.max_stable_version'` |
 > | A claim that `X` is / isn't / would-be-added-as a dep in this project | `grep -r '<X>' --include='Cargo.toml' .` AND `cargo tree --invert <X>` (catches transitive presence) |
 >
+> If your draft contains substrings like *"would add"*, *"introduce X as a dep"*, *"pull in X"*, *"avoid X as a dep"*, *"X is not currently a dependency"* — **STOP**, run the `grep` + `cargo tree --invert` check, and either rewrite with the actual trade-off (perf / feature-gate / test-prod parity / binary-size) or drop the claim.
+>
 > See [`ai-docs/dependency-versions.md`](ai-docs/dependency-versions.md) for the lookup recipes. Apply the pinning rule to the **observed** version, never the remembered one.
 
 When adding or editing dependencies in `Cargo.toml`:
@@ -111,6 +124,7 @@ When adding or editing dependencies in `Cargo.toml`:
 - Stage explicitly; **never** `git add -A` / `git add .`.
 - **Before every `git commit` during a PR task**, stage `ai-docs/learnings.md` with related code. **After every push**, give a post-push learning entry its own commit.
 - **Never** `git commit --no-verify` (or any hook-skip flag) — fix the hook.
+- **`gh … --body` vs the commit-block hook.** The commit-block hook matches `git[[:space:]]+commit`, so a `gh issue create` / `gh pr create` / `gh pr comment` invocation whose `--body` argument *contains* that substring (e.g. a body mentioning `git commit`) is falsely blocked — use `--body-file <path>` instead of inlining the body.
 - **NEVER** batch a `git commit` / data-dependent `AskUserQuestion` in the same turn as the `Edit`/subagent call producing its inputs; verify with `git diff --cached --stat` first.
 - **CI-fix commits get self-review too.** Spawn `self-review` before pushing any CI-fix commit.
 - **No "too simple" step-skip in `/task`.** Steps 6 / 7 / 10 are MANDATORY; user authorisation is the only bypass.
@@ -266,7 +280,7 @@ Run `/improve` when **≥3 unescalated correction entries**, **≥2 unescalated 
 
 - Unit tests in the same file under a `#[cfg(test)]` module. Integration tests in `tests/`.
 - Use `rstest` for parameterized tests when useful; `mockall` for mocking traits; `pretty_assertions` encouraged for diffs.
-- Assert with `assert_eq!` / `assert_matches!`. **`assert_matches!` formats the scrutinee with `{:?}` on mismatch, so its type MUST impl `Debug`**; if the scrutinee is non-`Debug`, leave `assert!(matches!(...))` as-is — do NOT add a production `#[derive(Debug)]` to satisfy a test-only assertion.
+- Assert with `assert_eq!` / `assert_matches!`. **`assert_matches!` formats the scrutinee with `{:?}` on mismatch, so its type MUST impl `Debug`** (`Result` needs both `T` + `E`; `Box<dyn Trait>` needs a `Debug` supertrait) — `assert!(matches!(...))` imposes no such bound. If the scrutinee is non-`Debug`, leave `assert!(matches!(...))` as-is — do NOT add a production `#[derive(Debug)]` to satisfy a test-only assertion. Counting `assert!(matches!)` sites for a migration: the multi-line message form is invisible to single-line `rg 'assert!\(matches!'` — use `rg -U`.
 - Test names as `snake_case` describing behaviour: `returns_empty_when_not_found`.
 - No `unwrap()` in production code without a justifying comment; `expect("reason")` preferred.
 - No `#[allow(clippy::...)]` / `#[allow(dead_code)]` unless unavoidable (with justification).
