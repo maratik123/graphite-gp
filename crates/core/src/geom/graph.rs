@@ -100,6 +100,11 @@ pub fn flood_fill(d: &Corridor, seed: Point) -> Vec<Point> {
 ///
 /// Counts maximal 4-connected clusters of drivable cells over the bounding box;
 /// `0` for an empty corridor. Deterministic (design doc §1, §3a).
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "count <= cell count <= area (the box is iterated by d.box_points(), \
+              so count is bounded by the allocated cell count) — cannot overflow usize"
+)]
 pub fn component_count(d: &Corridor) -> usize {
     let mut visited = vec![false; d.area()];
     let mut out = Vec::new();
@@ -108,6 +113,7 @@ pub fn component_count(d: &Corridor) -> usize {
         out.clear();
         flood_component(d, |q| d.contains(q), &mut visited, p, &mut out);
         if !out.is_empty() {
+            // bound: count <= cell count <= area (see fn doc precondition)
             count += 1;
         }
     }
@@ -123,6 +129,11 @@ pub fn component_count(d: &Corridor) -> usize {
 /// region (design doc §2, Ф4 — "exactly one bounded hole" is then `== 1`). Works
 /// regardless of box margin; deterministic; `0` for an empty or fully-drivable
 /// corridor.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "count <= cell count <= area (the box is iterated by d.box_points(), \
+              so count is bounded by the allocated cell count) — cannot overflow usize"
+)]
 pub fn bounded_complement_components(d: &Corridor) -> usize {
     let mut visited = vec![false; d.area()];
     let mut out = Vec::new();
@@ -131,6 +142,7 @@ pub fn bounded_complement_components(d: &Corridor) -> usize {
         out.clear();
         let touches_boundary = flood_component(d, |q| !d.contains(q), &mut visited, p, &mut out);
         if !out.is_empty() && !touches_boundary {
+            // bound: count <= cell count <= area (see fn doc precondition)
             count += 1;
         }
     }
@@ -206,6 +218,12 @@ impl CorridorScratch {
     /// `self`'s buffers via an O(1) generation-stamp reset (AC6). Intra-layer order
     /// is fixed and reproducible (AC5), but callers must treat a layer only as an
     /// unordered tie set.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "distance <= cell count <= area (each cell is stamped/visited at \
+                  most once per query, so the layer count cannot exceed the \
+                  allocated cell count) — cannot overflow usize"
+    )]
     pub fn geodesic_bfs<B>(
         &mut self,
         d: &Corridor,
@@ -243,6 +261,7 @@ impl CorridorScratch {
                 }
             }
             std::mem::swap(&mut self.frontier, &mut self.next_frontier);
+            // bound: distance <= cell count <= area (see fn doc precondition)
             distance += 1;
         }
         None
