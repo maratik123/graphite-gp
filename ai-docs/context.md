@@ -16,7 +16,7 @@ From this duality, "a wall never crosses a point", "a car never touches a wall",
 
 | Crate | Block | Role |
 |-------|-------|------|
-| `gp-core` (`crates/core`) | **3a** | Pure, deterministic, integer-only physics core — `geom` (dual grid, supercover), `track` (the `TrackArtifact` contract), `sim` (`step`, `legal_move`, lap counter, crash, collisions). The shared dependency of render **and** AI. |
+| `gp-core` (`crates/core`) | **3a** | Pure, deterministic, integer-only physics core — `geom` (dual grid + `Size`/`Rect` value types, supercover, corridor-graph helpers), `track` (the `TrackArtifact` contract), `sim` (`step`, `legal_move`, lap counter, crash, collisions). The shared dependency of render **and** AI. |
 | `gp-gen` (`crates/gen`) | **1** | Track generation — coarse-block ring (infield-first) + local repair, phases Ф1–Ф7. |
 | `gp-render` (`crates/render`) | **2** | Rendering + UX — asphalt/walls derived from the corridor `D`. Visual language = the imported [design system](../docs/design-system/IMPORT.md); backend = **native Rust GUI** (tokens→consts, JSX components→widgets). |
 | `gp-ai` (`crates/ai`) | **4** | AI training — feedforward policy over honest local features, 5-action masked softmax. |
@@ -29,13 +29,13 @@ Dependency edges: `gen · render · ai → core`; `game → all`; `core` depends
 
 `{ D, walls, sf, race_dir, s_field, centerline, Vmax, tempo, fastest_lap, speed_heatmap }` (see `crates/core/src/track.rs` + `docs/design.md` §2). The AI frame is derived from the `s`-field gradient (`t̂ = normalize(∇s)`); the racing-line `centerline` curve is render-only.
 
-## Status (2026-07-14)
+## Status (2026-07-15)
 
 - Design: **finalized** (`docs/design.md`), reviewed across 4 rounds.
-- Code: **scaffold + first physics predicate** — module structure, `TrackArtifact` type, and stub APIs in place; the exact integer `supercover` predicate (block 3a, `crates/core/src/geom.rs`) is now implemented with its full §3 C4 test table (12 unit tests); the remaining algorithms are still `todo!()` (marked `TODO(<block>)`). Whole workspace builds clean.
+- Code: **scaffold + geom physics primitives** — module structure, `TrackArtifact` type, and stub APIs in place. `crates/core/src/geom/` (split into `mod.rs` + a private `graph.rs`) implements the exact integer `supercover` predicate (full §3 C4 test table) plus the corridor-graph helpers: 4-conn `flood_fill` / `component_count`, `bounded_complement_components` (the §2 Ф4 infield-hole test), in-`D` geodesic BFS (`CorridorScratch::geodesic_bfs` reusable-scratch visitor + eager `geodesic_layers`), and `walls_from_boundary` (Ф7 dual edges). The box/index math is factored into `Size { width, height }` (unsigned) + `Rect { origin, size }` value types; `Corridor` is `{ rect, cells }` with **unsigned** dimensions — negative dims are unrepresentable, so `Corridor::new` needs no `assert!` and **gp-core has zero production panics** (`Rect::index` is total via `checked_sub` + `usize::try_from`). `Wall` is `{ cell, side: Side }` (4-way outward `Side`). **45 gp-core unit tests.** The remaining `sim` / `gen` / `render` / `ai` algorithms are still `todo!()` (marked `TODO(<block>)`). Whole workspace builds clean.
 - **Visual base:** the Claude Design "Graphite GP Design System" is imported to [`docs/design-system/`](../docs/design-system/IMPORT.md) and adopted as the canonical visual language; render target is a **native Rust GUI** (design tokens/components are a spec to port, not runnable web code).
 - **CI / tooling:** GitHub Actions CI (`ubuntu-latest`) is in place — `changes`-gated format/build/test/clippy/docs + advisory Miri + `-pass` branch-protection gates, sccache, and a mandatory Linux software-Vulkan env-init in the `test` job (ready for the block-2 wgpu/Vulkan renderer). Plus Dependabot (cargo + github-actions), MSRV bumped to **1.97.0** (`resolver = "3"` retained — virtual workspace), `CARGO_BUILD_WARNINGS=deny`, and a strict workspace lint policy (`clippy::pedantic`/`nursery` = `deny`, `missing_docs`/`broken_intra_doc_links` = `deny`) in the root `Cargo.toml` + `clippy.toml`, each crate opting in via `[lints] workspace = true`. See [`code-style.md`](code-style.md) § Linter posture.
-- **Next implementation step:** continue block 3a — `step` (state advance), the signed lap counter, crash resolution, and car-collision resolution in `crates/core/src/sim.rs`, then the passability oracle. (`supercover` — the first 3a predicate and the shared foundation of `legal_move` + the oracle graph edge — is done.)
+- **Next implementation step:** continue block 3a — `step` (state advance), the signed lap counter, crash resolution, and car-collision resolution in `crates/core/src/sim.rs`, then the passability oracle. (`supercover` and the corridor-graph helpers — `flood_fill` / `component_count` / `bounded_complement_components`, geodesic BFS, `walls_from_boundary` — are done; `resolve_collisions` can now build nearest-free placement on `CorridorScratch::geodesic_bfs`, and `gen`'s Ф4 static-validation on the component/complement helpers.)
 
 ## Load-bearing details worth knowing before touching a block
 

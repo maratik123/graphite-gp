@@ -37,17 +37,22 @@ block 1, state + legal mask onto 3a).
 ## Status
 
 Early block 3a — module structure, the `TrackArtifact` contract, and stub APIs are
-in place; the exact integer `supercover` predicate (`crates/core`) is implemented
-with its full §3 C4 test table. The remaining algorithms (`step`, generation
-pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
-`TODO(<block>)` markers.
+in place; `crates/core/src/geom/` implements the exact integer `supercover`
+predicate (full §3 C4 test table) plus the corridor-graph helpers — 4-conn
+flood-fill / connected-component counting, `bounded_complement_components` (the
+§2 Ф4 infield-hole test), in-`D` geodesic BFS, and `walls_from_boundary` (dual
+edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
+value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
+production panics** (`Rect::index` is total via `checked_sub` + `try_from`). The
+remaining algorithms (`step`, generation pipeline, oracle, feature extraction,
+policy) are still `todo!()`. See the `TODO(<block>)` markers.
 
 ## Build
 
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 12 gp-core supercover tests green
+cargo test             # 45 gp-core tests green (supercover + corridor-graph + Size/Rect)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,

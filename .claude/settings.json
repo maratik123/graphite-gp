@@ -88,9 +88,6 @@
       "Edit(./**)",
       "Edit(~/.claude/**)",
       "Edit(.claude/**)",
-      "Write(./**)",
-      "Write(~/.claude/**)",
-      "Write(.claude/**)",
       "Bash(cargo *)",
       "Bash(git *)",
       "Bash(gh *)",
@@ -106,19 +103,14 @@
     "deny": [
       "Read(.idea/**)",
       "Edit(.idea/**)",
-      "Write(.idea/**)",
       "Read(**/.env)",
       "Read(**/.env.*)",
       "Edit(**/.env)",
       "Edit(**/.env.*)",
-      "Write(**/.env)",
-      "Write(**/.env.*)",
       "Read(**/secrets*)",
       "Read(**/.secrets*)",
       "Edit(**/secrets*)",
-      "Edit(**/.secrets*)",
-      "Write(**/secrets*)",
-      "Write(**/.secrets*)"
+      "Edit(**/.secrets*)"
     ]
   }
 }
