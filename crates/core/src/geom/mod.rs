@@ -37,10 +37,10 @@ impl Point {
     /// "needle's-eye" slips between two walls.
     pub const fn neighbors4(self) -> [Self; 4] {
         [
-            Self::new(self.x + 1, self.y),
-            Self::new(self.x - 1, self.y),
-            Self::new(self.x, self.y + 1),
-            Self::new(self.x, self.y - 1),
+            Self::new(self.x.saturating_add(1), self.y),
+            Self::new(self.x.saturating_sub(1), self.y),
+            Self::new(self.x, self.y.saturating_add(1)),
+            Self::new(self.x, self.y.saturating_sub(1)),
         ]
     }
 }
@@ -444,6 +444,40 @@ mod tests {
         ] {
             assert_eq!(cover_set(a, b), cover_set(b, a));
         }
+    }
+
+    #[test]
+    fn neighbors4_saturates_at_i32_max_without_panic() {
+        // AC4: the east/north neighbours of an i32::MAX-cornered point saturate
+        // rather than overflow; the non-saturating axis is a const-operand
+        // literal (i32::MAX - 1), not flagged by arithmetic_side_effects.
+        let p = Point::new(i32::MAX, i32::MAX);
+        assert_eq!(
+            p.neighbors4(),
+            [
+                Point::new(i32::MAX, i32::MAX),     // east: saturated self
+                Point::new(i32::MAX - 1, i32::MAX), // west: in-domain
+                Point::new(i32::MAX, i32::MAX),     // north: saturated self
+                Point::new(i32::MAX, i32::MAX - 1), // south: in-domain
+            ]
+        );
+    }
+
+    #[test]
+    fn neighbors4_saturates_at_i32_min_without_panic() {
+        // AC4: the west/south neighbours of an i32::MIN-cornered point saturate
+        // rather than underflow; the non-saturating axis is a const-operand
+        // literal (i32::MIN + 1), not flagged by arithmetic_side_effects.
+        let p = Point::new(i32::MIN, i32::MIN);
+        assert_eq!(
+            p.neighbors4(),
+            [
+                Point::new(i32::MIN + 1, i32::MIN), // east: in-domain
+                Point::new(i32::MIN, i32::MIN),     // west: saturated self
+                Point::new(i32::MIN, i32::MIN + 1), // north: in-domain
+                Point::new(i32::MIN, i32::MIN),     // south: saturated self
+            ]
+        );
     }
 
     #[test]
