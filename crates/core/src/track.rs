@@ -54,7 +54,7 @@ pub struct Centerline {
 }
 
 impl Centerline {
-    /// Sample the centerline at arc length `s`, wrapping around the closed loop.
+    /// Samples the centerline at arc length `s`, wrapping around the closed loop.
     ///
     /// TODO(1): interpolate between the nearest samples.
     pub fn at(&self, _s: f32) -> Option<CenterlineSample> {

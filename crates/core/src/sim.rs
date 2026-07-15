@@ -22,6 +22,7 @@ pub struct CarState {
 
 impl CarState {
     /// The car's current cell.
+    #[inline]
     pub const fn pos(self) -> Point {
         Point::new(self.x, self.y)
     }
@@ -57,6 +58,7 @@ impl Action {
     ];
 
     /// The acceleration `(a, b)` this action applies to velocity.
+    #[inline]
     pub const fn accel(self) -> (i32, i32) {
         match self {
             Self::Coast => (0, 0),
@@ -107,7 +109,7 @@ pub fn legal_mask(d: &Corridor, s: CarState) -> [bool; 5] {
     Action::ALL.map(|a| legal_move(d, s, a))
 }
 
-/// Advance one car by one (assumed-legal) action, returning the new state.
+/// Advances one car by one (assumed-legal) action, returning the new state.
 ///
 /// TODO(3a): apply `(vx',vy') = v + accel`, then `pos += (vx',vy')`.
 pub fn step(_d: &Corridor, _s: CarState, _a: Action) -> CarState {
@@ -133,21 +135,24 @@ impl Default for LapCounter {
 
 impl LapCounter {
     /// A new lap counter in the pre-race state (`raw()` is `-1`, `laps()` is `0`).
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Completed laps.
+    #[inline]
     pub fn laps(&self) -> i32 {
         self.counter.max(0)
     }
 
     /// Raw signed crossing count (may be negative before the race starts).
+    #[inline]
     pub const fn raw(&self) -> i32 {
         self.counter
     }
 
-    /// Register the move segment `from → to` against the S/F chord: `+1` for a
+    /// Registers the move segment `from → to` against the S/F chord: `+1` for a
     /// forward crossing (along `race_dir`), `−1` for a reverse one, at most one
     /// event per move. Scored *before* collision resolution — teleports never
     /// touch the counter.
@@ -178,7 +183,7 @@ pub fn resolve_crash(_d: &Corridor, _s: CarState) -> CarState {
     todo!("crash rule (design doc §3 [OPEN])")
 }
 
-/// Resolve several cars occupying the same point (design doc §3) — a layer
+/// Resolves several cars occupying the same point (design doc §3) — a layer
 /// *outside* movement physics.
 ///
 /// Each displaced car is moved to the nearest free point by in-`D` geodesic BFS

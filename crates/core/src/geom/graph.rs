@@ -12,18 +12,18 @@ use super::{Coord, Corridor, Point, Wall};
 
 /// One of a cell's four axis-aligned sides.
 ///
-/// The outward direction from a drivable cell toward a non-drivable neighbour
+/// The outward direction from a drivable cell toward a non-drivable neighbor
 /// (design doc §1). Variant order mirrors [`Point::neighbors4`]: east, west,
 /// north, south.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Side {
-    /// The +x side — toward the eastern neighbour.
+    /// The +x side — toward the eastern neighbor.
     East,
-    /// The -x side — toward the western neighbour.
+    /// The -x side — toward the western neighbor.
     West,
-    /// The +y side — toward the northern neighbour (`y` increases northward).
+    /// The +y side — toward the northern neighbor (`y` increases northward).
     North,
-    /// The -y side — toward the southern neighbour.
+    /// The -y side — toward the southern neighbor.
     South,
 }
 
@@ -31,7 +31,8 @@ impl Side {
     /// All four sides, in [`Point::neighbors4`] order: east, west, north, south.
     pub const ALL: [Self; 4] = [Self::East, Self::West, Self::North, Self::South];
 
-    /// The unit step `(dx, dy)` from a cell across this side to its neighbour.
+    /// The unit step `(dx, dy)` from a cell across this side to its neighbor.
+    #[inline]
     pub const fn delta(self) -> (Coord, Coord) {
         match self {
             Self::East => (1, 0),
@@ -89,6 +90,20 @@ fn flood_component(
 /// Returns the drivable cells 4-reachable from `seed` without leaving `D` (the
 /// seed itself included when drivable); empty when `seed ∉ D`. Deterministic: for
 /// a given corridor and seed the returned order is fixed (design doc §1, §3a).
+///
+/// # Examples
+///
+/// ```
+/// use gp_core::geom::{flood_fill, Corridor, Point};
+///
+/// let mut d = Corridor::new(Point::new(0, 0), 5, 5);
+/// for p in [Point::new(1, 1), Point::new(2, 1)] {
+///     d.set(p, true);
+/// }
+/// let mut cells = flood_fill(&d, Point::new(1, 1));
+/// cells.sort_by_key(|p| (p.y, p.x));
+/// assert_eq!(cells, vec![Point::new(1, 1), Point::new(2, 1)]);
+/// ```
 pub fn flood_fill(d: &Corridor, seed: Point) -> Vec<Point> {
     let mut visited = vec![false; d.area()];
     let mut out = Vec::new();
@@ -286,7 +301,7 @@ pub fn geodesic_layers(d: &Corridor, seed: Point) -> Vec<Vec<Point>> {
 
 /// The exact set of dual boundary edges (walls) of the corridor `D`.
 ///
-/// For every drivable cell and every [`Side`] whose neighbour is not in `D`,
+/// For every drivable cell and every [`Side`] whose neighbor is not in `D`,
 /// emits one [`Wall`] anchored to that cell and side. Because a `D ↔ ¬D` adjacency
 /// has exactly one drivable side, each boundary edge is emitted **exactly once**,
 /// and no edge lies between two `D` cells (design doc §1 duality). Feeds
@@ -300,15 +315,15 @@ pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
         for side in Side::ALL {
             let (dx, dy) = side.delta();
             // NOTE: does not reuse the saturating `Point::neighbors4` — a
-            // saturated self-neighbour would test `d.contains(cell) == true`
+            // saturated self-neighbor would test `d.contains(cell) == true`
             // and wrongly suppress a real boundary wall. A coordinate-overflowing
-            // neighbour is off the representable grid, hence ∉ D, hence its side
+            // neighbor is off the representable grid, hence ∉ D, hence its side
             // must emit a wall — checked_add maps `None` to exactly that.
-            let neighbour_in_d = match (cell.x.checked_add(dx), cell.y.checked_add(dy)) {
+            let neighbor_in_d = match (cell.x.checked_add(dx), cell.y.checked_add(dy)) {
                 (Some(x), Some(y)) => d.contains(Point::new(x, y)),
                 (None, _) | (_, None) => false,
             };
-            if !neighbour_in_d {
+            if !neighbor_in_d {
                 walls.push(Wall { cell, side });
             }
         }
@@ -588,10 +603,10 @@ mod tests {
 
     #[test]
     fn walls_of_lone_cell_at_i32_min_origin_emits_all_four_without_panic() {
-        // AC4: a 1×1 box anchored at i32::MIN. The west/south neighbours underflow
+        // AC4: a 1×1 box anchored at i32::MIN. The west/south neighbors underflow
         // i32 (cell.x - 1, cell.y - 1); the checked-add chain must map that
         // off-grid case to "emit wall" (not panic, not skip — an underflowing
-        // neighbour is unambiguously ∉ D). East/north are off-box in the ordinary
+        // neighbor is unambiguously ∉ D). East/north are off-box in the ordinary
         // (non-overflowing) sense, confirming both paths emit correctly.
         let d = corridor((i32::MIN, i32::MIN), 1, 1, &[(i32::MIN, i32::MIN)]);
         let expected: HashSet<Wall> = [
