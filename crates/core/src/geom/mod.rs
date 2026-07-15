@@ -332,7 +332,7 @@ impl Corridor {
 ///   with `cr = dx·(c.y − a.y) − dy·(c.x − a.x)`, evaluated with no floating point
 ///   anywhere (design doc §3a).
 /// - **Order-independent, duplicate-free.** The result is the exact cell set: as a
-///   set `supercover(a, b) == supercover(b, a)`, each cell is pushed exactly once
+///   set `supercover(a, b) == supercover(b, a)`, each cell is yielded exactly once
 ///   (the bounding-box scan visits every cell once), and both endpoint cells are
 ///   always present (a degenerate `a == b` yields exactly `{a}`).
 ///
@@ -349,7 +349,7 @@ impl Corridor {
 ///
 /// // A straight horizontal edge covers each cell it spans, endpoints included.
 /// let cells = supercover(Point::new(0, 0), Point::new(2, 0));
-/// assert_eq!(cells.len(), 3);
+/// assert_eq!(cells.count(), 3);
 /// ```
 #[allow(
     clippy::arithmetic_side_effects,
@@ -358,20 +358,16 @@ impl Corridor {
               within the documented domain; a giant-chord overflow test is \
               infeasible (~1e18-cell scan)"
 )]
-pub fn supercover(a: Point, b: Point) -> Vec<Point> {
+pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
     let dx = i64::from(b.x) - i64::from(a.x);
     let dy = i64::from(b.y) - i64::from(a.y);
     let bound = dx.abs() + dy.abs();
-    let mut cover = Vec::new();
-    for cx in a.x.min(b.x)..=a.x.max(b.x) {
-        for cy in a.y.min(b.y)..=a.y.max(b.y) {
+    (a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
+        (a.y.min(b.y)..=a.y.max(b.y)).filter_map(move |cy| {
             let cr = dx * (i64::from(cy) - i64::from(a.y)) - dy * (i64::from(cx) - i64::from(a.x));
-            if 2 * cr.abs() <= bound {
-                cover.push(Point::new(cx, cy));
-            }
-        }
-    }
-    cover
+            (2 * cr.abs() <= bound).then(|| Point::new(cx, cy))
+        })
+    })
 }
 
 #[cfg(test)]
@@ -382,7 +378,7 @@ mod tests {
     /// Collect a supercover into a `HashSet` so comparisons ignore iteration
     /// order (spec §4: the result is defined up to set equality).
     fn cover_set(a: Point, b: Point) -> HashSet<Point> {
-        supercover(a, b).into_iter().collect()
+        supercover(a, b).collect()
     }
 
     /// Build an expected cell set from `(x, y)` literals.
@@ -487,8 +483,8 @@ mod tests {
     #[test]
     fn no_duplicate_cells() {
         // AC6: each cell appears exactly once. A HashSet compare alone would hide a
-        // double-push, so assert the raw Vec length equals its deduped length.
-        let v = supercover(Point::new(0, 0), Point::new(1, 1));
+        // double-yield, so assert the raw Vec length equals its deduped length.
+        let v: Vec<Point> = supercover(Point::new(0, 0), Point::new(1, 1)).collect();
         assert_eq!(v.len(), v.iter().collect::<HashSet<_>>().len());
     }
 
