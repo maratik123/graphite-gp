@@ -37,7 +37,10 @@ When triggered (every design-defined group OR compaction detected):
 
 1. `cargo build` — ensure code compiles
 2. Update `ai-docs/plans/YYYY-MM-DD-name.progress.md` (format below)
-3. Launch ONE `Agent` Tool call per **group** (per the design's `## Handoff plan`). The Subagent owns all subtasks in its group and runs them sequentially in-context, committing after each: `Agent(subagent_type="general-purpose", prompt="Read ai-docs/plans/YYYY-MM-DD-name.progress.md and complete Group <X>'s subtasks <N>–<M>, then return")`
+3. Launch ONE `Agent` Tool call per **group** (per the design's `## Handoff plan`). **Read the group's marked implementor model + effort** from its Handoff-plan entry and spawn the `general-purpose` implementor with that **inline override** — the marker, not a fixed default, governs the spawn:
+   - **code** group (marked `sonnet`) → `Agent(subagent_type="general-purpose", model="sonnet", …)` run at effort **`medium` (pinned)**, 1M-token window.
+   - **instructions/harness** group (marked `opus`) → `Agent(subagent_type="general-purpose", model="opus", …)` with effort **NOT set** (inherited from the orchestrator, typically xHigh), 1M-token window.
+   The Subagent owns all subtasks in its group and runs them sequentially in-context, committing after each: `prompt="Read ai-docs/plans/YYYY-MM-DD-name.progress.md and complete Group <X>'s subtasks <N>–<M>, then return"`. Only this per-group implementor spawn takes the override; the quality-gate subagents (`design` / `design-review` / `self-review` / `spec-writer`) stay on Opus.
 4. Do NOT spawn one Agent per subtask. The group is the unit of fan-out; the subtask is the unit of commit.
 5. Do NOT continue in current context
 
@@ -95,7 +98,7 @@ The full format spec lives in the shared-templates directory: **[`ai-docs/templa
 1. Progress file = `ai-docs/plans/*.progress.md`. Updated at each checkpoint.
 2. On context reset: pass file path in Agent prompt: `"Read ai-docs/plans/YYYY-MM-DD-name.progress.md and continue"`
 3. `cargo build` BEFORE handoff — don't pass broken code
-4. Maximum 3 design-defined groups per task. If more needed — the task is too large, decompose into separate issues.
+4. Default maximum 4 design-defined groups per task; needing more than 4 is surfaced to the user for approval (not an automatic issue-split).
 
 ## Patterns
 
