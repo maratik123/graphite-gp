@@ -71,6 +71,42 @@ pub struct Wall {
     pub side: Side,
 }
 
+/// An unsigned grid extent, in cells: a `width` × `height` box size.
+///
+/// Unsigned fields make a negative dimension unrepresentable — the whole reason
+/// [`Corridor::new`] needs no non-negative-dimensions `assert!`. Mirrors [`Point`]'s
+/// derive set; a plain [`Copy`] value type.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Size {
+    /// Extent along `x`, in cells (columns).
+    pub width: usize,
+    /// Extent along `y`, in cells (rows).
+    pub height: usize,
+}
+
+impl Size {
+    /// A grid extent of `width` × `height` cells.
+    pub const fn new(width: usize, height: usize) -> Self {
+        Self { width, height }
+    }
+
+    /// The number of cells in the box (`width × height`).
+    ///
+    /// A raw `usize` multiply: real grid dimensions are ≪ `usize::MAX`, so a
+    /// product large enough to overflow is unreachable in the grid domain — a
+    /// [`Corridor`] of that cell count could not allocate its backing `Vec<bool>`
+    /// first. This is the same bounded-domain treatment as [`supercover`]'s
+    /// overflow precondition (`docs/design.md` §3 C4); not a panic-index entry.
+    pub const fn area(self) -> usize {
+        self.width * self.height
+    }
+
+    /// Whether the box has zero area (either dimension is `0`).
+    pub const fn is_empty(self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+}
+
 /// The corridor `D` — the set of drivable points/cells (design doc §1).
 ///
 /// Backed by a dense bitmap over a bounding box (`origin` + `width`×`height`) for
@@ -355,5 +391,37 @@ mod tests {
         ] {
             assert_eq!(cover_set(a, b), cover_set(b, a));
         }
+    }
+
+    #[test]
+    fn size_area_is_width_times_height() {
+        // AC1/AC10: area of a normal box is the product of its dimensions.
+        assert_eq!(Size::new(3, 4).area(), 12);
+        assert_eq!(Size::new(1, 1).area(), 1);
+    }
+
+    #[test]
+    fn size_zero_dimension_is_empty_with_zero_area() {
+        // AC1/AC10: a zero in either dimension → empty box, zero area.
+        for s in [Size::new(0, 5), Size::new(5, 0), Size::new(0, 0)] {
+            assert!(s.is_empty());
+            assert_eq!(s.area(), 0);
+        }
+    }
+
+    #[test]
+    fn size_nonzero_dimensions_are_not_empty() {
+        // AC1/AC10: both dimensions positive → not empty.
+        assert!(!Size::new(1, 1).is_empty());
+        assert!(!Size::new(3, 4).is_empty());
+    }
+
+    #[test]
+    fn size_default_is_empty_zero_area() {
+        // AC1/AC10: `Size::default()` is the empty `{0, 0}` box.
+        let s = Size::default();
+        assert_eq!(s, Size::new(0, 0));
+        assert!(s.is_empty());
+        assert_eq!(s.area(), 0);
     }
 }
