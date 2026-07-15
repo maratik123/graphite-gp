@@ -97,6 +97,21 @@ impl Size {
     /// [`Corridor`] of that cell count could not allocate its backing `Vec<bool>`
     /// first. This is the same bounded-domain treatment as [`supercover`]'s
     /// overflow precondition (`docs/design.md` §3 C4); not a panic-index entry.
+    ///
+    /// # Overflow precondition
+    ///
+    /// Holds for grid-realistic, [`Corridor`]-backed (allocatable) dimensions.
+    /// `Size` is a public, standalone-constructible type — a `Size { width:
+    /// usize::MAX, .. }` built directly by struct literal, bypassing
+    /// [`Corridor::new`], is representable but lies outside this documented
+    /// domain and is not supported (its `area()` would overflow).
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "bounded by allocatability: a Corridor of this many cells must \
+                  first allocate a Vec<bool> of that length, so a usize-overflowing \
+                  product is unreachable via Corridor::new — see the doc precondition \
+                  for the (unsupported) direct-struct-literal exception"
+    )]
     pub const fn area(self) -> usize {
         self.width * self.height
     }
@@ -141,6 +156,23 @@ impl Rect {
     /// Total and panic-free for every [`Point`]: out-of-box, negative-delta, and
     /// coordinate-overflowing inputs all yield `None`. Widening happens only in the
     /// checked `offset` conversion — there is no `as` cast in the index path.
+    ///
+    /// # Overflow precondition
+    ///
+    /// The final `dy * width + dx` multiply-add is guarded by the immediately
+    /// preceding `dx < width && dy < height`, so the result is always strictly
+    /// `< width * height` (== [`Size::area`]) — the same grid-realistic,
+    /// allocatable-dimensions domain as `area`'s. `Rect` is a public,
+    /// standalone-constructible type — a `Rect` built by struct literal with
+    /// adversarially large, unallocatable `width`/`height` near `usize::MAX`,
+    /// bypassing [`Corridor::new`], lies outside this documented domain and is
+    /// not supported.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "dx < width && dy < height (checked immediately above) bounds the \
+                  product strictly below width*height == Size::area, itself bounded \
+                  by allocatability (see Size::area's doc precondition)"
+    )]
     pub fn index(&self, p: Point) -> Option<usize> {
         let (dx, dy) = self.offset(p)?;
         (dx < self.size.width && dy < self.size.height).then(|| dy * self.size.width + dx)
@@ -168,6 +200,18 @@ impl Rect {
     /// `false` for any out-of-box point. Uses the `dx + 1 == width` form (never
     /// `width - 1`), so it is correct and underflow-free at `width`/`height` of `0`
     /// (a zero-dim box has no border cells).
+    ///
+    /// # Overflow precondition
+    ///
+    /// `dx + 1` / `dy + 1` are guarded by the preceding `dx < w && dy < h`, so
+    /// `dx ≤ w − 1` (resp. `dy ≤ h − 1`) and the sum cannot overflow `usize` for
+    /// any grid-realistic, allocatable box — the same domain as [`Size::area`].
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "dx < w && dy < h (checked immediately above) bounds dx+1/dy+1 \
+                  strictly below w+1/h+1, so the add cannot overflow in the \
+                  allocatable-dimensions domain (see Size::area's doc precondition)"
+    )]
     pub fn on_border(&self, p: Point) -> bool {
         let Some((dx, dy)) = self.offset(p) else {
             return false;
@@ -488,6 +532,15 @@ mod tests {
     }
 
     #[test]
+    fn size_area_large_in_domain_dims() {
+        // AC3: a large-but-in-domain product (50_000 x 50_000) exercises the
+        // documented overflow-precondition bound well beyond the tiny 3x4
+        // fixture, while staying portable on 32-bit targets too
+        // (usize::MAX >= 4_294_967_295 > 2_500_000_000).
+        assert_eq!(Size::new(50_000, 50_000).area(), 2_500_000_000);
+    }
+
+    #[test]
     fn size_zero_dimension_is_empty_with_zero_area() {
         // AC1/AC10: a zero in either dimension → empty box, zero area.
         for s in [Size::new(0, 5), Size::new(5, 0), Size::new(0, 0)] {
@@ -531,6 +584,17 @@ mod tests {
         assert_eq!(r.index(Point::new(2, 4)), Some(4)); // dx=0, dy=1
         assert_eq!(r.index(Point::new(3, 4)), Some(5)); // dx=1, dy=1
         assert_eq!(r.index(Point::new(5, 7)), Some(19)); // dx=3, dy=4 (last cell)
+    }
+
+    #[test]
+    fn rect_index_large_in_domain_dims() {
+        // AC3: a large-but-in-domain box (50_000 x 50_000) drives a large
+        // dy*width product through the documented overflow-precondition bound
+        // (49_999*50_000 = 2_499_950_000, + 12_345), plus a small in-box sanity
+        // cell.
+        let r = rect_at(0, 0, 50_000, 50_000);
+        assert_eq!(r.index(Point::new(12_345, 49_999)), Some(2_499_962_345));
+        assert_eq!(r.index(Point::new(1, 1)), Some(50_001));
     }
 
     #[test]
