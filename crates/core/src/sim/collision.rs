@@ -3,8 +3,8 @@
 
 use crate::geom::{Corridor, CorridorScratch, Point};
 use crate::sim::CarState;
+use rand::RngExt;
 use rand::seq::SliceRandom;
-use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
@@ -34,20 +34,21 @@ use std::ops::ControlFlow;
 ///
 /// # Determinism contract (AC3/AC7)
 ///
-/// Given the same `d`, `cars`, and `seed`, the output is byte-identical
-/// (including across 32-/64-bit targets). This holds because of two fixed
-/// rules that MUST NOT drift:
+/// `rng` is a caller-owned, long-lived physics RNG handle: this function
+/// draws from it but **never re-seeds it**. Given the same `d`, `cars`, and
+/// starting `rng` state, the output — and the state `rng` is left in — is
+/// byte-identical (including across 32-/64-bit targets). This holds because
+/// of two fixed rules that MUST NOT drift:
 ///
 /// - **(a) Canonical pre-shuffle group order.** `HashMap` iteration order is
 ///   *not* used for anything RNG-sensitive: the buckets are materialized into
 ///   a `Vec<Vec<usize>>` and sorted with
 ///   `groups.sort_unstable_by_key(|g| g[0])` — the unique min car index —
 ///   *before* any shuffle, giving a canonical, RNG-independent group order.
-/// - **(b) Fixed RNG-consumption order.** A single
-///   `ChaCha8Rng::seed_from_u64(seed)` is built, then consumed in exactly
-///   this sequence: `groups.shuffle(&mut rng)` (picks which group is
-///   processed first), then for each group in that shuffled order,
-///   `group.shuffle(&mut rng)` (picks the winner = post-shuffle index 0, and
+/// - **(b) Fixed RNG-consumption order.** `rng` is consumed in exactly this
+///   sequence: `groups.shuffle(&mut *rng)` (picks which group is processed
+///   first), then for each group in that shuffled order,
+///   `group.shuffle(&mut *rng)` (picks the winner = post-shuffle index 0, and
 ///   the displacement order of the rest), then for each loser (in that
 ///   order) a `u32` tie draw via `rng.random_range` — **only** when the
 ///   nearest-free BFS layer has more than one candidate cell
@@ -56,7 +57,7 @@ use std::ops::ControlFlow;
 /// The tie index is drawn as `u32` (matching `rand`'s own slice-index
 /// policy for `shuffle`), so the pick is reproducible across 32-/64-bit
 /// targets.
-pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64) {
+pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut ChaCha8Rng) {
     let mut buckets: HashMap<Point, Vec<usize>> = HashMap::new();
     for (i, car) in cars.iter().enumerate() {
         buckets.entry(car.pos()).or_default().push(i);
@@ -64,10 +65,9 @@ pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64) {
     let mut groups: Vec<Vec<usize>> = buckets.into_values().collect();
     groups.sort_unstable_by_key(|g| g[0]);
 
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    groups.shuffle(&mut rng);
+    groups.shuffle(&mut *rng);
     for group in &mut groups {
-        group.shuffle(&mut rng);
+        group.shuffle(&mut *rng);
     }
 
     // Phase 1 — winners (no RNG): the post-shuffle first car of every group
@@ -119,6 +119,7 @@ pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
 
     /// A car at rest at `(x, y)` with velocity `(vx, vy)`.
     fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
@@ -141,7 +142,8 @@ mod tests {
         let d = filled(5, 5);
         let mut cars = [car(2, 2, 1, 0)];
         let before = cars;
-        resolve_collisions(&d, &mut cars, 7);
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        resolve_collisions(&d, &mut cars, &mut rng);
         assert_eq!(cars, before);
     }
 
@@ -149,7 +151,8 @@ mod tests {
     fn ac8_three_into_one_cell_resolved_distinctly() {
         let d = filled(5, 5);
         let mut cars = [car(2, 2, 1, 0), car(2, 2, 0, 1), car(2, 2, -1, 0)];
-        resolve_collisions(&d, &mut cars, 7);
+        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        resolve_collisions(&d, &mut cars, &mut rng);
         // Exactly one car remains at (2,2); the other two are on distinct
         // free cells.
         let positions: Vec<Point> = cars.iter().map(|c| c.pos()).collect();
@@ -183,7 +186,8 @@ mod tests {
             car(2, 1, 0, 0),
             car(2, 3, 0, 0),
         ];
-        resolve_collisions(&d, &mut cars, 11);
+        let mut collision_rng = ChaCha8Rng::seed_from_u64(11);
+        resolve_collisions(&d, &mut cars, &mut collision_rng);
         let ring = [
             Point::new(1, 2),
             Point::new(3, 2),
@@ -214,7 +218,8 @@ mod tests {
         let d = filled(5, 5);
         let mut cars = [car(1, 2, 1, 0), car(2, 2, -1, 0)];
         let before = cars;
-        resolve_collisions(&d, &mut cars, 3);
+        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        resolve_collisions(&d, &mut cars, &mut rng);
         assert_eq!(cars, before);
     }
 
@@ -225,7 +230,8 @@ mod tests {
         // distinct final cells: A ends at (2,2), B ends at (0,2).
         let mut cars = [car(0, 2, 2, 0), car(2, 2, -2, 0)];
         let before = cars;
-        resolve_collisions(&d, &mut cars, 3);
+        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        resolve_collisions(&d, &mut cars, &mut rng);
         assert_eq!(cars, before);
     }
 
@@ -234,8 +240,10 @@ mod tests {
         let d = filled(5, 5);
         let mut cars_a = [car(2, 2, 1, 0), car(2, 2, 0, 1), car(2, 2, -1, 0)];
         let mut cars_b = cars_a;
-        resolve_collisions(&d, &mut cars_a, 99);
-        resolve_collisions(&d, &mut cars_b, 99);
+        let mut rng_a = ChaCha8Rng::seed_from_u64(99);
+        let mut rng_b = ChaCha8Rng::seed_from_u64(99);
+        resolve_collisions(&d, &mut cars_a, &mut rng_a);
+        resolve_collisions(&d, &mut cars_b, &mut rng_b);
         assert_eq!(cars_a, cars_b);
     }
 
@@ -246,14 +254,16 @@ mod tests {
         // a genuine intra-layer tie the seeded RNG must break reproducibly.
         let d = filled(5, 5);
         let mut cars = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
-        resolve_collisions(&d, &mut cars, 42);
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        resolve_collisions(&d, &mut cars, &mut rng);
         // Seed 42 deterministically picks (2,3) among the equidistant free
         // ring cells {(1,2), (3,2), (2,1), (2,3)}.
         assert_eq!(cars, [car(2, 2, 0, 0), car(2, 3, 0, 0)]);
 
         // A second independent run with the same seed reproduces exactly.
         let mut cars2 = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
-        resolve_collisions(&d, &mut cars2, 42);
+        let mut rng2 = ChaCha8Rng::seed_from_u64(42);
+        resolve_collisions(&d, &mut cars2, &mut rng2);
         assert_eq!(cars, cars2, "same seed must reproduce the same tie pick");
     }
 }
