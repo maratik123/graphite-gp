@@ -8,7 +8,7 @@
 //! which is what lets the golden guard derive its pixel probes instead of
 //! hardcoding them.
 //!
-//! Colours below are scaffold-local `Color32` consts, not the design-token
+//! Colors below are scaffold-local `Color32` consts, not the design-token
 //! module — #12 owns "design tokens → Rust consts" and supersedes these.
 
 use egui::{Color32, Painter, Pos2, Rangef, Rect, Stroke, StrokeKind, pos2};
@@ -106,9 +106,11 @@ fn geometry(rect: Rect) -> PlaceholderGeometry {
     }
 }
 
-/// Draw the scaffold placeholder frame into `rect`: the paper background, a
-/// graph-paper ruling + dot motif, one crisp-radius card, and one hairline
-/// stroke. Draws no text (design *Font-proof amendment*).
+/// Draws the scaffold placeholder frame into `rect`.
+///
+/// Paints the paper background, a graph-paper ruling + dot motif, one
+/// crisp-radius card, and one hairline stroke. Draws no text (design
+/// *Font-proof amendment*).
 ///
 /// `painter` is a borrowed draw context (design *Ownership override*) — this
 /// function does not own, construct, or store one. `rect` is explicit rather

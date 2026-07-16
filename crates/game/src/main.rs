@@ -13,7 +13,6 @@ use eframe::egui;
 
 /// The app shell. Currently draws only the `gp-render` scaffold placeholder —
 /// input, timing, and orchestration are block 3b's own future work.
-#[derive(Default)]
 struct GraphiteGpApp;
 
 impl eframe::App for GraphiteGpApp {
