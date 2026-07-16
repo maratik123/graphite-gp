@@ -129,8 +129,15 @@ impl SField {
     }
 
     /// The scalar distance `s` at `p`, or `None` if `p` is outside the band.
+    ///
+    /// Total: never panics, even if `dist` is shorter than `rect.area()` (a
+    /// hand-built `SField` violating the `dist.len() == rect.area()`
+    /// invariant `new` upholds) — an out-of-range index yields `None` rather
+    /// than indexing off the end.
     pub fn scalar_at(&self, p: Point) -> Option<u32> {
-        self.rect.index(p).and_then(|i| self.dist[i])
+        self.rect
+            .index(p)
+            .and_then(|i| self.dist.get(i).copied().flatten())
     }
 
     /// Whether `p` sits immediately against `gate`'s cut (a gate cell).
@@ -423,6 +430,26 @@ mod tests {
         assert_eq!(field.scalar_at(Point::new(2, 1)), Some(2));
         assert_eq!(field.scalar_at(Point::new(3, 1)), Some(3));
         assert_eq!(field.scalar_at(Point::new(0, 0)), None);
+    }
+
+    #[test]
+    fn scalar_at_is_total_even_when_dist_is_short() {
+        // A hand-built `SField` violating the `dist.len() == rect.area()`
+        // invariant `SField::new` upholds: a 2x2 rect (area 4) with only one
+        // `dist` entry.
+        let rect = Rect {
+            origin: Point::new(0, 0),
+            size: Size::new(2, 2),
+        };
+        let field = SField {
+            rect,
+            dist: vec![Some(0)],
+        };
+        // In-bounds cell backed by `dist` still reads back correctly.
+        assert_eq!(field.scalar_at(Point::new(0, 0)), Some(0));
+        // In-`rect` cell past the end of the short `dist` — must return
+        // `None`, not panic.
+        assert_eq!(field.scalar_at(Point::new(1, 1)), None);
     }
 
     #[test]
