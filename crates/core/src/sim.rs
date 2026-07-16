@@ -276,6 +276,114 @@ mod tests {
     }
 
     #[test]
+    fn step_from_rest_shifts_by_action_delta() {
+        // AC5: from rest, each action's velocity equals its accel delta, and
+        // position shifts by that same delta.
+        let s = CarState {
+            x: 5,
+            y: 5,
+            vx: 0,
+            vy: 0,
+        };
+        assert_eq!(
+            step(s, Action::Coast),
+            CarState {
+                x: 5,
+                y: 5,
+                vx: 0,
+                vy: 0
+            }
+        );
+        assert_eq!(
+            step(s, Action::East),
+            CarState {
+                x: 6,
+                y: 5,
+                vx: 1,
+                vy: 0
+            }
+        );
+        assert_eq!(
+            step(s, Action::West),
+            CarState {
+                x: 4,
+                y: 5,
+                vx: -1,
+                vy: 0
+            }
+        );
+        assert_eq!(
+            step(s, Action::North),
+            CarState {
+                x: 5,
+                y: 6,
+                vx: 0,
+                vy: 1
+            }
+        );
+        assert_eq!(
+            step(s, Action::South),
+            CarState {
+                x: 5,
+                y: 4,
+                vx: 0,
+                vy: -1
+            }
+        );
+    }
+
+    #[test]
+    fn step_advances_by_new_velocity() {
+        // AC1: position advances by the *new* velocity, not the old one. If the
+        // body advanced by the old velocity, this would yield y = 1 instead of 2.
+        let s = CarState {
+            x: 0,
+            y: 0,
+            vx: 3,
+            vy: 1,
+        };
+        assert_eq!(
+            step(s, Action::North),
+            CarState {
+                x: 3,
+                y: 2,
+                vx: 3,
+                vy: 2
+            }
+        );
+
+        // Symmetric x-axis case.
+        let s2 = CarState {
+            x: 2,
+            y: 7,
+            vx: -1,
+            vy: 4,
+        };
+        assert_eq!(
+            step(s2, Action::East),
+            CarState {
+                x: 2,
+                y: 11,
+                vx: 0,
+                vy: 4
+            }
+        );
+    }
+
+    #[test]
+    fn step_is_deterministic() {
+        // AC2: step is a pure function — repeated calls on the same input yield
+        // the same output.
+        let s = CarState {
+            x: 2,
+            y: 7,
+            vx: -1,
+            vy: 4,
+        };
+        assert_eq!(step(s, Action::East), step(s, Action::East));
+    }
+
+    #[test]
     fn legal_mask_contains_exactly_the_legal_actions() {
         // AC2: legal_mask contains exactly the actions for which legal_move is
         // true. Carve a corridor so the car at the center has only Coast/East/West
