@@ -44,19 +44,29 @@ Runs **alongside** Step 1 and Step 1b — a third parallel signal source, **NOT*
 Read **both**:
 
 1. `~/.claude/projects/<project-path-encoded>/memory/MEMORY.md` (the index) first — fast enumeration of memory filenames; avoids a blind `ls`.
-2. Each individual `~/.claude/projects/<project-path-encoded>/memory/feedback_*.md` file — the detection rule below operates on each file's `name:` frontmatter, `description:` frontmatter, or first sentence, so per-file content is required.
+2. Each individual **memory file** — every `*.md` sibling of `MEMORY.md` in that directory **except `MEMORY.md` itself** (the index, not a memory). Read each file's frontmatter, then **select the feedback-type memories: those whose `metadata.type` is `feedback`.** Those are this step's subject — the successor of the `feedback_*.md` files earlier revisions globbed for. The detection rule below operates on each selected file's `name:` frontmatter, `description:` frontmatter, or first sentence, so per-file content is required.
 
-For each `feedback_*.md`, decide whether it **names a workflow primitive**. The recognised primitives form a closed enumerated set:
+> **Identify feedback memories by `metadata.type`, NOT by filename — and read this before reporting an empty sweep.**
+>
+> The auto-memory layer's convention **changed**: it once produced `feedback_<slug>.md` filenames, and now produces **topic-named** files (`project-overview.md`, `golden-tests-and-miri.md`, …) carrying a `metadata.type` of `user` | `feedback` | `project` | `reference`. Earlier revisions of this step globbed `feedback_*.md`; against the current layer that glob matches nothing, so Step 1c could not yield a candidate and an always-empty pass was indistinguishable from a genuinely clean one — a silent no-op wearing the costume of a completed check.
+>
+> **The old convention was real, not imagined** — do not write it off as a shape that "never existed". Two skills cite specific `feedback_*.md` files as the provenance of live rules, one of them surfaced by this very step: `.claude/skills/pr-merged/SKILL.md` (`feedback_remove_merged_branches.md`, *"Carrot surfaced via `/improve` 2026-05-22 Step 1c"*) and `.claude/skills/interview/SKILL.md` (`feedback_interview_delegate_to_subagent.md`). Those citations are historical provenance records; the files behind them are gone, and that is expected.
+>
+> **Empty is a legitimate outcome — but distinguish the two reasons and say which one applies.** *(a)* Zero `*.md` siblings at all, or an encoded path that does not resolve → a **tooling failure until proven otherwise**; verify the path before reporting. *(b)* Files present, none with `metadata.type: feedback` → a genuinely clean sweep; report it as such, naming the types you did find. As of 2026-07-16 this project is case (b): six memories, types `user` ×1 / `project` ×3 / `reference` ×2, zero `feedback`. Same shape as the `jq`-prints-`null` trap in AGENTS.md § *Dependency Versions*: absence-of-signal from a mis-aimed query is not evidence of absence — but a correctly-aimed query returning nothing IS.
+
+For each selected feedback memory, decide whether it **names a workflow primitive**. The recognised primitives form a closed enumerated set:
 
 <!-- anchor: auto-memory-primitive-keywords -->
 ```
 Slash commands:
   /task, /improve, /pr-commented, /bugfix, /interview, /context-reset,
-  /project-review, /ai-audit, /triage, /main-ci-failed, /pr-ci-failed, /pr-merged
+  /project-review, /ai-audit, /triage, /main-ci-failed, /pr-ci-failed, /pr-merged,
+  /next, /dependabot-pr, /verify-change
 
 Agent stems (file stems under .claude/agents/):
   self-improve, design, design-review, review-findings, self-review,
-  spec-writer, learnings-escalation-audit, triage-runner
+  spec-writer, learnings-escalation-audit, triage-runner,
+  code-writer, image-check
 
 AGENTS.md section headings:
   ## Workflow, ## Propagation Rule, ## Learning Log, ## Code Style
@@ -66,14 +76,14 @@ Verb-phrase keywords:
   boundary rule
 ```
 
-A new Skill / Subagent / section heading / verb-phrase keyword added to the project requires an **additive update** to this block. The set is not auto-generated from `.claude/` listings (over-broad — would match incidental references).
+A new Skill / Subagent / section heading / verb-phrase keyword added to the project requires an **additive update** to this block. The set is not auto-generated from `.claude/` listings (over-broad — would match incidental references). **Because the block is hand-maintained it drifts silently:** it omitted `code-writer`, `image-check`, `/next`, `/dependabot-pr`, and `/verify-change` until 2026-07-16, so memories naming exactly those primitives could not be detected. When running Step 1c, spot-check the block against `ls .claude/agents/` + `ls .claude/skills/` and report any drift in the `## Auto-memory candidates` section rather than silently sweeping with a stale set.
 
-**Cross-check against `ai-docs/learnings.md`.** A `feedback_*.md` is a **candidate** iff BOTH hold:
+**Cross-check against `ai-docs/learnings.md`.** A memory file is a **candidate** iff BOTH hold:
 
 1. It names ≥ 1 primitive from the block above, AND
 2. There is **no** `Kind: validation` entry in `ai-docs/learnings.md` whose `### YYYY-MM-DD — [category] — [short description]` heading OR `Rule:` field mentions the same primitive (substring match, case-insensitive — Subagent judgement applies for fuzzy topical matches).
 
-A single `feedback_*.md` naming N primitives can be a candidate if **any** subset of the named primitives is uncovered; the per-feedback-file collapse rule applies (one candidate row per file, listing the uncovered primitive(s) in the cross-check column — see Step 2c).
+A single memory file naming N primitives can be a candidate if **any** subset of the named primitives is uncovered; the per-memory-file collapse rule applies (one candidate row per file, listing the uncovered primitive(s) in the cross-check column — see Step 2c).
 
 **Prohibitions (the privacy boundary — read carefully):**
 
@@ -122,7 +132,7 @@ Pairs with Step 1c the way Step 2b pairs with Step 1b — takes the candidate se
 |---|---|
 | 1 + named workflow primitive + no matching `Kind: validation` entry in `learnings.md` | Emit a `## Auto-memory candidates` row; **needs parent-thread `Surface` consent before any routing decision** |
 
-**Per-feedback-file collapse rule.** One row per `feedback_*.md`, NOT one row per uncovered primitive. If a single `feedback_*.md` names multiple uncovered primitives, list them comma-separated in the *Workflow primitive named* column and combine their cross-check verdicts in the *Cross-check verdict* column. This keeps the consent UI legible (the user sees one prompt per memory file, not per primitive).
+**Per-memory-file collapse rule.** One row per feedback memory file, NOT one row per uncovered primitive. If a single memory names multiple uncovered primitives, list them comma-separated in the *Workflow primitive named* column and combine their cross-check verdicts in the *Cross-check verdict* column. This keeps the consent UI legible (the user sees one prompt per memory file, not per primitive).
 
 **Report-section shape.** The `## Auto-memory candidates` section is the third section in the Step 6 report, after `## Corrections proposed` and `## Carrots proposed`. Row format:
 
@@ -131,7 +141,7 @@ Pairs with Step 1c the way Step 2b pairs with Step 1b — takes the candidate se
 
 | Auto-memory file | Workflow primitive named | Cross-check verdict | Consent action |
 |---|---|---|---|
-| `feedback_<name>.md` | `<primitive>` (comma-separated if multiple) | no `Kind: validation` in `learnings.md` mentions `<primitive>` | (awaiting user) |
+| `<topic-slug>.md` (`metadata.type: feedback`) | `<primitive>` (comma-separated if multiple) | no `Kind: validation` in `learnings.md` mentions `<primitive>` | (awaiting user) |
 ```
 
 **Consent action column** records the parent thread's `AskUserQuestion` result. Initial value is `(awaiting user)`. After the parent thread dispatches the consent prompt and the user picks one option:
@@ -166,11 +176,44 @@ The verb chosen for a promoted rule encodes its shape. Carrot rules (`Kind: vali
 
 ### Step 3: Propose concrete changes
 
+> **AXIOM — A learnings entry's factual claims are CANDIDATE-truth, not ground-truth. Re-verify every one you carry into a proposal — wherever in the entry it sits.**
+>
+> Recurrence licenses the entry's **pattern** — the behaviour to change. It licenses **nothing** about the *facts* wrapped around that pattern (a cited `file:line`, a "precedent already in-tree" list, a lint's group, a tool's flag, a count). Those are unaudited recollections written mid-task, and nothing checks them (see *Why this is on you alone* below). Copying one into an instruction file is not quotation — it is **re-assertion under a more authoritative byline**.
+>
+> **The split is pattern-vs-facts — NOT `Rule:`-line-vs-narrative.** Do not treat a fact as safe because it sits in the `Rule:` line; a false one is just as likely there as in the `What happened:` story. The two entries **whose facts failed review** in the 2026-07-16 batch are one of each — and the `Rule:`-line case is the one that reached production text. (Two *of the nine escalated*, and only because those two claims happened to be audited; the other seven were never checked, so treat this as a floor, not a rate.)
+>
+> - **False fact in the narrative** — the const-fn entry's `What happened:` closes with *"Precedent already in-tree: `Size::area`, `Rect::index`, `CarState::pos` are all `pub const fn`."* `Rect::index` is **not**: `geom/mod.rs:178` is `pub fn`, because its body ends in `.then(|| …)` and `bool::then` is conditionally-const but not const-stable (`E0658`), so `missing_const_for_fn` correctly declines to fire. It is a **counter-example** — an agent checking the cited precedent learns the rule backwards. (That entry's `Rule:` line cites only `Size::area`, which is accurate.)
+> - **False fact in the `Rule:` line** — the DOC-1 entry (`learnings.md:75`) states *"`clippy::nursery` (denied here) polices their shape (`too_long_first_doc_paragraph`, `doc_markdown`, `missing_panics_doc`)."* The latter two are **pedantic**, not nursery. This one was escalated **verbatim** into `code-writer.md` and `task/reference.md` before review caught it.
+>
+> Both are the same defect — a false fact carried into an instruction file — and their position in the entry had nothing to do with it. Verify facts wherever they sit.
+>
+> This matters more here than anywhere else in the workspace, because of an asymmetry unique to this Subagent:
+>
+> - `ai-docs/learnings.md` is **append-only** (Boundary rule 1). A false claim in an entry can **never be corrected at its source** — a later entry can contradict it, but the original text stays, and every future `/improve` re-reads it.
+> - Escalation **copies** that claim into `AGENTS.md` / a Skill / a Subagent — files that ARE mutable, that agents treat as normative, and that no one re-checks against the log.
+>
+> So escalation is the machine that launders an unverified recollection into a rule. **You are the only gate on that path.**
+>
+> | If the entry asserts... | Verify with |
+> |---|---|
+> | A precedent list (*"`X`, `Y`, `Z` are all `const fn`"*) | Read **each** cited site. One counter-example inverts the lesson for every future reader. |
+> | A `file:line` | `sed -n '<N>p' <file>` — line numbers drift after any edit to the file. |
+> | A lint's group / a tool's flag / an API's behaviour | Run it (`cargo clippy -W clippy::<group>` on a probe; `<tool> --help`) — see AGENTS.md § *Dependency Versions*. |
+> | A count, a size, a "N times" figure | Re-measure. Never carry a number one step past the command that produced it. |
+> | A VCS claim (*"X is tracked/ignored/committed"*) | The category-matched `git` command — AGENTS.md § *Dependency Versions*. |
+>
+> **On failure:** propose the rule **without** the false claim, or with a verified replacement — and say in the report that the entry's claim did not hold. Do **NOT** edit the entry (Boundary rule 1: `Escalated?` / `Superseded by:` only). If the claim was load-bearing for the rule itself, the pattern may not be real — re-examine before proposing.
+>
+> **Why this is on you alone.** Nothing else in the workspace is *mandated* to check an entry's facts. An entry staged at Step 8 does land in the diff `self-review` reads (AGENTS.md § *Workflow* requires staging `learnings.md` with related code) — but `self-review.md`'s checklist has **no item** directing anyone to verify a claim inside it, so being in the diff buys nothing. The const-fn entry did not even get that far: it was committed at Step 12 (`961a5a3`), after `self-review` had already run. And `design-review` reviews *designs*, never entries.
+>
+> How the const-fn claim was actually caught is the argument **for** this AXIOM, not a fluke that excuses its absence: `self-review`, reviewing the escalation, read `design.md`'s new prose, grepped `crates/` for the three cited `const fn` sites, and found `Rect::index` was `pub fn`. That is *exactly this AXIOM's procedure* — verifying a carried claim against the source — applied to instruction-file prose. Note it could **not** have been incidental code review: this branch's diff contains **zero `.rs` files**. The save came from a spawn prompt that happened to ask for claim-verification, not from any standing process. Prompts vary; a rule does not. That is the gap this AXIOM closes.
+
 For each pattern show:
 1. **Problem** — what repeats, how many times
 2. **Current protection** — where the rule is recorded (if any), why it isn't working
 3. **Proposal** — concrete diff (old text → new text)
 4. **Level** — `ai-docs/learnings.md` → `AGENTS.md`/skill → hook
+5. **Claims re-verified** — for every factual assertion carried from the entry into the diff: the command run and its result, or *"no factual claims carried"*. A proposal citing a precedent, a `file:line`, a lint group, or a count without this line is **incomplete** — do not present it as ready to apply.
 
 ### Step 4: Escalate to hooks (only ≥3 occurrences and rule not working)
 
@@ -270,6 +313,7 @@ Report (parent-thread emits, NOT the subagent): `Eval: PASS ✅` or `Eval: FAIL 
 ## Anti-patterns
 
 - **Do NOT** delete entries from `ai-docs/learnings.md` — it's a log, only grows
+- **Do NOT** carry an entry's factual claim into a proposal unverified — see Step 3's AXIOM. Recurrence licenses the entry's **pattern**, never the *facts* wrapped around it — **wherever they sit, `Rule:` line included** (the DOC-1 entry's false lint-group attribution was in its `Rule:` line, and that is the one that reached production text). The log is append-only, so a false claim can only ever be fixed in the copy you are about to make.
 - **Do NOT** add rules for one-off errors — wait for recurrence
 - **Do NOT** propose hooks for the first/second occurrence
 - **Do NOT** overload `AGENTS.md` — specific rules go in the Skill/Subagent file

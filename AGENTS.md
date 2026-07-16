@@ -88,15 +88,17 @@ See [`ai-docs/code-style.md`](ai-docs/code-style.md) for the canonical (growing)
 
 ## Dependency Versions
 
-> **AXIOM — Query live state BEFORE asserting any claim about an external dep, the project's own dep graph, or an external tool's flags/behavior. Memory is stale.**
+> **AXIOM — Query live state BEFORE asserting any claim about an external dep, the project's own dep graph, an external tool's flags/behavior, this repo's VCS state, or an upstream issue's status. Memory is stale — and so is any tool blind to the category you are asking about.**
 >
 > | If you're about to write... | Verify first with |
 > |---|---|
-> | A specific version of crate `X` | `curl -sS "https://crates.io/api/v1/crates/X" \| jq -r '.crate.max_stable_version'` |
+> | A specific version of crate `X` | `curl -sS -H "User-Agent: graphite-gp-agent (<contact-email>)" "https://crates.io/api/v1/crates/X" \| jq -r '.crate.max_stable_version'` — the `User-Agent` is **required**: crates.io's data-access policy rejects UA-less requests with a JSON *error body*, so a bare `curl` makes `jq` print the literal `null` and **exit 0**. A `null` means **the query failed** — never "the crate has no stable release". Re-run without the `jq` filter and read the raw body before concluding anything. |
 > | A claim that `X` is / isn't / would-be-added-as a dep in this project | `grep -r '<X>' --include='Cargo.toml' .` AND `cargo tree --invert <X>` (catches transitive presence) |
 > | A specific flag / subcommand / capability of an external tool (`cargo`, `gh`, `actionlint`, …) — e.g. "`cargo test` supports `--keep-going`" | `cargo <cmd> --help` (or run the command), or read the offline docs at `~/.rustup/toolchains/stable-*/share/doc/`. **Never assert a tool flag from memory.** |
+> | A claim that a file is **committed / tracked / ignored** ("the repo commits X", "X is gitignored", "there are no stale Y") | **Match the command to the FILE CATEGORY, and name the category before choosing:** tracked → `git ls-files <path>`; ignored + which rule → `git check-ignore -v <path>`; untracked-but-not-ignored → `git status --porcelain`; ignored included → `git status --porcelain --ignored`; exists on disk at all → `ls` / `find`. `find`/`ls` prove on-disk presence, **never** tracked status. `git status` is **blind to ignored files** — empty output is NEVER proof a path is absent, and is actively misleading for any question about gitignored build/regen output, which is exactly where stale-artifact questions live. |
+> | A claim about an **upstream issue/PR's current state** ("bug X is unfixed", "affects 1.98 beta", "no fix released") | `gh issue view <N> --json state,comments` — the issue *body* is frozen at filing time; the **closing comment** carries the resolution. **When the user cites a URL with a `#fragment`, fetch THAT anchor** — the fragment is the citation, the page is merely where it lives; a user linking a specific comment has usually already found the answer. |
 >
-> If your draft contains substrings like *"would add"*, *"introduce X as a dep"*, *"pull in X"*, *"avoid X as a dep"*, *"X is not currently a dependency"*, *"supports `--flag`"*, *"takes `--flag`"*, *"passing `--flag`"* — **STOP**, run the relevant check above (`grep` + `cargo tree --invert` for deps; `--help` for tool flags), and either rewrite with the verified fact or drop the claim.
+> If your draft contains substrings like *"would add"*, *"introduce X as a dep"*, *"pull in X"*, *"avoid X as a dep"*, *"X is not currently a dependency"*, *"supports `--flag`"*, *"takes `--flag`"*, *"passing `--flag`"*, *"is committed"*, *"is tracked"*, *"is gitignored"*, *"there are no"*, *"still affects"*, *"is unfixed"* — **STOP**, run the relevant check above (`grep` + `cargo tree --invert` for deps; `--help` for tool flags; the category-matched `git` command for VCS state; `gh issue view --json state,comments` for upstream status), and either rewrite with the verified fact or drop the claim.
 >
 > See [`ai-docs/dependency-versions.md`](ai-docs/dependency-versions.md) for the lookup recipes. Apply the pinning rule to the **observed** version, never the remembered one.
 

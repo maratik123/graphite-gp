@@ -48,6 +48,12 @@
             "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '(^|[ ;&|`])git[[:space:]]+commit\\b'; then ast-index update >/dev/null 2>&1 || true; fi; exit 0",
             "timeout": 30,
             "statusMessage": "Refreshing ast-index..."
+          },
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qF 'crates.io/api' && echo \"$cmd\" | grep -qE '(^|[[:space:];|&(`$])(curl|wget)[[:space:]]' && ! echo \"$cmd\" | grep -qiE 'user-agent[[:space:]]*[:=]|--user-agent[[:space:]]' && ! echo \"$cmd\" | grep -qE '(^|[[:space:]])-[a-zA-Z]*A([[:space:]]|=|[\"'\"'\"'])'; then printf 'BLOCKED: crates.io API fetch with no User-Agent.\\n\\ncrates.io rejects UA-less requests with a JSON *error body*, so `jq -r \".crate.max_stable_version\"` prints the literal `null` and exits 0 -- a fact-shaped non-answer, not data (AGENTS.md > Dependency Versions; ai-docs/dependency-versions.md > Failure mode).\\n\\nUse:\\n  curl -sS -H \"User-Agent: graphite-gp-agent (<contact-email>)\" \"https://crates.io/api/v1/crates/<name>\" | jq -r \".crate.max_stable_version\"\\n\\nAny of these satisfies the check: a literal `User-Agent:` / `user-agent=` anywhere (so -H, -H\"..\", -sSH \"..\", --header all work), `--user-agent <v>`, or an -A-style flag (-A \"v\", -A'\"'\"'v'\"'\"', -sSA \"v\"). A null from any version lookup means the QUERY FAILED -- re-run without the jq filter and read the raw body.\\n\\nThis hook matches COMMAND TEXT, not shell semantics: it cannot tell a real fetch from a heredoc/sed that merely quotes one, so it fails closed on those. If that is what you are doing, put a User-Agent in the quoted text too, or write the file with the Write tool.\\n' >&2; exit 2; fi",
+            "timeout": 10,
+            "statusMessage": "Checking crates.io User-Agent..."
           }
         ]
       }

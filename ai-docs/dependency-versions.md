@@ -10,10 +10,27 @@ Whenever you write a specific version of a Cargo crate or a GitHub Action — an
 
 | If you need to write... | Run this first |
 |---|---|
-| A Cargo crate version | `curl -sS "https://crates.io/api/v1/crates/<name>" \| jq -r '.crate.max_stable_version'` |
+| A Cargo crate version | `curl -sS -H "User-Agent: graphite-gp-agent (<contact-email>)" "https://crates.io/api/v1/crates/<name>" \| jq -r '.crate.max_stable_version'` — the `User-Agent` is **required** (see § *Failure mode* below); a bare `curl` returns `null` and exits 0 |
 | A GitHub Action version | `gh api /repos/<owner>/<repo>/releases --jq '.[0].tag_name'` (and verify the action's Node runtime is current) |
 | A version into a long-lived doc (won't be revisited for months) | Annotate `(verified current YYYY-MM-DD)` next to the version |
 | A **load-bearing claim about an Action's behaviour** (env vars it exports, defaults it sets, files it produces — anything the spec or design relies on) | `gh api /repos/<owner>/<repo>/contents/action.yml --jq '.content' \| base64 -d` AND `gh api /repos/<owner>/<repo>/contents/src/setup.ts --jq '.content' \| base64 -d \| grep -inE 'exportVariable\|process\.env\|GITHUB_ENV\|saveState'` (or `src/main.ts` for run-step actions). Cite the source-line evidence in the design — README narrative alone is **not** evidence. |
 | A **claim about whether dep `<X>` is / isn't / would-be-added-as a dep in this project** (any "would add X", "introduce X", "pull in X", "avoid X as a dep", "X is not currently a dependency") | `grep -rn '<X>' --include='Cargo.toml' .` to surface direct manifest hits; `cargo tree --invert <X>` to surface transitive presence via any leaf crate. Any hit → drop the false-premise wording; rewrite naming the actual concern (perf-sensitivity, feature-gate, test-prod parity, binary-size). This row exists because a crate is easily claimed as a would-be-new-dep when `cargo tree --invert <X>` would in fact show it already reached by every leaf crate via `gp-core`. |
+
+## Failure mode — `jq` + an error body = a silent `null`
+
+**crates.io requires a `User-Agent`.** Its [data-access policy](https://crates.io/data-access) rejects UA-less requests with an *error body*:
+
+```json
+{"errors":[{"detail":"We are unable to process your request at this time. This usually means that you are in violation of our API data access policy (https://crates.io/data-access) ..."}]}
+```
+
+That body is **valid JSON with no `.crate` key**, so `jq -r '.crate.max_stable_version'` prints the literal string `null` and **exits 0**. The pipeline reports success while the fact was never obtained — and `null` reads as "no stable version" / "crate not found", a *fact-shaped non-answer*. Taken at face value it yields either a false "no stable release found" or a fallback to the remembered version, which is exactly what the AXIOM exists to prevent.
+
+**Rules:**
+
+- Treat a `null` from **any** version lookup as **"the query failed"**, never as data. Re-run without the `jq` filter and read the raw body before concluding anything.
+- A version lookup returning `null` for a crate you have good reason to believe is published is a **tooling** failure until proven otherwise, not a fact about the crate.
+- **Generalises beyond crates.io:** whenever a verification recipe pipes an HTTP response through `jq`, a policy / auth / rate-limit error body is *still valid JSON*, so `jq` prints `null` and exits 0. A stale recipe defeats the AXIOM as thoroughly as not running it — and more quietly, because the operator believes a check ran.
+- A `PreToolUse` hook (`.claude/settings.json`) blocks UA-less `crates.io/api` calls mechanically; the rule above still governs every other `jq`-piped lookup, which no hook covers.
 
 Then apply the pinning rule (in AGENTS.md) to the **observed** version, never the remembered one. If `setup.ts` / `main.ts` does not export the env vars your design assumed, set them explicitly in the workflow (per-job `env:` or `echo >> $GITHUB_ENV` after the action step) — don't rely on "the action probably sets it".
