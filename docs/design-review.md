@@ -151,6 +151,8 @@ non-yielding car — which makes bottlenecks bite but is a real physics change (
 mid-segment blocking rule). At minimum, add a same-turn **swap/pass-through** check so two
 cars can't trade cells or thread through each other unmodeled.
 
+**Amendment — 2026-07-16 (product-owner directive, supersedes the swap/pass-through recommendation).** Option (a) is adopted in full and the same-turn swap/pass-through check is **dropped**: the collision model resolves **same-final-cell conflicts only** (`A.pos == B.pos`). Cars whose move-segments swap, thread mid-segment, or cross orthogonally but **end on distinct cells** are allowed unchanged — under (a) narrows are positional/visual, so two cars ending apart have no occupancy conflict and a forced displacement would be gratuitous. This supersedes the "At minimum, add a same-turn swap/pass-through check" sentence above. Recorded against this entry — not a new review round.
+
 ### D2 — "centerline(s)" is load-bearing but its construction is unspecified — and it's conflated with the medial axis
 
 `centerline(s)` feeds the AI frame (`v_tangent/v_normal`, lateral distances), the reward
@@ -300,7 +302,7 @@ two are resolved better than proposed:
   fold-near-hairpins problem completely. (But see N1.)
 
 Verification: C1 pure PBS ✅ · C3 sink-to-sink + cheap-global fallback ✅ · C4 exact integer
-predicate with tie-case + test table ✅ · D1 option (a) + mandatory swap check ✅ · D3
+predicate with tie-case + test table ✅ · D1 option (a); mandatory swap check **superseded 2026-07-16** (see D1 amendment) ✅ · D3
 `V_target`/`V_ceil` split ✅ · D4 scrub-tick rule finalized ✅ · M1–M7 all folded in ✅.
 
 New findings, from the added pipeline pseudocode (§2) and the finalized rules:
@@ -328,6 +330,8 @@ undefined (who yields? does it become a same-cell collision routed through the n
 BFS? a mutual crash? a no-op block?). Pick a rule; the natural one is to fold a detected swap
 into the existing collision layer (treat the contested edge as a same-cell contest and run the
 seeded nearest-free placement), so there's one resolution path.
+
+**Amendment — 2026-07-16 (product-owner directive, supersedes N2).** With the swap/pass-through check dropped (see the D1 amendment), there is no detected swap to resolve: the seeded nearest-free placement runs for **same-final-cell conflicts only**. N2's "fold a detected swap into the collision layer" resolution is moot. Recorded against this entry — not a new review round.
 
 ## 🟡 N3 — the real risk in generation is `frontier_gap → concrete edit`, and it's abstracted away
 
@@ -365,7 +369,7 @@ softening the claim to rest on the progress/position cost, not the kinematics.
 
 # Round 3 — converged
 
-All of N1–N5 are incorporated correctly (N1 as a cut-annulus `s`-field, N2 swap→nearest-free,
+All of N1–N5 are incorporated correctly (N1 as a cut-annulus `s`-field, N2 swap→nearest-free (later **superseded 2026-07-16** — see the N2 amendment: same-cell-only),
 N3 as an explicit `map_frontier_gap_to_edge` + "prototype first" callout, N4 seed/rng/`race_dir`
 threading + straight-behind check, N5 softened). The design is coherent enough to build from.
 Two precision notes, neither blocking:
