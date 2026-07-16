@@ -87,6 +87,18 @@ pub struct StartFinish {
     pub gate: TimingGate,
 }
 
+/// An ordered list of distinct start positions in the corridor `D`, each
+/// implicitly at rest (`v = (0, 0)`).
+///
+/// Invariant (upheld by the generator, not enforced here): every `positions`
+/// element is distinct, lies in `D`, and the list is ordered front-to-back
+/// along `−race_dir` (design doc §2, Ф3, \[C2\]).
+#[derive(Clone, Debug, Default)]
+pub struct StartGrid {
+    /// Distinct start positions, ordered front-to-back along `−race_dir`.
+    pub positions: Vec<Point>,
+}
+
 /// One sample of the parameterized centerline.
 #[derive(Clone, Copy, Debug)]
 pub struct CenterlineSample {
@@ -195,5 +207,26 @@ mod tests {
         let (a, b) = (Point::new(1, 1), Point::new(2, 1));
         assert!(gate.separates(a, b));
         assert!(gate.separates(b, a));
+    }
+
+    // ---- StartGrid (subtask 2) ----------------------------------------
+
+    #[test]
+    fn start_grid_preserves_front_to_back_order_and_distinctness() {
+        // race_dir such that "front" is +x, so front-to-back is decreasing x.
+        let grid = StartGrid {
+            positions: vec![Point::new(5, 0), Point::new(4, 0), Point::new(3, 0)],
+        };
+        assert_eq!(
+            grid.positions,
+            vec![Point::new(5, 0), Point::new(4, 0), Point::new(3, 0)]
+        );
+        let distinct: std::collections::HashSet<_> = grid.positions.iter().collect();
+        assert_eq!(distinct.len(), grid.positions.len());
+    }
+
+    #[test]
+    fn start_grid_default_is_empty() {
+        assert!(StartGrid::default().positions.is_empty());
     }
 }
