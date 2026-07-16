@@ -6,6 +6,8 @@
 //! Ф1–Ф7 and emits a [`TrackArtifact`].
 
 use gp_core::track::TrackArtifact;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]
@@ -32,6 +34,13 @@ impl GenParams {
     pub const fn start_finish_width(&self) -> u32 {
         self.cars
     }
+
+    /// A replay-deterministic RNG seeded from `self.seed`, for the generation
+    /// pipeline's stochastic phases (design doc §2). No OS entropy — the same
+    /// `seed` always yields the same draw stream (issue #49).
+    pub fn rng(&self) -> ChaCha8Rng {
+        ChaCha8Rng::seed_from_u64(self.seed)
+    }
 }
 
 /// Run the full generation pipeline (design doc §2, Ф1–Ф7) and return a
@@ -42,4 +51,38 @@ impl GenParams {
 ///   Ф4 static validation · Ф5 passability oracle · Ф6 local repair · Ф7 export.
 pub fn generate(_params: GenParams) -> TrackArtifact {
     todo!("track generation pipeline (design doc §2)")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+
+    fn params(seed: u64) -> GenParams {
+        GenParams {
+            cars: 4,
+            min_straight: 3,
+            v_ceiling: 5,
+            block_size: 6,
+            seed,
+        }
+    }
+
+    #[test]
+    fn rng_same_seed_yields_identical_stream() {
+        let mut a = params(42).rng();
+        let mut b = params(42).rng();
+        let draws_a: Vec<u64> = (0..8).map(|_| a.next_u64()).collect();
+        let draws_b: Vec<u64> = (0..8).map(|_| b.next_u64()).collect();
+        assert_eq!(draws_a, draws_b);
+    }
+
+    #[test]
+    fn rng_different_seed_yields_different_stream() {
+        let mut a = params(1).rng();
+        let mut b = params(2).rng();
+        let draws_a: Vec<u64> = (0..8).map(|_| a.next_u64()).collect();
+        let draws_b: Vec<u64> = (0..8).map(|_| b.next_u64()).collect();
+        assert_ne!(draws_a, draws_b);
+    }
 }
