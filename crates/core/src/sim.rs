@@ -730,6 +730,178 @@ mod tests {
         assert_eq!(lap.raw(), before);
     }
 
+    /// A lint-clean fully-drivable rectangle `w × h` at origin `(0,0)`.
+    fn filled(w: usize, h: usize) -> Corridor {
+        let mut d = Corridor::new(Point::new(0, 0), w, h);
+        for y in 0..i32::try_from(h).unwrap() {
+            for x in 0..i32::try_from(w).unwrap() {
+                d.set(Point::new(x, y), true);
+            }
+        }
+        d
+    }
+
+    #[test]
+    fn resolve_crash_ac1_respawn_position_is_last_valid_cell() {
+        // AC1: filled(3,4), car(1,0,3,2). Sweep (1,0)->(4,2); t_block=8 at
+        // (3,1); L=(2,1). First confirm this is a genuine crash.
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert_eq!(out.state.pos(), Point::new(2, 1));
+    }
+
+    #[test]
+    fn resolve_crash_ac2_straight_wall_quenches_normal_damps_tangential() {
+        // AC2: same fixture as AC1. At L=(2,1): (3,1) not in D -> vx=0;
+        // (2,2) in D -> survivor vy, floor(2/2)=1.
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        let out = resolve_crash(&d, s);
+        assert_eq!(
+            out.state,
+            CarState {
+                x: 2,
+                y: 1,
+                vx: 0,
+                vy: 1
+            }
+        );
+
+        // Head-on: survivor vy=0 -> floor(0/2)=0 locks t/2 truncation.
+        let d2 = filled(3, 4);
+        let s2 = car(1, 0, 0, 4);
+        assert_eq!(legal_mask(&d2, s2), BitFlags::empty());
+        let out2 = resolve_crash(&d2, s2);
+        assert_eq!(out2.state.vx, 0);
+        assert_eq!(out2.state.vy, 0);
+
+        // Sign case: negative survivor -> negative floor(t/2).
+        let d3 = filled(4, 3);
+        let s3 = car(0, 1, 5, -3);
+        assert_eq!(legal_mask(&d3, s3), BitFlags::empty());
+        let out3 = resolve_crash(&d3, s3);
+        assert!(out3.state.vy <= 0);
+    }
+
+    #[test]
+    fn resolve_crash_ac3_concave_corner_zeroes_both_axes() {
+        // AC3: filled(3,3), car(0,0,3,3). Sweep (0,0)->(3,3); L=(2,2); both
+        // (3,2) and (2,3) not in D -> corner -> v=(0,0).
+        let d = filled(3, 3);
+        let s = car(0, 0, 3, 3);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert_eq!(
+            out.state,
+            CarState {
+                x: 2,
+                y: 2,
+                vx: 0,
+                vy: 0
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_crash_ac4_scrub_tick_blocks_reaccel_for_exactly_one_tick() {
+        // AC4: reuse the AC1/AC2 fixture (crash -> state=(2,1,0,1)).
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        let out = resolve_crash(&d, s);
+        assert!(out.scrub);
+        assert_eq!(out.action_mask(&d), BitFlags::from(Action::Coast));
+
+        let out2 = out.consume_scrub();
+        assert!(!out2.scrub);
+        assert_eq!(
+            out2.state,
+            CarState {
+                x: 2,
+                y: 2,
+                vx: 0,
+                vy: 1
+            }
+        );
+        assert_eq!(out2.action_mask(&d), legal_mask(&d, out2.state));
+        // Non-vacuous: the resumed mask differs from the scrub-only mask.
+        assert_ne!(legal_mask(&d, out2.state), BitFlags::from(Action::Coast));
+    }
+
+    #[test]
+    fn resolve_crash_ac5_fail_safe_halves_until_legal_and_never_free() {
+        // (a) loop fires and reduces a single-axis survivor to an exact state.
+        // filled(4,2), car(0,0,4,3): L=(2,1), quench -> (2,0); Coast(2,0) from
+        // (2,1) lands at (4,1) not in D -> halve -> (1,0); Coast(1,0) -> (3,1)
+        // in D, legal.
+        let d = filled(4, 2);
+        let s = car(0, 0, 4, 3);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert_eq!(
+            out.state,
+            CarState {
+                x: 2,
+                y: 1,
+                vx: 1,
+                vy: 0
+            }
+        );
+        assert!(out.scrub);
+
+        // (b) the guaranteed (0,0) floor (AC3's corner outcome) still carries
+        // the scrub marker -- never a penalty-free controlled stop.
+        let d3 = filled(3, 3);
+        let s3 = car(0, 0, 3, 3);
+        let out3 = resolve_crash(&d3, s3);
+        assert_eq!((out3.state.vx, out3.state.vy), (0, 0));
+        assert!(out3.scrub);
+    }
+
+    #[test]
+    fn resolve_crash_ac6_is_pure_and_deterministic() {
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        assert_eq!(resolve_crash(&d, s), resolve_crash(&d, s));
+    }
+
+    #[test]
+    fn resolve_crash_robustness_axis_aligned_overflow_with_a_in_d_no_panic_no_hang() {
+        // R3(a): A=(1,0) in D, legal_mask empty, B.x=1+i32::MAX overflows i32
+        // -> checked_add fails -> L=A (walk skipped). Chord is axis-aligned
+        // (dy=0) so the fail-safe halves v to a legal value without a giant
+        // supercover collect. Must return promptly (no panic, no hang).
+        let d = filled(5, 5);
+        let s = CarState {
+            x: 1,
+            y: 0,
+            vx: i32::MAX,
+            vy: 0,
+        };
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert!(out.scrub);
+    }
+
+    #[test]
+    fn resolve_crash_robustness_a_not_in_d_guard_returns_promptly() {
+        // R3(b): A not in D (nothing drivable) -- the L in D guard (design
+        // section 5) fires and degrades safely instead of hanging the
+        // fail-safe loop.
+        let d = Corridor::new(Point::new(0, 0), 5, 5);
+        let s = CarState {
+            x: i32::MAX,
+            y: 0,
+            vx: i32::MAX,
+            vy: 0,
+        };
+        let out = resolve_crash(&d, s);
+        assert_eq!(out.state.vx, 0);
+        assert_eq!(out.state.vy, 0);
+        assert!(out.scrub);
+    }
+
     #[test]
     fn register_move_ac7_empty_gate_is_a_no_op_without_panic() {
         // AC7: a degenerate empty gate leaves counter unchanged and does not
