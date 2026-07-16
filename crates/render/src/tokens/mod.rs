@@ -7,6 +7,7 @@
 
 pub mod color;
 pub mod spacing;
+pub mod typography;
 
 /// Shared CSS-parsing test infrastructure, used by every token submodule's
 /// `#[cfg(test)] mod tests` (`color`, `spacing`, `typography`, `effects`).
