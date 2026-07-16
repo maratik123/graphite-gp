@@ -180,7 +180,7 @@ The verb chosen for a promoted rule encodes its shape. Carrot rules (`Kind: vali
 >
 > Recurrence licenses the entry's **pattern** — the behaviour to change. It licenses **nothing** about the *facts* wrapped around that pattern (a cited `file:line`, a "precedent already in-tree" list, a lint's group, a tool's flag, a count). Those are unaudited recollections written mid-task, and nothing checks them (see *Why this is on you alone* below). Copying one into an instruction file is not quotation — it is **re-assertion under a more authoritative byline**.
 >
-> **The split is pattern-vs-facts — NOT `Rule:`-line-vs-narrative.** Do not treat a fact as safe because it sits in the `Rule:` line; a false one is just as likely there as in the `What happened:` story. The two entries escalated on 2026-07-16 are one of each, and the `Rule:`-line case is the one that reached production text:
+> **The split is pattern-vs-facts — NOT `Rule:`-line-vs-narrative.** Do not treat a fact as safe because it sits in the `Rule:` line; a false one is just as likely there as in the `What happened:` story. The two entries **whose facts failed review** in the 2026-07-16 batch are one of each — and the `Rule:`-line case is the one that reached production text. (Two *of the nine escalated*, and only because those two claims happened to be audited; the other seven were never checked, so treat this as a floor, not a rate.)
 >
 > - **False fact in the narrative** — the const-fn entry's `What happened:` closes with *"Precedent already in-tree: `Size::area`, `Rect::index`, `CarState::pos` are all `pub const fn`."* `Rect::index` is **not**: `geom/mod.rs:178` is `pub fn`, because its body ends in `.then(|| …)` and `bool::then` is conditionally-const but not const-stable (`E0658`), so `missing_const_for_fn` correctly declines to fire. It is a **counter-example** — an agent checking the cited precedent learns the rule backwards. (That entry's `Rule:` line cites only `Size::area`, which is accurate.)
 > - **False fact in the `Rule:` line** — the DOC-1 entry (`learnings.md:75`) states *"`clippy::nursery` (denied here) polices their shape (`too_long_first_doc_paragraph`, `doc_markdown`, `missing_panics_doc`)."* The latter two are **pedantic**, not nursery. This one was escalated **verbatim** into `code-writer.md` and `task/reference.md` before review caught it.
@@ -313,7 +313,7 @@ Report (parent-thread emits, NOT the subagent): `Eval: PASS ✅` or `Eval: FAIL 
 ## Anti-patterns
 
 - **Do NOT** delete entries from `ai-docs/learnings.md` — it's a log, only grows
-- **Do NOT** carry an entry's factual claim into a proposal unverified — see Step 3's AXIOM. Recurrence licenses the entry's **`Rule:`**, never its incidental assertions; the log is append-only, so a false claim can only ever be fixed in the copy you are about to make.
+- **Do NOT** carry an entry's factual claim into a proposal unverified — see Step 3's AXIOM. Recurrence licenses the entry's **pattern**, never the *facts* wrapped around it — **wherever they sit, `Rule:` line included** (the DOC-1 entry's false lint-group attribution was in its `Rule:` line, and that is the one that reached production text). The log is append-only, so a false claim can only ever be fixed in the copy you are about to make.
 - **Do NOT** add rules for one-off errors — wait for recurrence
 - **Do NOT** propose hooks for the first/second occurrence
 - **Do NOT** overload `AGENTS.md` — specific rules go in the Skill/Subagent file
