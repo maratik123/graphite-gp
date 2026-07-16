@@ -117,3 +117,145 @@ pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A car at rest at `(x, y)` with velocity `(vx, vy)`.
+    fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
+        CarState { x, y, vx, vy }
+    }
+
+    /// A lint-clean fully-drivable rectangle `w × h` at origin `(0,0)`.
+    fn filled(w: usize, h: usize) -> Corridor {
+        let mut d = Corridor::new(Point::new(0, 0), w, h);
+        for y in 0..i32::try_from(h).unwrap() {
+            for x in 0..i32::try_from(w).unwrap() {
+                d.set(Point::new(x, y), true);
+            }
+        }
+        d
+    }
+
+    #[test]
+    fn ac1_singleton_unchanged() {
+        let d = filled(5, 5);
+        let mut cars = [car(2, 2, 1, 0)];
+        let before = cars;
+        resolve_collisions(&d, &mut cars, 7);
+        assert_eq!(cars, before);
+    }
+
+    #[test]
+    fn ac8_three_into_one_cell_resolved_distinctly() {
+        let d = filled(5, 5);
+        let mut cars = [car(2, 2, 1, 0), car(2, 2, 0, 1), car(2, 2, -1, 0)];
+        resolve_collisions(&d, &mut cars, 7);
+        // Exactly one car remains at (2,2); the other two are on distinct
+        // free cells.
+        let positions: Vec<Point> = cars.iter().map(|c| c.pos()).collect();
+        let unique: HashSet<Point> = positions.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            3,
+            "all three cars must land on distinct cells: {positions:?}"
+        );
+        assert!(positions.contains(&Point::new(2, 2)));
+        // Velocities are untouched by the teleport (AC4).
+        assert_eq!(cars[0].vx, 1);
+        assert_eq!(cars[0].vy, 0);
+        assert_eq!(cars[1].vx, 0);
+        assert_eq!(cars[1].vy, 1);
+        assert_eq!(cars[2].vx, -1);
+        assert_eq!(cars[2].vy, 0);
+    }
+
+    #[test]
+    fn ac2_displaced_into_occupied_ring_lands_on_first_free_layer() {
+        let d = filled(5, 5);
+        // Two cars collide at (2,2); its immediate 4-conn ring is fully
+        // occupied by other (non-colliding) cars, so the loser must reach
+        // past the ring to the first free layer.
+        let mut cars = [
+            car(2, 2, 0, 0),
+            car(2, 2, 0, 0),
+            car(1, 2, 0, 0),
+            car(3, 2, 0, 0),
+            car(2, 1, 0, 0),
+            car(2, 3, 0, 0),
+        ];
+        resolve_collisions(&d, &mut cars, 11);
+        let ring = [
+            Point::new(1, 2),
+            Point::new(3, 2),
+            Point::new(2, 1),
+            Point::new(2, 3),
+        ];
+        let positions: Vec<Point> = cars.iter().map(|c| c.pos()).collect();
+        let unique: HashSet<Point> = positions.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            6,
+            "all six cars must land on distinct cells: {positions:?}"
+        );
+        let collider_positions = [positions[0], positions[1]];
+        assert!(collider_positions.contains(&Point::new(2, 2)));
+        for p in collider_positions {
+            if p != Point::new(2, 2) {
+                assert!(
+                    !ring.contains(&p),
+                    "displaced car must skip the fully-occupied ring, got {p:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ac5_swap_ending_apart_left_unchanged() {
+        let d = filled(5, 5);
+        let mut cars = [car(1, 2, 1, 0), car(2, 2, -1, 0)];
+        let before = cars;
+        resolve_collisions(&d, &mut cars, 3);
+        assert_eq!(cars, before);
+    }
+
+    #[test]
+    fn ac5_thread_ending_apart_left_unchanged() {
+        let d = filled(5, 5);
+        // Opposing multi-cell moves with overlapping supercovers but
+        // distinct final cells: A ends at (2,2), B ends at (0,2).
+        let mut cars = [car(0, 2, 2, 0), car(2, 2, -2, 0)];
+        let before = cars;
+        resolve_collisions(&d, &mut cars, 3);
+        assert_eq!(cars, before);
+    }
+
+    #[test]
+    fn ac7_repeated_calls_are_byte_identical() {
+        let d = filled(5, 5);
+        let mut cars_a = [car(2, 2, 1, 0), car(2, 2, 0, 1), car(2, 2, -1, 0)];
+        let mut cars_b = cars_a;
+        resolve_collisions(&d, &mut cars_a, 99);
+        resolve_collisions(&d, &mut cars_b, 99);
+        assert_eq!(cars_a, cars_b);
+    }
+
+    #[test]
+    fn ac3_equidistant_seeded_pick_is_exact_and_stable() {
+        // A symmetric fixture: two colliding cars at the center of a 5x5
+        // filled corridor, both immediate ring cells free and equidistant —
+        // a genuine intra-layer tie the seeded RNG must break reproducibly.
+        let d = filled(5, 5);
+        let mut cars = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
+        resolve_collisions(&d, &mut cars, 42);
+        // Seed 42 deterministically picks (2,3) among the equidistant free
+        // ring cells {(1,2), (3,2), (2,1), (2,3)}.
+        assert_eq!(cars, [car(2, 2, 0, 0), car(2, 3, 0, 0)]);
+
+        // A second independent run with the same seed reproduces exactly.
+        let mut cars2 = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
+        resolve_collisions(&d, &mut cars2, 42);
+        assert_eq!(cars, cars2, "same seed must reproduce the same tie pick");
+    }
+}
