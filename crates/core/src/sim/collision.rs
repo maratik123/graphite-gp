@@ -56,11 +56,6 @@ use std::ops::ControlFlow;
 /// The tie index is drawn as `u32` (matching `rand`'s own slice-index
 /// policy for `shuffle`), so the pick is reproducible across 32-/64-bit
 /// targets.
-///
-/// # Panics
-///
-/// Panics if a single BFS layer's free-cell count exceeds `u32::MAX` — not
-/// reachable in practice, since a layer is bounded by `d`'s cell count.
 pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64) {
     let mut buckets: HashMap<Point, Vec<usize>> = HashMap::new();
     for (i, car) in cars.iter().enumerate() {
@@ -104,10 +99,13 @@ pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64) {
                 let chosen = if free.len() == 1 {
                     free[0]
                 } else {
-                    let idx = rng.random_range(
-                        0..u32::try_from(free.len()).expect("layer <= area fits u32"),
-                    );
-                    free[idx as usize]
+                    // `free.len()` is bounded by `d`'s cell count and never
+                    // exceeds `u32::MAX` for any allocatable corridor; the
+                    // `u32::MAX` cap keeps the draw total (no panic — gp-core's
+                    // zero-production-panics invariant) while preserving the
+                    // cross-arch `u32` pick.
+                    let n = u32::try_from(free.len()).unwrap_or(u32::MAX);
+                    free[rng.random_range(0..n) as usize]
                 };
                 cars[i].x = chosen.x;
                 cars[i].y = chosen.y;
