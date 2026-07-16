@@ -321,15 +321,123 @@ impl CrashOutcome {
 /// Crash resolution — a wall collision, arising as a search dead-end where all 5
 /// moves leave `D` (design doc §3, `[D4]`/`[N5]`, finalized).
 ///
-/// Leaning rule: zero the into-wall velocity component, keep the along-wall
-/// component with strong damping (e.g. `/2`), respawn at the last valid cell —
-/// so a crash never yields a controlled `v = 0` (which would make "brake by
-/// crashing" the dominant strategy). Fail-safe: if every move from the respawn
-/// state is illegal, damp again, down to `v = 0` in the limit.
+/// **Precondition:** `s.pos() ∈ D` and `legal_mask(d, s)` is empty (`s` is a
+/// genuine crash), and the coast chord `s.pos() → (s.x+s.vx, s.y+s.vy)` lies in
+/// [`supercover`]'s bounded-chord domain (a realistic single-move velocity,
+/// `|vx|, |vy| ≪ 1.5×10⁹`) — inherited verbatim, since `resolve_crash` walks
+/// that chord via `supercover`. An adversarially astronomical `v` is
+/// out-of-domain (unsupported, mirroring `supercover`/`step`/`gate_coord`); the
+/// residual `i32`-overflow edge and an out-of-precondition `s.pos() ∉ D` are
+/// still handled without panicking or hanging (see below).
 ///
-/// TODO(3a): finalize once the crash rule is settled (open question).
-pub fn resolve_crash(_d: &Corridor, _s: CarState) -> CrashOutcome {
-    todo!("crash rule (design doc §3 [OPEN])")
+/// **Algorithm:** walk the coast segment `A = s.pos() → B = (x+vx, y+vy)` in
+/// order (via the projection onto the travel direction) and respawn at `L`,
+/// the furthest swept cell whose supercover-prefix stays `⊆ D` (`A` itself is
+/// always a fallback, so `L` is well-defined). Classify the wall at `L` by
+/// probing its axis-neighbors in the travel direction: an into-wall axis
+/// zeroes that velocity component; a corner (both axes into-wall) zeroes both.
+/// The surviving along-wall component `t` is damped to `⌊t/2⌋` (integer `t/2`,
+/// truncation toward zero, sign preserved). If the forced `Coast` from `L` at
+/// the quenched velocity is still illegal, the fail-safe halves the whole
+/// vector (toward zero) and rechecks, terminating at `v=(0,0)` in the limit
+/// (`Coast` from `L ∈ D` at `v=0` is always legal). The outcome always carries
+/// `scrub: true` — a crash never yields a penalty-free controlled `v = 0`
+/// (`[N5]`).
+///
+/// **Documented fallback variant (not implemented):** if the `⌊t/2⌋` damping
+/// proves "finicky" in play/training, the design's alternative is `v = 0` plus
+/// skipping `P` ticks (a fixed time penalty) instead of the halved-velocity
+/// scrub — a calibration swap, not a scope change (spec **Deferred**).
+pub fn resolve_crash(d: &Corridor, s: CarState) -> CrashOutcome {
+    let a = s.pos();
+    let l = match a.x.checked_add(s.vx).zip(a.y.checked_add(s.vy)) {
+        Some((bx, by)) => respawn_cell(d, a, Point::new(bx, by)),
+        None => a,
+    };
+    if !d.contains(l) {
+        // Out of precondition (`A ∉ D`): cannot coast-check from `L` — do not
+        // enter the fail-safe loop (§ 5: the loop's termination proof requires
+        // `L ∈ D`).
+        return CrashOutcome {
+            state: CarState {
+                x: l.x,
+                y: l.y,
+                vx: 0,
+                vy: 0,
+            },
+            scrub: true,
+        };
+    }
+    let (mut vx, mut vy) = quench_velocity(d, l, s.vx, s.vy);
+    while !legal_move(
+        d,
+        CarState {
+            x: l.x,
+            y: l.y,
+            vx,
+            vy,
+        },
+        Action::Coast,
+    ) {
+        vx /= 2;
+        vy /= 2;
+    }
+    CrashOutcome {
+        state: CarState {
+            x: l.x,
+            y: l.y,
+            vx,
+            vy,
+        },
+        scrub: true,
+    }
+}
+
+/// The ordered coast-walk respawn cell (design doc §3, decision (1)): the
+/// furthest cell along `a → b`'s [`supercover`] whose projection onto the
+/// travel direction is strictly before the nearest non-`D` cell's projection.
+/// Falls back to `a` (always `∈ D` per [`resolve_crash`]'s precondition) when
+/// no such cell exists.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "bounded-chord precondition inherited from supercover (resolve_crash's \
+              documented precondition): |v| << 1.5e9 per move, so the i64 projection \
+              vx*(c.x-a.x) + vy*(c.y-a.y) cannot overflow within the documented domain"
+)]
+fn respawn_cell(d: &Corridor, a: Point, b: Point) -> Point {
+    let vx = i64::from(b.x) - i64::from(a.x);
+    let vy = i64::from(b.y) - i64::from(a.y);
+    let proj =
+        |c: Point| vx * (i64::from(c.x) - i64::from(a.x)) + vy * (i64::from(c.y) - i64::from(a.y));
+    let cover: Vec<Point> = supercover(a, b).collect();
+    let t_block = cover
+        .iter()
+        .filter(|&&c| !d.contains(c))
+        .map(|&c| proj(c))
+        .min()
+        .unwrap_or(i64::MAX);
+    cover
+        .into_iter()
+        .filter(|&c| proj(c) < t_block)
+        .max_by_key(|&c| (proj(c), c.x, c.y))
+        .unwrap_or(a)
+}
+
+/// The wall-normal velocity quench at respawn cell `l` (design doc §3,
+/// decisions (2)/(3)): an axis whose forward neighbor (`l + (sgn(vx), 0)` /
+/// `l + (0, sgn(vy))`) is not in `D` is into-wall and zeroed; the surviving
+/// along-wall component is damped to `⌊t/2⌋` (integer `t/2`). Both axes
+/// into-wall (a corner) zeroes both.
+fn quench_velocity(d: &Corridor, l: Point, vx: i32, vy: i32) -> (i32, i32) {
+    let into_wall_x =
+        l.x.checked_add(vx.signum())
+            .is_none_or(|nx| !d.contains(Point::new(nx, l.y)));
+    let into_wall_y =
+        l.y.checked_add(vy.signum())
+            .is_none_or(|ny| !d.contains(Point::new(l.x, ny)));
+    let vx = if into_wall_x { 0 } else { vx / 2 };
+    let vy = if into_wall_y { 0 } else { vy / 2 };
+    (vx, vy)
 }
 
 /// Resolves several cars occupying the same point (design doc §3) — a layer
@@ -769,20 +877,40 @@ mod tests {
             }
         );
 
-        // Head-on: survivor vy=0 -> floor(0/2)=0 locks t/2 truncation.
+        // Head-on: axis-aligned sweep along x, vy already 0 -> survivor
+        // floor(0/2)=0 locks the t/2 truncation at zero. filled(3,4), sweep
+        // (0,0)->(5,0): t_block=15 at x=3, L=(2,0); (3,0) not in D -> vx=0;
+        // (2,0)==L in D -> survivor vy, floor(0/2)=0.
         let d2 = filled(3, 4);
-        let s2 = car(1, 0, 0, 4);
+        let s2 = car(0, 0, 5, 0);
         assert_eq!(legal_mask(&d2, s2), BitFlags::empty());
         let out2 = resolve_crash(&d2, s2);
-        assert_eq!(out2.state.vx, 0);
-        assert_eq!(out2.state.vy, 0);
+        assert_eq!(
+            out2.state,
+            CarState {
+                x: 2,
+                y: 0,
+                vx: 0,
+                vy: 0
+            }
+        );
 
-        // Sign case: negative survivor -> negative floor(t/2).
-        let d3 = filled(4, 3);
-        let s3 = car(0, 1, 5, -3);
+        // Sign case: negative survivor -> negative floor(t/2). Mirror of the
+        // AC1 fixture about y (filled(3,4), car(1,3,3,-2)): L=(2,2); (3,2)
+        // not in D -> vx=0; (2,1) in D -> survivor vy, floor(-2/2)=-1.
+        let d3 = filled(3, 4);
+        let s3 = car(1, 3, 3, -2);
         assert_eq!(legal_mask(&d3, s3), BitFlags::empty());
         let out3 = resolve_crash(&d3, s3);
-        assert!(out3.state.vy <= 0);
+        assert_eq!(
+            out3.state,
+            CarState {
+                x: 2,
+                y: 2,
+                vx: 0,
+                vy: -1
+            }
+        );
     }
 
     #[test]
