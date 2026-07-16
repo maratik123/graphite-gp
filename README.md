@@ -36,12 +36,15 @@ block 1, state + legal mask onto 3a).
 
 ## Status
 
-Early block 3a — module structure, the `TrackArtifact` contract, and stub APIs are
-in place; `crates/core/src/geom/` implements the exact integer `supercover`
-predicate (full §3 C4 test table) plus the corridor-graph helpers — 4-conn
-flood-fill / connected-component counting, `bounded_complement_components` (the
-§2 Ф4 infield-hole test), in-`D` geodesic BFS, and `walls_from_boundary` (dual
-edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
+Block 3a in progress — the `TrackArtifact` contract is **finalized** (`SField`
+distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
+segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
+contract types + read accessors on hand-filled fixtures, the block-1 generator
+that populates them stays `todo!`). `crates/core/src/geom/` implements the exact
+integer `supercover` predicate (full §3 C4 test table) plus the corridor-graph
+helpers — 4-conn flood-fill / connected-component counting,
+`bounded_complement_components` (the §2 Ф4 infield-hole test), in-`D` geodesic
+BFS, and `walls_from_boundary` (dual edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
 value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
 production panics** (`Rect::index` is total via `checked_sub` + `try_from`). All
 integer arithmetic is **overflow- and signedness-safe**, machine-enforced by a
@@ -54,7 +57,7 @@ policy) are still `todo!()`. See the `TODO(<block>)` markers.
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 53 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask)
+cargo test             # 69 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
