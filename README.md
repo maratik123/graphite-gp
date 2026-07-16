@@ -48,16 +48,19 @@ BFS, and `walls_from_boundary` (dual edges). The corridor's box/index math is fa
 value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
 production panics** (`Rect::index` is total via `checked_sub` + `try_from`). All
 integer arithmetic is **overflow- and signedness-safe**, machine-enforced by a
-workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The
-remaining algorithms (`step`, generation pipeline, oracle, feature extraction,
-policy) are still `todo!()`. See the `TODO(<block>)` markers.
+workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The `sim`
+`step` (accelerate-then-advance state advance) is implemented alongside the
+already-live `legal_move` / `legal_mask` legality path (issue #7). The remaining
+algorithms (lap counter, crash / collision resolution, generation pipeline,
+oracle, feature extraction, policy) are still `todo!()`. See the `TODO(<block>)`
+markers.
 
 ## Build
 
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 69 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract)
+cargo test             # 74 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,

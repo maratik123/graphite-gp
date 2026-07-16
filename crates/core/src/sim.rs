@@ -126,9 +126,35 @@ pub fn legal_mask(d: &Corridor, s: CarState) -> BitFlags<Action> {
 
 /// Advances one car by one (assumed-legal) action, returning the new state.
 ///
-/// TODO(3a): apply `(vx',vy') = v + accel`, then `pos += (vx',vy')`.
-pub fn step(_d: &Corridor, _s: CarState, _a: Action) -> CarState {
-    todo!("step (design doc §3)")
+/// Accelerate-then-advance (design doc §3): `(vx', vy') = (vx + ax, vy + ay)`,
+/// then `(x', y') = (x + vx', y + vy')`, where `(ax, ay)` is `a`'s
+/// [`accel()`](Action::accel).
+///
+/// **Assumed-legal precondition:** `step` performs no legality check — that is
+/// [`legal_move`]'s sole job. Callers must pass an `a` that is legal for `s`
+/// (i.e. `legal_move(d, s, a)` holds for the relevant corridor `d`); behavior
+/// for an illegal action is unsupported.
+///
+/// **Overflow precondition:** the four adds this function performs — `vx + ax`,
+/// `vy + ay`, `x + vx'`, `y + vy'` — are exactly the four sums [`legal_move`]
+/// computes via its `checked_add` chain and proves in-range (never overflowing
+/// `i32`) before returning `true`. On the assumed-legal domain above, these
+/// plain adds therefore never overflow.
+#[inline]
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "assumed-legal precondition above: the four adds mirror legal_move's \
+              checked_add chain, which proves them in-range for any action legal \
+              under legal_move/legal_mask; out-of-domain (illegal-action) input is \
+              unsupported, per this fn's documented precondition"
+)]
+pub const fn step(s: CarState, a: Action) -> CarState {
+    let (ax, ay) = a.accel();
+    let vx = s.vx + ax;
+    let vy = s.vy + ay;
+    let x = s.x + vx;
+    let y = s.y + vy;
+    CarState { x, y, vx, vy }
 }
 
 /// Signed start/finish crossing counter (design doc §3).
@@ -247,6 +273,150 @@ mod tests {
             assert!(!legal_move(&d, s, a));
         }
         assert_eq!(legal_mask(&d, s), BitFlags::empty());
+    }
+
+    #[test]
+    fn step_from_rest_shifts_by_action_delta() {
+        // AC5: from rest, each action's velocity equals its accel delta, and
+        // position shifts by that same delta.
+        let s = CarState {
+            x: 5,
+            y: 5,
+            vx: 0,
+            vy: 0,
+        };
+        assert_eq!(
+            step(s, Action::Coast),
+            CarState {
+                x: 5,
+                y: 5,
+                vx: 0,
+                vy: 0
+            }
+        );
+        assert_eq!(
+            step(s, Action::East),
+            CarState {
+                x: 6,
+                y: 5,
+                vx: 1,
+                vy: 0
+            }
+        );
+        assert_eq!(
+            step(s, Action::West),
+            CarState {
+                x: 4,
+                y: 5,
+                vx: -1,
+                vy: 0
+            }
+        );
+        assert_eq!(
+            step(s, Action::North),
+            CarState {
+                x: 5,
+                y: 6,
+                vx: 0,
+                vy: 1
+            }
+        );
+        assert_eq!(
+            step(s, Action::South),
+            CarState {
+                x: 5,
+                y: 4,
+                vx: 0,
+                vy: -1
+            }
+        );
+    }
+
+    #[test]
+    fn step_advances_by_new_velocity() {
+        // AC1: position advances by the *new* velocity, not the old one. If the
+        // body advanced by the old velocity, this would yield y = 1 instead of 2.
+        let s = CarState {
+            x: 0,
+            y: 0,
+            vx: 3,
+            vy: 1,
+        };
+        assert_eq!(
+            step(s, Action::North),
+            CarState {
+                x: 3,
+                y: 2,
+                vx: 3,
+                vy: 2
+            }
+        );
+
+        // Symmetric x-axis case.
+        let s2 = CarState {
+            x: 2,
+            y: 7,
+            vx: -1,
+            vy: 4,
+        };
+        assert_eq!(
+            step(s2, Action::East),
+            CarState {
+                x: 2,
+                y: 11,
+                vx: 0,
+                vy: 4
+            }
+        );
+    }
+
+    #[test]
+    fn step_is_deterministic() {
+        // AC2: step is a pure function — repeated calls on the same input yield
+        // the same output.
+        let s = CarState {
+            x: 2,
+            y: 7,
+            vx: -1,
+            vy: 4,
+        };
+        assert_eq!(step(s, Action::East), step(s, Action::East));
+    }
+
+    #[test]
+    fn legal_move_rejects_wall_clipping_chord() {
+        // AC3: a clear in-corridor chord is legal; a chord whose supercover
+        // clips a wall cell (not itself the endpoint) is illegal.
+        let mut d = Corridor::new(Point::new(0, 0), 4, 4);
+        d.set(Point::new(0, 0), true);
+        d.set(Point::new(1, 0), true);
+        d.set(Point::new(2, 0), true);
+        d.set(Point::new(1, 1), true);
+        // (0,1) is deliberately left off-D.
+
+        // Clear chord: (0,0) + Coast, v=(2,0) -> p1=(2,0). supercover =
+        // {(0,0),(1,0),(2,0)} ⊆ D.
+        let s_clear = CarState {
+            x: 0,
+            y: 0,
+            vx: 2,
+            vy: 0,
+        };
+        assert!(legal_move(&d, s_clear, Action::Coast));
+
+        // Wall-clipping chord: (0,0) + East, v=(0,1)+accel(1,0)=(1,1) ->
+        // p1=(1,1). supercover((0,0),(1,1)) is the dual-vertex tie, all four of
+        // {(0,0),(1,0),(0,1),(1,1)}; (0,1) is off-D, so the move is illegal.
+        let s_clip = CarState {
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 1,
+        };
+        // Non-vacuous: p1 itself is drivable, so rejection comes from the
+        // supercover rule, not the endpoint check.
+        assert!(d.contains(Point::new(1, 1)));
+        assert!(!legal_move(&d, s_clip, Action::East));
     }
 
     #[test]
