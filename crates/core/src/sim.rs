@@ -440,18 +440,8 @@ fn quench_velocity(d: &Corridor, l: Point, vx: i32, vy: i32) -> (i32, i32) {
     (vx, vy)
 }
 
-/// Resolves several cars occupying the same point (design doc §3) — a layer
-/// *outside* movement physics.
-///
-/// Each displaced car is moved to the nearest free point by in-`D` geodesic BFS
-/// (4-conn, seeded-RNG shuffle for replay determinism). The displaced car keeps
-/// its velocity (zeroing it would revive the "ram the pack to brake" abuse); the
-/// displacement is a teleport — no supercover check, no lap-counter change.
-///
-/// TODO(3a): BFS-outward nearest-free placement.
-pub fn resolve_collisions(_d: &Corridor, _cars: &mut [CarState]) {
-    todo!("car-collision resolution (design doc §3)")
-}
+mod collision;
+pub use collision::resolve_collisions;
 
 #[cfg(test)]
 mod tests {
