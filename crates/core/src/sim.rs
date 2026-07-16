@@ -126,9 +126,35 @@ pub fn legal_mask(d: &Corridor, s: CarState) -> BitFlags<Action> {
 
 /// Advances one car by one (assumed-legal) action, returning the new state.
 ///
-/// TODO(3a): apply `(vx',vy') = v + accel`, then `pos += (vx',vy')`.
-pub fn step(_d: &Corridor, _s: CarState, _a: Action) -> CarState {
-    todo!("step (design doc §3)")
+/// Accelerate-then-advance (design doc §3): `(vx', vy') = (vx + ax, vy + ay)`,
+/// then `(x', y') = (x + vx', y + vy')`, where `(ax, ay)` is `a`'s
+/// [`accel()`](Action::accel).
+///
+/// **Assumed-legal precondition:** `step` performs no legality check — that is
+/// [`legal_move`]'s sole job. Callers must pass an `a` that is legal for `s`
+/// (i.e. `legal_move(d, s, a)` holds for the relevant corridor `d`); behavior
+/// for an illegal action is unsupported.
+///
+/// **Overflow precondition:** the four adds this function performs — `vx + ax`,
+/// `vy + ay`, `x + vx'`, `y + vy'` — are exactly the four sums [`legal_move`]
+/// computes via its `checked_add` chain and proves in-range (never overflowing
+/// `i32`) before returning `true`. On the assumed-legal domain above, these
+/// plain adds therefore never overflow.
+#[inline]
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "assumed-legal precondition above: the four adds mirror legal_move's \
+              checked_add chain, which proves them in-range for any action legal \
+              under legal_move/legal_mask; out-of-domain (illegal-action) input is \
+              unsupported, per this fn's documented precondition"
+)]
+pub const fn step(s: CarState, a: Action) -> CarState {
+    let (ax, ay) = a.accel();
+    let vx = s.vx + ax;
+    let vy = s.vy + ay;
+    let x = s.x + vx;
+    let y = s.y + vy;
+    CarState { x, y, vx, vy }
 }
 
 /// Signed start/finish crossing counter (design doc §3).
