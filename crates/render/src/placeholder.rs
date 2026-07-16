@@ -245,6 +245,19 @@ mod tests {
     /// calls `render()` once and feeds that same image to both the guard and
     /// `try_image_snapshot_options`).
     #[test]
+    // Miri cannot execute foreign functions, and this test drives wgpu, which
+    // `dlopen`s the Vulkan ICD via `libloading` (`error: unsupported operation:
+    // can't call foreign function `dlopen` on OS `linux``). Without this gate
+    // the advisory workspace Miri job aborts here, losing this crate's whole
+    // binary — `tessellation_smoke` included, though it is pure CPU and passes
+    // under Miri — and, via cargo's fail-fast, every phase queued behind it
+    // (the doc-test phase never started). Other crates' unittest binaries happen
+    // to be scheduled earlier, so they survive; that is binary ordering, not a
+    // guarantee.
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
     fn golden_guard() {
         // `HarnessBuilder::renderer(..)` (used below) bypasses the builder's
         // `render_options` field entirely — its default `PREDICTABLE` value
