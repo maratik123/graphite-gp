@@ -4,8 +4,8 @@
 //! engine that the renderer and AI training both drive — the technical guarantee
 //! that "bots play the same game" as the player.
 
-use crate::geom::{Corridor, Point, supercover};
-use crate::track::{RaceDir, StartFinish};
+use crate::geom::{Corridor, Point, Side, supercover};
+use crate::track::StartFinish;
 use enumflags2::bitflags;
 
 /// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
@@ -193,20 +193,86 @@ impl LapCounter {
         self.counter
     }
 
-    /// Registers the move segment `from → to` against the S/F chord: `+1` for a
-    /// forward crossing (along `race_dir`), `−1` for a reverse one, at most one
-    /// event per move. Scored *before* collision resolution — teleports never
-    /// touch the counter.
+    /// Registers the move segment `from → to` against `sf`'s timing gate and
+    /// mutates the counter: `+1` for a forward crossing, `−1` for a reverse one,
+    /// no change otherwise — **at most one event per call**, even for a long
+    /// chord (a straight segment's perpendicular coordinate is monotone, so it
+    /// meets the gate line at most once).
     ///
-    /// TODO(3a): the signed segment/chord crossing test.
-    pub fn register_move(
-        &mut self,
-        _sf: &StartFinish,
-        _race_dir: RaceDir,
-        _from: Point,
-        _to: Point,
-    ) {
-        todo!("signed S/F crossing (design doc §3)")
+    /// The gate's supporting line is the **half-grid dual edge** one edge ahead
+    /// of the `behind` row (design doc §2 Ф3, §3 \[C2\]) — not any integer cell
+    /// line — so no real `Point` ever lands on it. The classification is
+    /// half-open: `from` strictly behind (`−`) and `to` ahead-**or**-on-line
+    /// (`+`) is forward; `from` ahead-or-on-line and `to` strictly behind is
+    /// reverse. Because the on-line branch is geometrically unreachable for
+    /// integer `Point`s, every real chord is scored purely by the behind/ahead
+    /// partition. The sign derives from `sf.gate.forward` alone (the local
+    /// `+race_dir` projection) — there is no separate race-direction parameter.
+    ///
+    /// Scores the swept `from → to` of the *committed legal move* only: no
+    /// teleport handling, no collision/crash resolution. Callers **must** gate
+    /// this call on [`legal_move`] first — `register_move` itself is
+    /// legality-agnostic (the single legality path stays in `legal_move`), so
+    /// an illegal chord's crossing must never reach here.
+    ///
+    /// No-op (does not panic) when `sf.gate.behind` is empty — a degenerate gate
+    /// has no supporting line to cross.
+    pub fn register_move(&mut self, sf: &StartFinish, from: Point, to: Point) {
+        let Some(&r) = sf.gate.behind.first() else {
+            return;
+        };
+        let from_c = gate_coord(from, r, sf.gate.forward);
+        let to_c = gate_coord(to, r, sf.gate.forward);
+        self.counter = self.counter.saturating_add(crossing_event(from_c, to_c));
+    }
+}
+
+/// The half-grid gate line's coordinate value — the odd midpoint between the
+/// `behind` row (`0`) and the `behind + forward` row (`+2`). Real integer
+/// `Point`s always yield an even [`gate_coord`], so this value is unreachable
+/// in play (design doc §2 Ф3).
+const GATE_LINE: i32 = 1;
+
+/// The doubled signed perpendicular coordinate of `p` relative to the gate's
+/// reference cell `r` (`sf.gate.behind[0]`) along `forward`'s unit axis
+/// (`forward.delta()`): `2 * ((p.x − r.x)·dx + (p.y − r.y)·dy)`.
+///
+/// The `behind` row (`r`'s row) maps to `0`, `behind + forward` to `+2`, and
+/// each further row to a further `±2` — always even. Doubling is what turns
+/// the half-grid gate line into an addressable integer ([`GATE_LINE`], the odd
+/// midpoint `1`) without a fractional coordinate.
+///
+/// **Precondition:** `p`, `r`, and every other point this is evaluated against
+/// in the same call lie in the grid-realistic, allocatable-corridor domain
+/// that `supercover`/`Size::area`/`step` also document — pairwise coordinate
+/// differences and the `×2` doubling stay within `i32`. Not proven for
+/// adversarial out-of-domain `Point`s.
+#[inline]
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "in-D precondition documented above: p/r are grid-realistic, \
+              allocatable-corridor coordinates (matching supercover/step/Size::area's \
+              domain), so the subtractions and doubling stay within i32"
+)]
+const fn gate_coord(p: Point, r: Point, forward: Side) -> i32 {
+    let (dx, dy) = forward.delta();
+    2 * ((p.x - r.x) * dx + (p.y - r.y) * dy)
+}
+
+/// The signed crossing event for a chord whose endpoints have doubled
+/// perpendicular coordinates `from_c` / `to_c` (see [`gate_coord`]): `+1`
+/// forward (`from_c` strictly `< GATE_LINE`, `to_c >= GATE_LINE`), `−1` reverse
+/// (`from_c >= GATE_LINE`, `to_c < GATE_LINE`), `0` otherwise.
+///
+/// Pure comparison — no arithmetic side effects, hence no overflow precondition
+/// and no `#[allow]`.
+const fn crossing_event(from_c: i32, to_c: i32) -> i32 {
+    if from_c < GATE_LINE && to_c >= GATE_LINE {
+        1
+    } else if from_c >= GATE_LINE && to_c < GATE_LINE {
+        -1
+    } else {
+        0
     }
 }
 
