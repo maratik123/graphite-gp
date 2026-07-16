@@ -384,6 +384,42 @@ mod tests {
     }
 
     #[test]
+    fn legal_move_rejects_wall_clipping_chord() {
+        // AC3: a clear in-corridor chord is legal; a chord whose supercover
+        // clips a wall cell (not itself the endpoint) is illegal.
+        let mut d = Corridor::new(Point::new(0, 0), 4, 4);
+        d.set(Point::new(0, 0), true);
+        d.set(Point::new(1, 0), true);
+        d.set(Point::new(2, 0), true);
+        d.set(Point::new(1, 1), true);
+        // (0,1) is deliberately left off-D.
+
+        // Clear chord: (0,0) + Coast, v=(2,0) -> p1=(2,0). supercover =
+        // {(0,0),(1,0),(2,0)} ⊆ D.
+        let s_clear = CarState {
+            x: 0,
+            y: 0,
+            vx: 2,
+            vy: 0,
+        };
+        assert!(legal_move(&d, s_clear, Action::Coast));
+
+        // Wall-clipping chord: (0,0) + East, v=(0,1)+accel(1,0)=(1,1) ->
+        // p1=(1,1). supercover((0,0),(1,1)) is the dual-vertex tie, all four of
+        // {(0,0),(1,0),(0,1),(1,1)}; (0,1) is off-D, so the move is illegal.
+        let s_clip = CarState {
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 1,
+        };
+        // Non-vacuous: p1 itself is drivable, so rejection comes from the
+        // supercover rule, not the endpoint check.
+        assert!(d.contains(Point::new(1, 1)));
+        assert!(!legal_move(&d, s_clip, Action::East));
+    }
+
+    #[test]
     fn legal_mask_contains_exactly_the_legal_actions() {
         // AC2: legal_mask contains exactly the actions for which legal_move is
         // true. Carve a corridor so the car at the center has only Coast/East/West
