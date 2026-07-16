@@ -4,7 +4,9 @@
 **Date:** 2026-07-16
 **Tracked in:** #10 (fully resolved) · #49 (partially resolved — dep adoption + seed→ChaCha wiring; generator stochastic usage deferred)
 
-**Amendment (2026-07-16, product-owner directed).** Collision detection is now **same-final-cell only** — the conflict predicate is exactly `A.pos == B.pos` (two or more cars ending the turn on the same cell). The swap / pass-through detector (design.md [D1]/[N2]) is **dropped**: cell-swaps (A:P→Q while B:Q→P), head-on / mid-segment threading, and orthogonal path crossings that end on **distinct** cells are all **allowed**. Rationale to record: design.md [D1(a)] already states "no traffic physics — chokepoints are positional/visual", so two cars ending on distinct cells have no occupancy conflict and forcing a displacement would be gratuitous. Because the two canonical documents still mandate the now-dropped swap check, this task **also corrects them** (`docs/design.md`, `docs/design-review.md`). The seeded ChaCha RNG stack and the same-cell resolution machinery (#49) are unchanged and still required (they drive the same-cell winner shuffle, displacement order, and equidistant tie-break).
+**Amendment 1 (2026-07-16, product-owner directed).** Collision detection is now **same-final-cell only** — the conflict predicate is exactly `A.pos == B.pos` (two or more cars ending the turn on the same cell). The swap / pass-through detector (design.md [D1]/[N2]) is **dropped**: cell-swaps (A:P→Q while B:Q→P), head-on / mid-segment threading, and orthogonal path crossings that end on **distinct** cells are all **allowed**. Rationale to record: design.md [D1(a)] already states "no traffic physics — chokepoints are positional/visual", so two cars ending on distinct cells have no occupancy conflict and forcing a displacement would be gratuitous. Because the two canonical documents still mandate the now-dropped swap check, this task **also corrects them** (`docs/design.md`, `docs/design-review.md`). The seeded ChaCha RNG stack and the same-cell resolution machinery (#49) are unchanged and still required (they drive the same-cell winner shuffle, displacement order, and equidistant tie-break).
+
+**Amendment 2 (2026-07-16, PR #68 review, product-owner directed) — RNG handle, not a per-call seed.** `resolve_collisions` now receives the **physics RNG by mutable reference as a shared, long-lived handle** — NOT a per-call `seed: u64` it re-seeds internally. The caller (the block-3b game loop, out of scope) owns **one** long-lived physics `ChaCha8Rng`, seeded once at race start and advanced across turns; `resolve_collisions` just draws from it (shuffle order + equidistant tie index). This **supersedes** Amendment 1's / the design's earlier "constructs its ChaCha RNG internally via `seed_from_u64`" decision and the earlier "Rejected `&mut impl RngCore`" note. Broader intent recorded here: **four independent long-lived RNG streams** — (1) physics/simulation, (2) track generation, (3) AI learning, (4) AI inference — so each domain's draws stay independent and separately reproducible. **Actionable now:** the physics-RNG handle on `resolve_collisions` (Part A) + the existing gp-gen track-gen stream (`GenParams::rng`, Part B). **Deferred:** the AI-learning + AI-inference streams (gp-ai is `todo!`) and the game-loop ownership/advancement of the physics stream across turns (block 3b). Nothing about the collision predicate changes — Amendment 1's same-final-cell rule and all its content stay intact; this amendment changes only the RNG param shape / RNG-instance architecture.
 
 Both issues share one thread: the seeded, replay-deterministic RNG stack. The user
 folded #49 in because #10 is the first *real* consumer of that stack (the collision
@@ -20,9 +22,9 @@ predicate is same final cell only: `A.pos == B.pos`.** Algorithm:
 
 1. **Group by same final cell.** Cars that end the turn on the exact same cell form a
    conflict group. There is no other conflict class.
-2. **Seeded shuffle.** Under the ChaCha RNG (below), shuffle the groups and the cars
-   within each group. The shuffle decides which car stays (wins) and the displacement
-   order.
+2. **RNG-driven shuffle.** Drawing from the caller-owned ChaCha RNG handle, shuffle the
+   groups and the cars within each group. The shuffle decides which car stays (wins) and
+   the displacement order.
 3. **First car stays, occupied *before* displacements.** The first car of each group
    keeps its cell and is entered into the occupied set before any car is moved — this
    same step covers singletons (non-colliding cars), so there is one universal path.
@@ -49,13 +51,19 @@ there is **no** supercover-overlap check, **no** velocity dot-product, and **no*
 forcing a displacement on cars that end apart would be gratuitous.
 
 **Signature (clean break, zero callers — verified).** From
-`resolve_collisions(_d: &Corridor, _cars: &mut [CarState])` to
-`resolve_collisions(d: &Corridor, cars: &mut [CarState], seed: u64)`. The `seed` is
-**still needed** — it drives the same-cell winner/displacement shuffle and the
-equidistant nearest-free tie-break. `resolve_collisions` constructs its ChaCha RNG
-internally via `SeedableRng::seed_from_u64(seed)`, so no third-party RNG type crosses
-gp-core's public API (no re-export needed). Exact param shape (seed vs `&mut impl
-RngCore`) is design's call.
+`resolve_collisions(_d: &Corridor, _cars: &mut [CarState])` to a form that **receives the
+physics RNG by mutable reference** — e.g.
+`resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut ChaCha8Rng)`
+(Amendment 2). The caller owns one long-lived physics `ChaCha8Rng`, seeded once at race
+start and advanced across turns; `resolve_collisions` **draws from** it for the same-cell
+winner/displacement shuffle and the equidistant nearest-free tie-break — it does **not**
+construct or re-seed an RNG internally. A concrete `&mut ChaCha8Rng` puts a definite
+`rand_chacha` type in gp-core's public API; that is acceptable here precisely because the
+point is to **share the one concrete instance across turns**. (The earlier "Rejected
+`&mut impl RngCore`" objection was about a *generic* `&mut impl RngCore` bound leaking
+`rand_core` into the public API — it does not apply to a *concrete* shared handle.) The
+exact param type — `&mut ChaCha8Rng` concrete vs `&mut impl RngCore` generic vs a gp-core
+RNG newtype — is design's call, but it **MUST be a shared handle, not a seed**.
 
 ### Part B — seeded RNG adoption in `gp-gen` (#49, `crates/gen/`) — actionable subset
 
@@ -75,10 +83,30 @@ for all stochastic choices in generation" has no call sites yet → that part is
 ### Part A/B shared — dependency stack (#10 + #49)
 
 Add `rand` + `rand_chacha` to **both** `crates/core/Cargo.toml` and `crates/gen/Cargo.toml`
-(each crate is an independent consumer). Each crate constructs its own ChaCha RNG from a
-`u64` seed — no shared RNG newtype (only 2 consumer sites, below the ≥3-site threshold for
-a shared extraction; design may revisit). rand supplies the shuffle + uniform-index
-sampling traits; rand_chacha supplies the portable, version-stable ChaCha stream engine.
+(each crate is an independent consumer). gp-gen constructs its own track-generation ChaCha
+RNG from `GenParams.seed` (`GenParams::rng`); gp-core's `resolve_collisions` does **not**
+construct an RNG — it **receives** a caller-owned physics `ChaCha8Rng` handle by `&mut`
+(Amendment 2). No shared RNG newtype today (below the ≥3-site threshold for a shared
+extraction; design may revisit). rand supplies the shuffle + uniform-index sampling traits;
+rand_chacha supplies the portable, version-stable ChaCha stream engine and the concrete
+`ChaCha8Rng` handle type shared across turns.
+
+### Per-domain RNG architecture (record; actionable vs deferred) (#68 Amendment 2)
+
+The intended design is **four independent long-lived RNG streams**, one per domain, so each
+domain's draws stay independent and each is separately reproducible:
+
+1. **Physics / simulation** — collisions (this task) and future physics stochastic bits.
+   *Actionable now:* the `&mut ChaCha8Rng` handle on `resolve_collisions` (Part A).
+2. **Track generation** — gp-gen. *Already present:* `GenParams::rng` returns the track-gen
+   `ChaCha8Rng` stream (Part B).
+3. **AI learning** — gp-ai. *Deferred* (gp-ai is `todo!`).
+4. **AI inference** — gp-ai. *Deferred* (gp-ai is `todo!`).
+
+Do **not** invent an RNG-registry / RNG-manager type or plumb the not-yet-built AI domains
+now. The game-loop ownership and per-turn advancement of the physics stream (seeding once at
+race start, threading one `&mut ChaCha8Rng` across turns) is a **block-3b game-loop concern**
+and is likewise **Deferred** — `resolve_collisions` only borrows the handle for one call.
 
 ### Part C — correct the canonical docs (#10 amendment, product-owner directive)
 
@@ -118,8 +146,10 @@ distinct cells allowed) and must **not** fabricate a new review round.
 
 - Wiring `resolve_collisions` into `step` / the game loop — zero callers today; the issue
   scope is the function itself.
-- The master-seed → per-turn-seed derivation for collisions (a replay / game-loop concern,
-  block 3b). `resolve_collisions` receives an already-deterministic `u64`.
+- Game-loop ownership and per-turn advancement of the long-lived physics RNG (seeding the
+  physics `ChaCha8Rng` once at race start and threading it across turns) — a replay /
+  game-loop concern, block 3b. `resolve_collisions` only borrows the caller-owned handle for
+  the duration of one call.
 - Occupancy / traffic physics — design §3 [D1(a)]: chokepoints are positional / visual only;
   no queuing / blocking mechanic and no swap/pass-through detector. Cars that swap, thread,
   or cross but **end on distinct cells** are allowed unchanged — the collision layer resolves
@@ -139,6 +169,13 @@ distinct cells allowed) and must **not** fabricate a new review round.
 - gp-gen: using the ChaCha RNG for the generator's stochastic choices (Ф1–Ф7 sampling) |
   `generate()` is `todo!`; no stochastic call sites exist yet | folds into the gp-gen
   generator implementation task (block 1); #49 stays open for that remainder.
+- Per-domain RNG streams for **AI learning** and **AI inference** (streams 3 & 4 of the
+  four-stream architecture) | gp-ai is `todo!` — no call sites for those streams yet | folds
+  into the gp-ai implementation tasks (block 4).
+- Game-loop ownership / per-turn advancement of the long-lived physics RNG stream (seeding
+  once at race start, threading one `&mut ChaCha8Rng` across turns) | the game loop (block 3b)
+  is not built yet; `resolve_collisions` only borrows the handle | folds into the block-3b
+  game-loop / race-driver task.
 
 ## Key decisions
 
@@ -147,10 +184,12 @@ distinct cells allowed) and must **not** fabricate a new review round.
 | Conflict predicate | **Same final cell only: `A.pos == B.pos`** (product-owner amendment, 2026-07-16). Cars ending on distinct cells never conflict, even if their move-segments swap, thread, or cross. |
 | Swap / pass-through detector | **Dropped** — no such detector, no supercover-overlap check, no velocity dot-product, no `from = pos − v` derivation. Swaps / mid-segment / orthogonal crossings ending on distinct cells are allowed (design §3 [D1(a)] "no traffic physics"). |
 | Canonical-doc correction | This task corrects `docs/design.md` §3 [D1]/[N2] (+ the §6 review-order / status / "Решённые" lines) and the `docs/design-review.md` [D1]/[N2] entries so they stop mandating the swap check. Described in Scope Part C; executed by the code-writer, not the spec. |
-| RNG stack | `rand` + `rand_chacha` — a rand_chacha ChaCha stream seeded from a `u64` via rand's `SeedableRng` (portable, version-stable across machines & runs). Not `SmallRng`, not `fastrand`, not a hand-rolled PRNG. Still required: it drives the same-cell shuffle + equidistant tie-break. |
-| Dep placement | Both `gp-core` and `gp-gen` declare `rand` + `rand_chacha` directly. gp-core keeps them internal (seed is a plain `u64` param — no third-party type in its public API, no re-export). |
-| Shared RNG newtype? | No — each crate builds its own ChaCha RNG from the seed. Only 2 consumer sites (gp-core, gp-gen), below the ≥3-site shared-extraction threshold; design may revisit. |
-| `resolve_collisions` callers today | Zero (verified) — signature change to add `seed: u64` is a clean break. |
+| RNG stack | `rand` + `rand_chacha` — a rand_chacha ChaCha stream (portable, version-stable across machines & runs). Not `SmallRng`, not `fastrand`, not a hand-rolled PRNG. Still required: it drives the same-cell shuffle + equidistant tie-break. |
+| RNG param shape (physics) | **`resolve_collisions` receives a shared, long-lived `&mut ChaCha8Rng` handle**, not a per-call `seed: u64` (product-owner Amendment 2, PR #68). The caller owns one physics RNG, seeded once at race start and advanced across turns; the function draws from it and never re-seeds. **Supersedes** Amendment 1's "constructs its ChaCha RNG internally via `seed_from_u64`" and the earlier "Rejected `&mut impl RngCore`" note (that objection was a *generic* bound leaking `rand_core`; a *concrete* shared `&mut ChaCha8Rng` is fine and is the whole point). Exact type (`&mut ChaCha8Rng` vs `&mut impl RngCore` vs a gp-core RNG newtype) is design's call — but MUST be a shared handle. |
+| Per-domain RNG streams | **Four independent long-lived streams** — physics/simulation, track generation, AI learning, AI inference — so each domain's draws stay reproducible independently (PR #68). Actionable now: physics handle on `resolve_collisions` + gp-gen's `GenParams::rng`. AI-learning / AI-inference streams and the game-loop's ownership/advancement of the physics stream are Deferred (gp-ai / block 3b not built). No RNG-registry type invented now. |
+| Dep placement | Both `gp-core` and `gp-gen` declare `rand` + `rand_chacha` directly. gp-gen keeps its RNG internal (`GenParams::rng`); gp-core's `resolve_collisions` now takes a concrete `&mut ChaCha8Rng` in its **public** signature (a definite `rand_chacha` type in the API) — accepted deliberately because the point is sharing the one concrete physics instance across turns. |
+| Shared RNG newtype? | No — no wrapper today. gp-gen builds its own ChaCha RNG from its seed; gp-core borrows a caller-owned handle. Below the ≥3-site shared-extraction threshold; design may revisit (a gp-core RNG newtype is one of the type options for Part A). |
+| `resolve_collisions` callers today | Zero (verified) — the signature change from `seed: u64` to a `&mut ChaCha8Rng` handle is a clean break. |
 | Velocity representation | `CarState { x, y, vx, vy }`; "velocity retained" = `vx`/`vy` left unchanged by displacement. |
 | Lap-counter interaction | `LapCounter` is a *separate* struct, not a field of `CarState`; "untouched" = `resolve_collisions` neither receives nor mutates a `LapCounter`. |
 | Nearest-free engine | Reuse `CorridorScratch::geodesic_bfs` / `geodesic_layers` (#5); layers are unordered tie-sets, RNG selects within a layer. |
@@ -160,9 +199,18 @@ distinct cells allowed) and must **not** fabricate a new review round.
 
 ## Technical constraints
 
-- **Determinism / replay is a hard AC** for both parts: same seed + same inputs ⇒
-  byte-identical output. **No `thread_rng`, no OS entropy** on either the collision path or
-  the generation path — construct the RNG only from the explicit seed.
+- **Determinism / replay is a hard AC** for both parts: **same RNG state + same inputs ⇒
+  byte-identical output** — for the physics path, the same seeded `ChaCha8Rng` state passed
+  by the caller; for the generation path, the same `GenParams.seed`. **No `thread_rng`, no OS
+  entropy** on either path — the RNG derives only from an explicit seed (caller-side for
+  physics, `GenParams.seed` for generation). The physics function itself never seeds; it
+  draws from the caller-owned handle in a fixed consumption order.
+- **Fixed RNG-consumption order (unchanged by Amendment 2).** Canonical pre-shuffle group
+  order via `groups.sort_unstable_by_key(|g| g[0])` (the unique min car index, RNG-independent)
+  → `groups.shuffle` → per-group `group.shuffle` → per-loser `u32` tie draw (only when the
+  nearest-free BFS layer has >1 candidate cell). Only the RNG *source* changes (caller-owned
+  handle vs internally seeded); the consumption sequence and the `u32` tie-draw width MUST NOT
+  drift — they are what make the output byte-identical across 32-/64-bit targets.
 - **Integer-only core** (design §3a): the ChaCha RNG yields `u32`/`u64`, consumed only as
   an integer shuffle order and an integer uniform index among equidistant free cells — no
   non-integer arithmetic enters the physics core.
@@ -187,11 +235,11 @@ distinct cells allowed) and must **not** fabricate a new review round.
 |---|-----------|
 | AC1 | Singletons / non-colliding cars are handled by the same path — the group's first car is occupied before displacements, so a lone car is unchanged. |
 | AC2 | A displaced car lands on the first BFS layer that contains a free cell (nearest by in-`D` 4-conn geodesic distance). |
-| AC3 | Equidistant free cells are resolved by the seeded RNG; the same seed yields an identical pick. |
+| AC3 | Equidistant free cells are resolved by the caller-owned ChaCha RNG (drawn as a `u32` tie index); the same RNG state (a `ChaCha8Rng` seeded from the same seed) yields an identical pick. |
 | AC4 | A displaced car retains its velocity (`vx`/`vy` unchanged); no `LapCounter` is touched; no supercover check runs on the teleport. |
 | AC5 | Cars whose move-segments swap or cross (cell-swap, head-on / mid-segment threading, or orthogonal crossing) but **end on distinct cells** are left **unchanged** — only same-final-cell conflicts (`A.pos == B.pos`) are resolved (no traffic physics; design §3 [D1(a)]). |
 | AC6 | Resolution is a single linear pass — occupancy updated after each placement; no cascades or cycles. |
-| AC7 | `resolve_collisions` determinism: same seed + same inputs ⇒ byte-identical final positions and velocities across repeated calls. |
+| AC7 | `resolve_collisions` determinism: passing a `ChaCha8Rng` seeded from the same seed (`ChaCha8Rng::seed_from_u64(K)`) by `&mut`, with the same inputs, yields byte-identical final positions and velocities across repeated calls. The function draws from the caller's handle and never re-seeds. |
 | AC8 | Collision tests cover, asserting exact final positions and velocities: **resolve cases** — three cars into one cell, and a car displaced into an occupied ring; **allowed cases** — two cars swapping cells and two cars threading segments while ending on distinct cells are left **unchanged** (positions and velocities intact). |
 | AC9 | `rand` + `rand_chacha` are added to both `crates/core/Cargo.toml` and `crates/gen/Cargo.toml`, pinned `0.10` / `0.10`; `cargo build` + `cargo clippy --workspace --all-targets -- -D warnings` pass. |
 | AC10 | `gp-gen` exposes a seeded ChaCha RNG constructed from `GenParams.seed` via `SeedableRng::seed_from_u64`; no `thread_rng` / OS entropy on the generation path. |
@@ -205,4 +253,12 @@ distinct cells allowed) and must **not** fabricate a new review round.
   BFS exhausts with no free cell. Defensible default for design — keep the car at its
   colliding position (degenerate same-cell overlap only in this pathological case, cars ≤
   cells normally); ties to the deferred radius-cap. Not exercised by the mandatory ACs.
-- **ChaCha variant** (8 / 12 / 20) — design default (all portable & version-stable).
+- **ChaCha variant** (8 / 12 / 20) — design default (all portable & version-stable). The
+  current code uses `ChaCha8Rng`, which is also the concrete handle type in Amendment 2's
+  physics signature.
+- **design.md doc-correction for the Amendment-2 RNG-handle change?** None found — flagged
+  for the design phase to confirm. design.md does **not** pin a Rust signature for
+  `resolve_collisions`, and its generator [N4] "RNG/`race_dir` в сигнатурах" pseudocode already
+  threads `rng` **by handle** (not a seed) — consistent with the shared-handle model — so no
+  `docs/design.md` edit is warranted for Amendment 2 (do **not** fabricate a review round).
+  The Amendment-1 same-final-cell doc corrections (AC12/AC13) are unaffected and still stand.

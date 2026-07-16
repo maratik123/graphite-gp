@@ -58,11 +58,13 @@ cell in `D`, normal→0 / tangential→`⌊t/2⌋`, one forced-`Coast` scrub tic
 `L∈D`-guarded whole-vector-halving fail-safe that never yields a penalty-free
 `v=0`) — returns a `CrashOutcome` with `action_mask` / `consume_scrub` (issue #9).
 `sim::resolve_collisions` — **same-final-cell** collision resolution (issues #10 +
-#49): a seeded `rand_chacha` ChaCha8 RNG (cross-arch-reproducible) picks the winner
-and displacement order for cars sharing a final cell; losers teleport to the
-nearest free cell via geodesic BFS, velocity retained. Per a product-owner
-amendment (2026-07-16) the predicate is same-final-cell only — swap/pass-through
-detection was dropped, so crossings ending on distinct cells are allowed. The
+#49): a caller-owned `rand_chacha` ChaCha8 RNG handle (`&mut ChaCha8Rng`,
+cross-arch-reproducible) picks the winner and displacement order for cars sharing
+a final cell; losers teleport to the nearest free cell via geodesic BFS, velocity
+retained. Per product-owner amendments (2026-07-16) the predicate is
+same-final-cell only (swap/pass-through detection dropped, so crossings ending on
+distinct cells are allowed), and the RNG is a shared per-domain stream handle
+(physics / track-gen / AI) rather than a per-call seed. The
 `rand` + `rand_chacha` (`0.10`, `default-features = false` → no `getrandom`) stack
 is adopted in both `gp-core` and `gp-gen`, with a seeded `GenParams::rng()`; the
 core still carries **zero production panics**. The remaining algorithms (generation
