@@ -57,15 +57,26 @@ timing gate, with the `legal_move`-first valid-finish conjunction (issue #8).
 cell in `D`, normal→0 / tangential→`⌊t/2⌋`, one forced-`Coast` scrub tick, and an
 `L∈D`-guarded whole-vector-halving fail-safe that never yields a penalty-free
 `v=0`) — returns a `CrashOutcome` with `action_mask` / `consume_scrub` (issue #9).
-The remaining algorithms (collision resolution, generation pipeline, oracle,
-feature extraction, policy) are still `todo!()`. See the `TODO(<block>)` markers.
+`sim::resolve_collisions` — **same-final-cell** collision resolution (issues #10 +
+#49): a caller-owned `rand_chacha` ChaCha8 RNG handle (`&mut ChaCha8Rng`,
+cross-arch-reproducible) picks the winner and displacement order for cars sharing
+a final cell; losers teleport to the nearest free cell via geodesic BFS, velocity
+retained. Per product-owner amendments (2026-07-16) the predicate is
+same-final-cell only (swap/pass-through detection dropped, so crossings ending on
+distinct cells are allowed), and the RNG is a shared per-domain stream handle
+(physics / track-gen / AI) rather than a per-call seed. The
+`rand` + `rand_chacha` (`0.10`, `default-features = false` → no `getrandom`) stack
+is adopted in both `gp-core` and `gp-gen`, with a seeded `GenParams::rng()`; the
+core still carries **zero production panics**. The remaining algorithms (generation
+pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
+`TODO(<block>)` markers.
 
 ## Build
 
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 90 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step + lap counter + crash rule)
+cargo test             # 97 gp-core + 2 gp-gen tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step + lap counter + crash rule + collisions + seeded RNG)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
