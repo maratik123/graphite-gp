@@ -1,5 +1,12 @@
 /target
 
+# egui_kittest golden-image test artifacts (never the committed golden itself).
+# Brace expansion is inert in git's fnmatch — three separate lines, not one
+# `*.{diff,new,old}.png` pattern (design: 2026-07-16-render-backend-decision, finding 10).
+**/tests/snapshots/**/*.diff.png
+**/tests/snapshots/**/*.new.png
+**/tests/snapshots/**/*.old.png
+
 # Harness local-only state (see AGENTS.md § Agent Docs)
 /ai-docs/plans/**/*.progress.md
 /ai-docs/pr-comments/

@@ -104,6 +104,18 @@ jobs:
         run: cargo build --workspace --tests --keep-going
       - name: Test
         run: cargo test --workspace --tests --no-fail-fast
+      - name: Upload golden-image failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gp-render-golden-diffs
+          # One pattern per line — @actions/glob sets `nobrace: true`, so a
+          # brace-expansion form (`*.{diff,new}.png`) matches nothing and
+          # would make this a silent no-op with `if-no-files-found: ignore`.
+          path: |
+            crates/render/tests/snapshots/**/*.diff.png
+            crates/render/tests/snapshots/**/*.new.png
+          if-no-files-found: ignore
 
   clippy:
     name: Clippy (lint)
