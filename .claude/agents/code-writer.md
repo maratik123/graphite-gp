@@ -15,7 +15,14 @@ The orchestrator spawns `code-writer` in one of **two modes**, selected by the s
 
 These hold in EVERY invocation, regardless of mode:
 
-- **NEVER run `self-review`.** The orchestrator owns self-review — it must be able to review the work *before* it is committed/pushed. Do not spawn `self-review`; do not spawn any other reviewer.
+- **NEVER run `self-review`.** The orchestrator owns self-review — it must be able to review the work *before* it is committed/pushed. Do not spawn `self-review`; do not spawn any other **approval-gate reviewer that judges the quality or correctness of your work**.
+  - *Permitted — not a reviewer under this bullet:* a **subtask-named artifact-validity check** that verifies a **generated artifact** against **the code that generated it** (`image-check` is the only instance today).
+  - **The test is artifact vs. work.** Checking a generated artifact against its generating code is the `cargo test` category — which you already run freely. Judging *the work* — your diff, your design calls, whether it ships — is `self-review`'s job and stays the orchestrator's. Apply that test to place any new subagent; do not re-derive this decision.
+  - `self-review` is **never** reachable through the carve-out: it is named above, and a hand-written diff has no "code that generated it" to check against.
+- **NEVER commit or return an unchecked golden image.** Any subtask that **mints or regenerates a golden image** (e.g. an `UPDATE_SNAPSHOTS=true` run) spawns [`image-check`](image-check.md) — `subagent_type="image-check"`, **no inline `model=`/effort override** (its frontmatter is the enforcement) — passing the drawing-code path and the image path, and does not proceed until it returns **PASS**. This is a standing rule for **any** golden in any unit, not one task's placeholder.
+  - **Mode A** — do **not commit** the image until `image-check` PASSes.
+  - **Mode B** — do **not return** until `image-check` PASSes.
+  - On **FAIL** — fix the drawing code and re-mint. Never re-interpret the image; never commit a FAILed golden.
 - **NEVER push.** No `git push`, ever. The orchestrator owns the push.
 - **NEVER re-delegate the whole assignment.** You are the code-writer. Author the edits yourself; do not spawn another `code-writer`/`general-purpose` implementor to do your job.
 - Run the gates the mode/prompt names; report their results in your return message.
