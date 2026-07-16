@@ -8,7 +8,7 @@ The finalized design and its full rationale live in [`docs/design.md`](../docs/d
 
 **Context.** Issue #11 is the foundational decision unit for Block 2 — `gp-render` ([`docs/design.md`](../docs/design.md) §4 *Рендеринг + UX*, §6 *Архитектура*); the other twelve `block:render` issues (#12–#23) all sit downstream of the pick. The design system to port (`docs/design-system/`) specifies flat vector geometry on a lattice, hairline pencil borders, crisp radii, and no photographic imagery. The downstream units cover **13 components** (#13–#16) across **4 screens** (#19–#22).
 
-**Decision.** **eframe/egui 0.35** — `egui` is the draw layer, `eframe` the window/loop shell. Verified live 2026-07-16: `egui` and `eframe` `max_stable_version` = **0.35.0**; MSRV 1.92 ≤ the workspace's `rust-version = 1.97.0`; eframe's **default** renderer is wgpu (glow is opt-in), which matches the CI `WGPU_BACKEND=vulkan` env as-is.
+**Decision.** **eframe/egui 0.35** — `egui` is the draw layer, `eframe` the window/loop shell. Verified live 2026-07-16: `egui` and `eframe` `max_stable_version` = **0.35.0**; MSRV 1.92 ≤ the workspace's `rust-version = 1.97.1`; eframe's **default** renderer is wgpu (glow is opt-in), which matches the CI `WGPU_BACKEND=vulkan` env as-is.
 
 **(a) Why it fits the aesthetic.** egui's `Painter` draws the design system's vocabulary directly — flat fills, strokes, and lines on a lattice — with no photographic or raster-asset pipeline to fight. Verified against `egui-0.35.0/src/painter.rs`: `rect_filled` (:397) and `rect_stroke` (:406) give crisp shapes and radii; `line_segment` (:318) and `hline` (:332) give hairline strokes; `hline` + `circle_filled` (:356) give the graph-paper ruling + dot motif.
 
