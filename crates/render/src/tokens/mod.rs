@@ -6,6 +6,7 @@
 //! inventory test.
 
 pub mod color;
+pub mod effects;
 pub mod spacing;
 pub mod typography;
 
