@@ -276,8 +276,50 @@ const fn crossing_event(from_c: i32, to_c: i32) -> i32 {
     }
 }
 
+/// The result of resolving a crash (design doc §3, `[D4]`/`[N5]`).
+///
+/// Carries the post-crash [`CarState`] plus the scrub-tick marker that forces
+/// the immediately-following move to be [`Action::Coast`] for exactly one tick.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CrashOutcome {
+    /// The post-crash kinematic state (respawn cell + quenched velocity).
+    pub state: CarState,
+    /// `true` while the scrub tick is still pending — the next move must be
+    /// [`Action::Coast`]. Cleared by [`CrashOutcome::consume_scrub`].
+    pub scrub: bool,
+}
+
+impl CrashOutcome {
+    /// The action mask available from this outcome: the singleton `{Coast}`
+    /// while [`CrashOutcome::scrub`] holds (`[N5]`'s "один ход без права
+    /// реакселерации"), otherwise the ordinary [`legal_mask`].
+    pub fn action_mask(self, d: &Corridor) -> BitFlags<Action> {
+        if self.scrub {
+            BitFlags::from(Action::Coast)
+        } else {
+            legal_mask(d, self.state)
+        }
+    }
+
+    /// Advances past the scrub tick. Total: while `scrub` holds, applies the
+    /// forced `Coast` (guaranteed legal, see [`resolve_crash`]) and clears the
+    /// marker; otherwise a no-op returning `self` unchanged — an
+    /// already-consumed outcome never double-advances.
+    #[must_use]
+    pub const fn consume_scrub(self) -> Self {
+        if self.scrub {
+            Self {
+                state: step(self.state, Action::Coast),
+                scrub: false,
+            }
+        } else {
+            self
+        }
+    }
+}
+
 /// Crash resolution — a wall collision, arising as a search dead-end where all 5
-/// moves leave `D` (design doc §3, marked **\[OPEN\]**).
+/// moves leave `D` (design doc §3, `[D4]`/`[N5]`, finalized).
 ///
 /// Leaning rule: zero the into-wall velocity component, keep the along-wall
 /// component with strong damping (e.g. `/2`), respawn at the last valid cell —
@@ -286,7 +328,7 @@ const fn crossing_event(from_c: i32, to_c: i32) -> i32 {
 /// state is illegal, damp again, down to `v = 0` in the limit.
 ///
 /// TODO(3a): finalize once the crash rule is settled (open question).
-pub fn resolve_crash(_d: &Corridor, _s: CarState) -> CarState {
+pub fn resolve_crash(_d: &Corridor, _s: CarState) -> CrashOutcome {
     todo!("crash rule (design doc §3 [OPEN])")
 }
 
