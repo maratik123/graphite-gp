@@ -8,9 +8,18 @@
 //! which is what lets the golden guard derive its pixel probes instead of
 //! hardcoding them.
 //!
-//! Colors below are scaffold-local `Color32` consts, not the design-token
-//! module — #12 owns "design tokens → Rust consts" and supersedes these.
+//! Colors and lengths below are repointed to `crate::tokens` (design:
+//! `2026-07-17-render-design-tokens`, subtask 6) — this file's own scaffold
+//! names are kept (repointed, not deleted) since they carry information the
+//! raw token names do not, and the migration is pixel-neutral: the golden
+//! stays byte-identical (AC12). `CARD_FILL` binds to `tokens::color::PAPER_2`
+//! — **not** `tokens::color::SURFACE_CARD` (`= PAPER_0`, a different pixel);
+//! see the design's binding table. `CARD_CORNER_RADIUS` and
+//! `GRID_DOT_RADIUS` stay local: neither numerically matches any token in
+//! the design system (the design system's radius ramp is 0/3/6/10, and its
+//! only dot radius is `--bg-dots`'s 1.2, not this scaffold's 1.0).
 
+use crate::tokens::{color, spacing};
 use egui::{Color32, Painter, Pos2, Rangef, Rect, Stroke, StrokeKind, pos2};
 
 /// The placeholder's fixed canvas: 192×128 logical points at `pixels_per_point
@@ -27,27 +36,32 @@ const CANVAS_RECT: Rect = Rect {
     max: Pos2::new(192.0, 128.0),
 };
 
-/// Spacing between graph-paper ruling lines and dots.
-const GRID_SPACING: f32 = 16.0;
-/// Radius of each graph-paper dot.
+/// Spacing between graph-paper ruling lines and dots. `tokens::spacing::CELL_SM`
+/// — also equals `--space-4` (16px); it is a graph-paper pitch.
+const GRID_SPACING: f32 = spacing::CELL_SM;
+/// Radius of each graph-paper dot. Stays local: `1.0` matches no radius
+/// token (the design system's only dot radius is `--bg-dots`'s `1.2`).
 const GRID_DOT_RADIUS: f32 = 1.0;
 /// Corner radius of the placeholder card — crisp, not rounded (AC4(a)).
+/// Stays local: `4` matches no radius token (the ramp is 0/3/6/10).
 const CARD_CORNER_RADIUS: u8 = 4;
-/// Stroke width of the card border and the hairline.
-const HAIRLINE_STROKE_WIDTH: f32 = 1.0;
+/// Stroke width of the card border and the hairline. `tokens::spacing::BW_HAIR`.
+const HAIRLINE_STROKE_WIDTH: f32 = spacing::BW_HAIR;
 
-/// `--paper-1` — the paper background fill.
-const PAPER: Color32 = Color32::from_rgb(0xF5, 0xF1, 0xE6);
-/// `--paper-2` — the card fill.
-const CARD_FILL: Color32 = Color32::from_rgb(0xEC, 0xE6, 0xD6);
-/// `--graphite-900` — the card stroke (crisp ink).
-const CARD_STROKE: Color32 = Color32::from_rgb(0x20, 0x1E, 0x1A);
-/// `--graphite-300` — the hairline stroke, the token literally named "hairline".
-const HAIRLINE: Color32 = Color32::from_rgb(0xC4, 0xBB, 0xAA);
-/// `--grid-line` — the graph-paper ruling.
-const GRID_LINE: Color32 = Color32::from_rgb(0xC3, 0xCE, 0xDD);
-/// `--grid-dot` — the graph-paper dot at each ruling intersection.
-const GRID_DOT: Color32 = Color32::from_rgb(0x93, 0xA2, 0xB8);
+/// `tokens::color::PAPER_1` — the paper background fill.
+const PAPER: Color32 = color::PAPER_1;
+/// `tokens::color::PAPER_2` — the card fill. **Not** `color::SURFACE_CARD`
+/// (`= PAPER_0`, a different pixel) — see this file's module doc.
+const CARD_FILL: Color32 = color::PAPER_2;
+/// `tokens::color::GRAPHITE_900` — the card stroke (crisp ink).
+const CARD_STROKE: Color32 = color::GRAPHITE_900;
+/// `tokens::color::GRAPHITE_300` — the hairline stroke, the token literally
+/// named "hairline".
+const HAIRLINE: Color32 = color::GRAPHITE_300;
+/// `tokens::color::GRID_LINE` — the graph-paper ruling.
+const GRID_LINE: Color32 = color::GRID_LINE;
+/// `tokens::color::GRID_DOT` — the graph-paper dot at each ruling intersection.
+const GRID_DOT: Color32 = color::GRID_DOT;
 
 /// Derived positions for the placeholder's content, private so the guard and
 /// the drawing path never write a probe coordinate twice.
