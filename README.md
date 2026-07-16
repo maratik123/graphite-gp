@@ -50,17 +50,18 @@ production panics** (`Rect::index` is total via `checked_sub` + `try_from`). All
 integer arithmetic is **overflow- and signedness-safe**, machine-enforced by a
 workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The `sim`
 `step` (accelerate-then-advance state advance) is implemented alongside the
-already-live `legal_move` / `legal_mask` legality path (issue #7). The remaining
-algorithms (lap counter, crash / collision resolution, generation pipeline,
-oracle, feature extraction, policy) are still `todo!()`. See the `TODO(<block>)`
-markers.
+already-live `legal_move` / `legal_mask` legality path (issue #7), and the signed
+`LapCounter::register_move` — the half-open S/F crossing test over the half-grid
+timing gate, with the `legal_move`-first valid-finish conjunction (issue #8). The
+remaining algorithms (crash / collision resolution, generation pipeline, oracle,
+feature extraction, policy) are still `todo!()`. See the `TODO(<block>)` markers.
 
 ## Build
 
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 74 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step)
+cargo test             # 82 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step + lap counter)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
