@@ -7,6 +7,8 @@
 use gp_core::sim::CarState;
 use gp_core::track::TrackArtifact;
 
+pub mod placeholder;
+
 /// Optional analytics overlays (design doc §4).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Overlays {

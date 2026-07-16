@@ -17,3 +17,4 @@ egui = "0.35"
 [dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
 egui-wgpu = "0.35"
+image = "0.25"
