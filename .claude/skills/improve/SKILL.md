@@ -12,9 +12,9 @@ The subagent reads `.claude/agents/self-improve.md` for full instructions.
 The subagent will:
 1. Read `ai-docs/learnings.md` for all correction records
 2. Find repeating patterns (same mistake ≥2 times)
-3. Propose concrete diffs to `AGENTS.md` or Skill/Subagent files
+3. Propose concrete diffs to `AGENTS.md` or Skill/Subagent files — **re-verifying every factual claim it carries out of an entry** (`self-improve.md § Step 3` AXIOM: an entry's `Rule:` is what recurrence licenses; its incidental assertions — a precedent list, a `file:line`, a lint group, a count — are candidate-truth. `learnings.md` is append-only, so a false claim is only ever fixable in the copy escalation is about to make). Each proposal carries a **Claims re-verified** line; a proposal citing a precedent or a count without one is incomplete.
 4. For mistakes that repeat ≥3 times despite existing rules — propose escalation to hooks in `.claude/settings.json`
-5. Apply changes after user confirmation
+5. Apply changes after user confirmation — **the parent thread re-runs each proposal's `Claims re-verified` commands against the tree before applying that proposal**, and drops or corrects any claim that no longer holds. Without a consumer that re-runs them the line is ceremony; this is the same contract `self-review.md` §2 already enforces for design's `AC<N> verified by: <command>` lines ("Confirmed during drafting" is not sufficient).
 6. Run a targeted eval to verify the fix works. Reports PASS/FAIL.
 
 Run when **≥3 unescalated correction entries**, **≥2 unescalated validation entries**, or a `🌱 Stale-validation` flag from `/ai-audit` accumulates. Mirror of the threshold line in `AGENTS.md § Learning Log` — keep both in sync per the Propagation Rule.

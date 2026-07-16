@@ -176,11 +176,44 @@ The verb chosen for a promoted rule encodes its shape. Carrot rules (`Kind: vali
 
 ### Step 3: Propose concrete changes
 
+> **AXIOM — A learnings entry's factual claims are CANDIDATE-truth, not ground-truth. Re-verify every one you carry into a proposal — wherever in the entry it sits.**
+>
+> Recurrence licenses the entry's **pattern** — the behaviour to change. It licenses **nothing** about the *facts* wrapped around that pattern (a cited `file:line`, a "precedent already in-tree" list, a lint's group, a tool's flag, a count). Those are unaudited recollections written mid-task, and nothing checks them (see *Why this is on you alone* below). Copying one into an instruction file is not quotation — it is **re-assertion under a more authoritative byline**.
+>
+> **The split is pattern-vs-facts — NOT `Rule:`-line-vs-narrative.** Do not treat a fact as safe because it sits in the `Rule:` line; a false one is just as likely there as in the `What happened:` story. The two entries escalated on 2026-07-16 are one of each, and the `Rule:`-line case is the one that reached production text:
+>
+> - **False fact in the narrative** — the const-fn entry's `What happened:` closes with *"Precedent already in-tree: `Size::area`, `Rect::index`, `CarState::pos` are all `pub const fn`."* `Rect::index` is **not**: `geom/mod.rs:178` is `pub fn`, because its body ends in `.then(|| …)` and `bool::then` is conditionally-const but not const-stable (`E0658`), so `missing_const_for_fn` correctly declines to fire. It is a **counter-example** — an agent checking the cited precedent learns the rule backwards. (That entry's `Rule:` line cites only `Size::area`, which is accurate.)
+> - **False fact in the `Rule:` line** — the DOC-1 entry (`learnings.md:75`) states *"`clippy::nursery` (denied here) polices their shape (`too_long_first_doc_paragraph`, `doc_markdown`, `missing_panics_doc`)."* The latter two are **pedantic**, not nursery. This one was escalated **verbatim** into `code-writer.md` and `task/reference.md` before review caught it.
+>
+> Both are the same defect — a false fact carried into an instruction file — and their position in the entry had nothing to do with it. Verify facts wherever they sit.
+>
+> This matters more here than anywhere else in the workspace, because of an asymmetry unique to this Subagent:
+>
+> - `ai-docs/learnings.md` is **append-only** (Boundary rule 1). A false claim in an entry can **never be corrected at its source** — a later entry can contradict it, but the original text stays, and every future `/improve` re-reads it.
+> - Escalation **copies** that claim into `AGENTS.md` / a Skill / a Subagent — files that ARE mutable, that agents treat as normative, and that no one re-checks against the log.
+>
+> So escalation is the machine that launders an unverified recollection into a rule. **You are the only gate on that path.**
+>
+> | If the entry asserts... | Verify with |
+> |---|---|
+> | A precedent list (*"`X`, `Y`, `Z` are all `const fn`"*) | Read **each** cited site. One counter-example inverts the lesson for every future reader. |
+> | A `file:line` | `sed -n '<N>p' <file>` — line numbers drift after any edit to the file. |
+> | A lint's group / a tool's flag / an API's behaviour | Run it (`cargo clippy -W clippy::<group>` on a probe; `<tool> --help`) — see AGENTS.md § *Dependency Versions*. |
+> | A count, a size, a "N times" figure | Re-measure. Never carry a number one step past the command that produced it. |
+> | A VCS claim (*"X is tracked/ignored/committed"*) | The category-matched `git` command — AGENTS.md § *Dependency Versions*. |
+>
+> **On failure:** propose the rule **without** the false claim, or with a verified replacement — and say in the report that the entry's claim did not hold. Do **NOT** edit the entry (Boundary rule 1: `Escalated?` / `Superseded by:` only). If the claim was load-bearing for the rule itself, the pattern may not be real — re-examine before proposing.
+>
+> **Why this is on you alone.** Nothing else in the workspace is *mandated* to check an entry's facts. An entry staged at Step 8 does land in the diff `self-review` reads (AGENTS.md § *Workflow* requires staging `learnings.md` with related code) — but `self-review.md`'s checklist has **no item** directing anyone to verify a claim inside it, so being in the diff buys nothing. The const-fn entry did not even get that far: it was committed at Step 12 (`961a5a3`), after `self-review` had already run. And `design-review` reviews *designs*, never entries.
+>
+> How the const-fn claim was actually caught is the argument **for** this AXIOM, not a fluke that excuses its absence: `self-review`, reviewing the escalation, read `design.md`'s new prose, grepped `crates/` for the three cited `const fn` sites, and found `Rect::index` was `pub fn`. That is *exactly this AXIOM's procedure* — verifying a carried claim against the source — applied to instruction-file prose. Note it could **not** have been incidental code review: this branch's diff contains **zero `.rs` files**. The save came from a spawn prompt that happened to ask for claim-verification, not from any standing process. Prompts vary; a rule does not. That is the gap this AXIOM closes.
+
 For each pattern show:
 1. **Problem** — what repeats, how many times
 2. **Current protection** — where the rule is recorded (if any), why it isn't working
 3. **Proposal** — concrete diff (old text → new text)
 4. **Level** — `ai-docs/learnings.md` → `AGENTS.md`/skill → hook
+5. **Claims re-verified** — for every factual assertion carried from the entry into the diff: the command run and its result, or *"no factual claims carried"*. A proposal citing a precedent, a `file:line`, a lint group, or a count without this line is **incomplete** — do not present it as ready to apply.
 
 ### Step 4: Escalate to hooks (only ≥3 occurrences and rule not working)
 
@@ -280,6 +313,7 @@ Report (parent-thread emits, NOT the subagent): `Eval: PASS ✅` or `Eval: FAIL 
 ## Anti-patterns
 
 - **Do NOT** delete entries from `ai-docs/learnings.md` — it's a log, only grows
+- **Do NOT** carry an entry's factual claim into a proposal unverified — see Step 3's AXIOM. Recurrence licenses the entry's **`Rule:`**, never its incidental assertions; the log is append-only, so a false claim can only ever be fixed in the copy you are about to make.
 - **Do NOT** add rules for one-off errors — wait for recurrence
 - **Do NOT** propose hooks for the first/second occurrence
 - **Do NOT** overload `AGENTS.md` — specific rules go in the Skill/Subagent file
