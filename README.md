@@ -88,7 +88,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 97 gp-core + 2 gp-gen tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step + lap counter + crash rule + collisions + seeded RNG)
+cargo test             # 103 workspace tests green (97 gp-core; 2 gp-gen; 2 gp-render: tessellation smoke + golden guard; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
