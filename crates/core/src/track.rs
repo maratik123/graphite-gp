@@ -2,7 +2,7 @@
 //! block 1 (generation) and consumed by blocks 2 (render), 3a (physics) and
 //! 4 (AI).
 
-use crate::geom::{Corridor, Orient, Point, Side, Wall};
+use crate::geom::{Corridor, Orient, Point, Rect, Side, Wall};
 
 /// Global traversal orientation of the ring, fixed during generation (design
 /// doc §2, Ф1). Everything downstream — the lap counter, AI progress/reward,
@@ -99,6 +99,115 @@ pub struct StartGrid {
     pub positions: Vec<Point>,
 }
 
+/// Fallback unit tangent for a degenerate (flat/saddle) gradient — shaping-only
+/// (design doc §2, P1); every band cell still gets a defined tangent.
+const FLAT_FALLBACK: (f32, f32) = (1.0, 0.0);
+
+/// The monotone integer distance field over the corridor `D \ gate`, seeded
+/// from the gate's forward face (design doc §2, N1), plus gradient/tangent
+/// accessors (design doc §2, P2/M1).
+///
+/// Dense grid mirroring [`Corridor`]'s bounding-box storage: row-major over
+/// `rect`, `None` = not in the band (`¬D`).
+#[derive(Clone, Debug, Default)]
+pub struct SField {
+    /// The bounding box `dist` is indexed over.
+    pub rect: Rect,
+    /// Row-major (`y`-outer, `x`-inner) distance per cell; `None` = not in the
+    /// band.
+    pub dist: Vec<Option<u32>>,
+}
+
+impl SField {
+    /// Builds a field over `rect`, filling each cell's distance via
+    /// `dist_at` — a caller-supplied per-cell lookup (the generator's BFS
+    /// result later; a hand-filled closure in tests today). No BFS is run
+    /// here.
+    pub fn new(rect: Rect, dist_at: impl Fn(Point) -> Option<u32>) -> Self {
+        let dist = rect.points().map(dist_at).collect();
+        Self { rect, dist }
+    }
+
+    /// The scalar distance `s` at `p`, or `None` if `p` is outside the band.
+    pub fn scalar_at(&self, p: Point) -> Option<u32> {
+        self.rect.index(p).and_then(|i| self.dist[i])
+    }
+
+    /// Whether `p` sits immediately against `gate`'s cut (a gate cell).
+    fn is_gate_cell(gate: &TimingGate, p: Point) -> bool {
+        p.neighbors4().into_iter().any(|q| gate.separates(p, q))
+    }
+
+    /// The raw integer gradient `∇s` at `p`: the sum, over in-band 4-neighbors
+    /// not separated from `p` by `gate`'s cut, of `(s(q) − s(p))·(q − p)`.
+    ///
+    /// Unifies central difference (both axis neighbors in-band) and one-sided
+    /// difference (one neighbor out of band) without special-casing; `gate`'s
+    /// cut is skipped so the field is never differenced across it. `None` if
+    /// `p` is outside the band.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "each neighbor contributes a bounded (s(q) - s(p)) * (q - p) \
+                  term: the u32 distances are converted through \
+                  i32::try_from (saturating to i32::MAX), the axis delta is \
+                  always -1/0/1, and at most 4 neighbors are summed — the \
+                  accumulation stays well within i32 range for any \
+                  grid-realistic s-field"
+    )]
+    pub fn gradient_at(&self, gate: &TimingGate, p: Point) -> Option<(i32, i32)> {
+        let sp = i32::try_from(self.scalar_at(p)?).unwrap_or(i32::MAX);
+        let mut grad = (0, 0);
+        for q in p.neighbors4() {
+            if gate.separates(p, q) {
+                continue;
+            }
+            let Some(sq) = self.scalar_at(q) else {
+                continue;
+            };
+            let sq = i32::try_from(sq).unwrap_or(i32::MAX);
+            let d = sq - sp;
+            grad.0 += d * (q.x - p.x);
+            grad.1 += d * (q.y - p.y);
+        }
+        Some(grad)
+    }
+
+    /// The unit tangent at `p`.
+    ///
+    /// On a gate cell, exactly `gate.forward_unit()` — the cut is not
+    /// differenced across (design doc §2, P2, AC3). Otherwise the normalized
+    /// gradient, or the flat fallback `(1.0, 0.0)` when the gradient is
+    /// degenerate (`(0, 0)`). `None` if `p` is outside the band.
+    pub fn tangent_at(&self, gate: &TimingGate, p: Point) -> Option<(f32, f32)> {
+        self.scalar_at(p)?;
+        if Self::is_gate_cell(gate, p) {
+            return Some(gate.forward_unit());
+        }
+        let grad = self.gradient_at(gate, p)?;
+        Some(if grad == (0, 0) {
+            FLAT_FALLBACK
+        } else {
+            normalize(grad)
+        })
+    }
+}
+
+/// Normalizes a nonzero integer gradient to a unit `(f32, f32)`.
+///
+/// Precondition: `g != (0, 0)` — both callers (a gate cell, and the degenerate
+/// `(0, 0)` gradient case) return before reaching this, so the division is
+/// never by zero.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "gradient components are small (bounded BFS-distance \
+              differences) integers, exactly representable in f32"
+)]
+fn normalize(g: (i32, i32)) -> (f32, f32) {
+    let (gx, gy) = (g.0 as f32, g.1 as f32);
+    let len = gx.hypot(gy);
+    (gx / len, gy / len)
+}
+
 /// One sample of the parameterized centerline.
 #[derive(Clone, Copy, Debug)]
 pub struct CenterlineSample {
@@ -167,6 +276,7 @@ pub struct TrackArtifact {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::Size;
 
     // ---- TimingGate (subtask 1) --------------------------------------
 
@@ -228,5 +338,88 @@ mod tests {
     #[test]
     fn start_grid_default_is_empty() {
         assert!(StartGrid::default().positions.is_empty());
+    }
+
+    // ---- SField (subtask 3) --------------------------------------------
+
+    /// A 4-wide, 1-tall band at `y == 1`, with `s(x, 1) = x` and no gate.
+    fn linear_field_no_gate() -> (SField, TimingGate) {
+        let rect = Rect {
+            origin: Point::new(0, 0),
+            size: Size::new(4, 2),
+        };
+        let field = SField::new(rect, |p| {
+            (p.y == 1 && (0..4).contains(&p.x)).then_some(u32::try_from(p.x).unwrap())
+        });
+        let gate = TimingGate {
+            behind: vec![],
+            forward: Side::East,
+        };
+        (field, gate)
+    }
+
+    #[test]
+    fn scalar_at_is_monotone_and_none_off_band() {
+        let (field, _gate) = linear_field_no_gate();
+        assert_eq!(field.scalar_at(Point::new(0, 1)), Some(0));
+        assert_eq!(field.scalar_at(Point::new(1, 1)), Some(1));
+        assert_eq!(field.scalar_at(Point::new(2, 1)), Some(2));
+        assert_eq!(field.scalar_at(Point::new(3, 1)), Some(3));
+        assert_eq!(field.scalar_at(Point::new(0, 0)), None);
+    }
+
+    #[test]
+    fn gradient_at_is_central_or_one_sided() {
+        let (field, gate) = linear_field_no_gate();
+        // Central difference: both neighbors in band.
+        assert_eq!(field.gradient_at(&gate, Point::new(1, 1)), Some((2, 0)));
+        // One-sided difference: west neighbor is out of band.
+        assert_eq!(field.gradient_at(&gate, Point::new(0, 1)), Some((1, 0)));
+    }
+
+    #[test]
+    fn tangent_at_points_along_increasing_s() {
+        let (field, gate) = linear_field_no_gate();
+        assert_eq!(field.tangent_at(&gate, Point::new(1, 1)), Some((1.0, 0.0)));
+    }
+
+    #[test]
+    fn tangent_at_gate_cells_is_forward_and_not_cross_cut() {
+        // Cells (0..=4, 1); gate cut between (1,1) and (2,1); a wrap in `s`
+        // straddles the cut (L = 4).
+        let rect = Rect {
+            origin: Point::new(0, 0),
+            size: Size::new(5, 2),
+        };
+        let s = [3u32, 4, 0, 1, 2];
+        let field = SField::new(rect, |p| {
+            (p.y == 1 && (0..5).contains(&p.x)).then(|| s[usize::try_from(p.x).unwrap()])
+        });
+        let gate = TimingGate {
+            behind: vec![Point::new(1, 1)],
+            forward: Side::East,
+        };
+        assert_eq!(field.tangent_at(&gate, Point::new(1, 1)), Some((1.0, 0.0)));
+        assert_eq!(field.tangent_at(&gate, Point::new(2, 1)), Some((1.0, 0.0)));
+        // Backward-only diff (+forward), not the spurious cross-cut jump.
+        assert_eq!(field.gradient_at(&gate, Point::new(1, 1)), Some((1, 0)));
+    }
+
+    #[test]
+    fn tangent_at_falls_back_when_gradient_is_flat() {
+        let rect = Rect {
+            origin: Point::new(0, 0),
+            size: Size::new(3, 3),
+        };
+        // All cells in the box share the same s: every gradient is (0, 0).
+        let field = SField::new(rect, |_| Some(0));
+        let gate = TimingGate {
+            behind: vec![],
+            forward: Side::East,
+        };
+        assert_eq!(
+            field.tangent_at(&gate, Point::new(1, 1)),
+            Some(FLAT_FALLBACK)
+        );
     }
 }
