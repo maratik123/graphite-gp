@@ -23,7 +23,7 @@ wall derivation from the corridor, and the correctness of legality masks all hol
 |-------|-------|------|
 | [`crates/core`](crates/core)   | **3a** | Pure, deterministic physics core — geometry, track artifact, `step` / `legal_move` / lap counter / crash / collisions. The shared dependency of render **and** AI. |
 | [`crates/gen`](crates/gen)     | **1**  | Track generation — coarse-block ring (infield-first) + local repair, phases Ф1–Ф7. |
-| [`crates/render`](crates/render) | **2**  | Rendering + UX — asphalt and walls derived from `D`. |
+| [`crates/render`](crates/render) | **2**  | Rendering + UX — asphalt and walls derived from `D`. Draw-only: takes `egui` 0.35, never `eframe`/`winit`/`wgpu` on a normal edge. |
 | [`crates/ai`](crates/ai)       | **4**  | AI training — feedforward policy over honest local features, 5-action masked softmax. |
 | [`crates/game`](crates/game)   | **3b** | Game loop / orchestration — the runnable `graphite-gp` binary. |
 
@@ -38,7 +38,16 @@ block 1, state + legal mask onto 3a).
 
 **Block 3a (the `gp-core` physics core) is complete** — every `block:core` issue is
 closed; next up per the §6 build order (`3a → (1 ∥ 2) → 4`) are block 1 (`gp-gen`,
-the Ф1–Ф7 generator pipeline) and, in parallel, block 2 (`gp-render`). The
+the Ф1–Ф7 generator pipeline) and, in parallel, block 2 (`gp-render`).
+
+**Block 2 has started**: the foundational GUI-backend decision (issue #11) is landed
+— the backend is **eframe/egui 0.35**, `gp-game` owns the window + event loop, and
+`gp-render` stays a **draw-only** library (`render_frame` takes a borrowed
+`&egui::Painter`; `cargo tree -p gp-render --edges no-dev` carries no
+`eframe`/`winit`/`wgpu`). `cargo run -p gp-game` opens a window drawing a
+placeholder frame — paper background, graph-paper motif, one card, one hairline —
+covered by an offscreen `egui_kittest` wgpu/Vulkan golden test that needs no display
+server. Block 2 continues at the design tokens (#12). The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
