@@ -304,6 +304,11 @@ pub struct TrackMetrics {
 }
 
 /// The full exported track artifact (design doc §2, Ф7).
+///
+/// Carries the corridor `D`, its boundary walls, the start/finish line
+/// (carrying the timing gate), the global traversal orientation, the
+/// s-field, the start grid, the parameterized centerline, and the
+/// oracle-derived metrics.
 #[derive(Clone, Debug)]
 pub struct TrackArtifact {
     /// The corridor `D` — the set of drivable points.
@@ -314,6 +319,11 @@ pub struct TrackArtifact {
     pub sf: StartFinish,
     /// Global traversal orientation.
     pub race_dir: RaceDir,
+    /// The monotone distance field over `D \ gate`, plus its gradient/tangent
+    /// accessors.
+    pub s_field: SField,
+    /// The ordered, distinct start positions.
+    pub start_grid: StartGrid,
     /// Parameterized centerline.
     pub centerline: Centerline,
     /// Oracle-derived speed metrics.
@@ -560,5 +570,34 @@ mod tests {
         };
         // `wrapped_s = 0.2 < samples[0].s`: must return a defined value, not panic.
         assert!(cl.at(0.2).is_some());
+    }
+
+    // ---- TrackArtifact (subtask 5) --------------------------------------
+
+    #[test]
+    fn track_artifact_carries_all_eight_members() {
+        let rect = Rect {
+            origin: Point::new(0, 0),
+            size: Size::new(1, 1),
+        };
+        let artifact = TrackArtifact {
+            corridor: Corridor::new(Point::new(0, 0), 1, 1),
+            walls: vec![],
+            sf: StartFinish {
+                chord: vec![],
+                orient: Orient::Horizontal,
+                gate: TimingGate {
+                    behind: vec![],
+                    forward: Side::East,
+                },
+            },
+            race_dir: RaceDir::Cw,
+            s_field: SField::new(rect, |_| None),
+            start_grid: StartGrid::default(),
+            centerline: Centerline::default(),
+            metrics: TrackMetrics::default(),
+        };
+        assert!(artifact.start_grid.positions.is_empty());
+        assert!(artifact.s_field.dist.iter().all(Option::is_none));
     }
 }
