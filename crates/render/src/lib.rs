@@ -15,6 +15,7 @@ use gp_core::sim::CarState;
 use gp_core::track::TrackArtifact;
 
 pub mod placeholder;
+pub mod tokens;
 
 /// Optional analytics overlays (design doc §4).
 #[derive(Clone, Copy, Debug, Default)]
