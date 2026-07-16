@@ -12,5 +12,8 @@ workspace = true
 
 [dependencies]
 gp-core = { workspace = true }
+egui = "0.35"
 
-# TODO(2): pick a rendering backend (e.g. macroquad / egui / raw canvas) and add it here.
+[dev-dependencies]
+egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
+egui-wgpu = "0.35"

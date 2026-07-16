@@ -19,3 +19,4 @@ gp-core = { workspace = true }
 gp-gen = { workspace = true }
 gp-render = { workspace = true }
 gp-ai = { workspace = true }
+eframe = "0.35"
