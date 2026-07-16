@@ -14,7 +14,7 @@ use std::ops::ControlFlow;
 /// This is the only conflict predicate. Cars whose move-segments swap, thread
 /// mid-segment, or cross orthogonally but **end on distinct cells** are left
 /// **unchanged**; there is no swap/pass-through detector (design doc §3
-/// [D1]/[N2], product-owner amendment 2026-07-16).
+/// `[D1]`/`[N2]`, product-owner amendment 2026-07-16).
 ///
 /// # Algorithm
 ///
