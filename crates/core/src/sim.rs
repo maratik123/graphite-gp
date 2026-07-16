@@ -508,4 +508,200 @@ mod tests {
         assert!(!mask.is_empty());
         assert_ne!(mask, BitFlags::all());
     }
+
+    use crate::geom::Orient;
+    use crate::track::TimingGate;
+
+    /// Fixture gate (design's Test Design): `behind = [(1,1)]`, `forward =
+    /// East` ⇒ `gate_coord(p) = 2·(p.x−1)`, `GATE_LINE = 1` (no integer `x`
+    /// reaches it). `chord`/`orient` are unused by `register_move`.
+    fn sf_east_gate() -> StartFinish {
+        StartFinish {
+            chord: vec![Point::new(1, 1), Point::new(2, 1)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![Point::new(1, 1)],
+                forward: Side::East,
+            },
+        }
+    }
+
+    /// A car at rest at `(x, y)` with velocity `(vx, vy)`, for AC5.
+    fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
+        CarState { x, y, vx, vy }
+    }
+
+    #[test]
+    fn register_move_ac1_forward_reverse_no_cross() {
+        // AC1: table-driven over the spec rows.
+        let cases = [
+            (Point::new(1, 1), Point::new(2, 1), 1),
+            (Point::new(3, 1), Point::new(1, 1), -1),
+            (Point::new(2, 1), Point::new(1, 1), -1),
+            (Point::new(0, 1), Point::new(1, 1), 0),
+        ];
+        let sf = sf_east_gate();
+        for (from, to, expected_delta) in cases {
+            let mut lap = LapCounter::new();
+            let before = lap.raw();
+            lap.register_move(&sf, from, to);
+            assert_eq!(
+                lap.raw() - before,
+                expected_delta,
+                "from {from:?} to {to:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn register_move_ac2_long_chord_scores_at_most_one_event() {
+        // AC2: a long chord spanning many cells across the gate still yields
+        // exactly one event, not more.
+        let sf = sf_east_gate();
+
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(0, 1), Point::new(4, 1));
+        assert_eq!(lap.raw(), 0); // -1 init + 1 forward event
+
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(4, 1), Point::new(0, 1));
+        assert_eq!(lap.raw(), -2); // -1 init + 1 reverse event
+    }
+
+    #[test]
+    fn register_move_ac3_no_rescore_when_already_on_one_side() {
+        // AC3: a chord that stays wholly ahead (or wholly behind) the gate does
+        // not re-score, even though both endpoints are on the "far" side.
+        let sf = sf_east_gate();
+
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(2, 1), Point::new(3, 1));
+        assert_eq!(lap.raw(), -1); // ahead -> ahead: no cross
+
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(1, 1), Point::new(0, 1));
+        assert_eq!(lap.raw(), -1); // behind -> behind: no cross
+    }
+
+    #[test]
+    fn crossing_event_locks_the_odd_line_into_the_forward_side() {
+        // AC3: direct unit test of the private half-open comparison at the
+        // odd (half-grid) line value. Real Points never produce gate_coord ==
+        // 1 (design §2 Ф3) — this only locks the defensive on-line convention.
+        assert_eq!(crossing_event(0, 1), 1);
+        assert_eq!(crossing_event(1, 0), -1);
+        assert_eq!(crossing_event(2, 4), 0);
+    }
+
+    #[test]
+    fn register_move_ac4_init_and_laps() {
+        // AC4: -1 at construction; laps() == 0 until the raw count is
+        // positive; first forward cross -> raw 0 / laps 0 (race start); second
+        // -> raw 1 / laps 1.
+        let lap = LapCounter::new();
+        assert_eq!(lap.raw(), -1);
+        assert_eq!(lap.laps(), 0);
+
+        let lap = LapCounter::default();
+        assert_eq!(lap.raw(), -1);
+        assert_eq!(lap.laps(), 0);
+
+        let sf = sf_east_gate();
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(1, 1), Point::new(2, 1));
+        assert_eq!(lap.raw(), 0);
+        assert_eq!(lap.laps(), 0);
+
+        lap.register_move(&sf, Point::new(1, 1), Point::new(2, 1));
+        assert_eq!(lap.raw(), 1);
+        assert_eq!(lap.laps(), 1);
+    }
+
+    #[test]
+    fn register_move_ac5_valid_finish_gates_on_legal_move_first() {
+        // AC5: the valid-finish conjunction is legal_move first, then the
+        // gate-cross. An illegal would-be forward-crosser must not score.
+        let mut d = Corridor::new(Point::new(0, 0), 4, 4);
+        d.set(Point::new(1, 0), true);
+        d.set(Point::new(1, 1), true);
+        d.set(Point::new(2, 1), true);
+        // (2,0) is deliberately left off-D.
+        let sf = sf_east_gate();
+
+        // Illegal: (1,0), v=(0,1), East -> v2=(1,1) -> p1=(2,1). supercover
+        // hits the dual-vertex tie including off-D (2,0) -> legal_move false.
+        let s_illegal = car(1, 0, 0, 1);
+        let p1 = Point::new(2, 1);
+        assert!(d.contains(p1)); // non-vacuous: rejection is the supercover rule
+        assert!(!legal_move(&d, s_illegal, Action::East));
+
+        let mut lap = LapCounter::new();
+        if legal_move(&d, s_illegal, Action::East) {
+            lap.register_move(&sf, s_illegal.pos(), step(s_illegal, Action::East).pos());
+        }
+        assert_eq!(lap.raw(), -1); // unchanged: skipped
+
+        // Legal: (1,1), v=(0,0), East -> v2=(1,0) -> p1=(2,1). supercover
+        // {(1,1),(2,1)} subset D -> legal_move true -> register_move runs.
+        let s_legal = car(1, 1, 0, 0);
+        assert!(legal_move(&d, s_legal, Action::East));
+
+        let mut lap = LapCounter::new();
+        if legal_move(&d, s_legal, Action::East) {
+            lap.register_move(&sf, s_legal.pos(), step(s_legal, Action::East).pos());
+        }
+        assert_eq!(lap.raw(), 0); // -1 init + 1 forward event
+    }
+
+    #[test]
+    fn register_move_ac6_scripted_telescoping_and_parallel_move() {
+        // AC6: a scripted sequence asserts exact counter/laps values,
+        // including a back-and-forth pair telescoping to net 0 and a parallel
+        // (tangent) move leaving the counter unchanged.
+        let sf = sf_east_gate();
+        let mut lap = LapCounter::new();
+        assert_eq!(lap.raw(), -1);
+        assert_eq!(lap.laps(), 0);
+
+        lap.register_move(&sf, Point::new(1, 1), Point::new(2, 1)); // forward
+        assert_eq!(lap.raw(), 0);
+        assert_eq!(lap.laps(), 0);
+
+        lap.register_move(&sf, Point::new(2, 1), Point::new(1, 1)); // reverse
+        assert_eq!(lap.raw(), -1);
+        assert_eq!(lap.laps(), 0);
+
+        lap.register_move(&sf, Point::new(1, 1), Point::new(2, 1)); // forward
+        lap.register_move(&sf, Point::new(2, 1), Point::new(1, 1)); // reverse
+        assert_eq!(lap.raw(), -1); // telescopes to net 0 over the pair
+        assert_eq!(lap.laps(), 0);
+
+        lap.register_move(&sf, Point::new(1, 1), Point::new(2, 1)); // forward
+        lap.register_move(&sf, Point::new(1, 1), Point::new(2, 1)); // forward
+        assert_eq!(lap.raw(), 1);
+        assert_eq!(lap.laps(), 1);
+
+        // Parallel move along the gate (pure-y, constant gate_coord): no
+        // perpendicular crossing.
+        let before = lap.raw();
+        lap.register_move(&sf, Point::new(2, 0), Point::new(2, 3));
+        assert_eq!(lap.raw(), before);
+    }
+
+    #[test]
+    fn register_move_ac7_empty_gate_is_a_no_op_without_panic() {
+        // AC7: a degenerate empty gate leaves counter unchanged and does not
+        // panic.
+        let sf = StartFinish {
+            chord: vec![],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![],
+                forward: Side::East,
+            },
+        };
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(0, 0), Point::new(5, 0));
+        assert_eq!(lap.raw(), -1);
+    }
 }
