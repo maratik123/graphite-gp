@@ -44,19 +44,29 @@ Runs **alongside** Step 1 and Step 1b — a third parallel signal source, **NOT*
 Read **both**:
 
 1. `~/.claude/projects/<project-path-encoded>/memory/MEMORY.md` (the index) first — fast enumeration of memory filenames; avoids a blind `ls`.
-2. Each individual `~/.claude/projects/<project-path-encoded>/memory/feedback_*.md` file — the detection rule below operates on each file's `name:` frontmatter, `description:` frontmatter, or first sentence, so per-file content is required.
+2. Each individual **memory file** — every `*.md` sibling of `MEMORY.md` in that directory **except `MEMORY.md` itself** (the index, not a memory). Read each file's frontmatter, then **select the feedback-type memories: those whose `metadata.type` is `feedback`.** Those are this step's subject — the successor of the `feedback_*.md` files earlier revisions globbed for. The detection rule below operates on each selected file's `name:` frontmatter, `description:` frontmatter, or first sentence, so per-file content is required.
 
-For each `feedback_*.md`, decide whether it **names a workflow primitive**. The recognised primitives form a closed enumerated set:
+> **Identify feedback memories by `metadata.type`, NOT by filename — and read this before reporting an empty sweep.**
+>
+> The auto-memory layer's convention **changed**: it once produced `feedback_<slug>.md` filenames, and now produces **topic-named** files (`project-overview.md`, `golden-tests-and-miri.md`, …) carrying a `metadata.type` of `user` | `feedback` | `project` | `reference`. Earlier revisions of this step globbed `feedback_*.md`; against the current layer that glob matches nothing, so Step 1c could not yield a candidate and an always-empty pass was indistinguishable from a genuinely clean one — a silent no-op wearing the costume of a completed check.
+>
+> **The old convention was real, not imagined** — do not write it off as a shape that "never existed". Two skills cite specific `feedback_*.md` files as the provenance of live rules, one of them surfaced by this very step: `.claude/skills/pr-merged/SKILL.md` (`feedback_remove_merged_branches.md`, *"Carrot surfaced via `/improve` 2026-05-22 Step 1c"*) and `.claude/skills/interview/SKILL.md` (`feedback_interview_delegate_to_subagent.md`). Those citations are historical provenance records; the files behind them are gone, and that is expected.
+>
+> **Empty is a legitimate outcome — but distinguish the two reasons and say which one applies.** *(a)* Zero `*.md` siblings at all, or an encoded path that does not resolve → a **tooling failure until proven otherwise**; verify the path before reporting. *(b)* Files present, none with `metadata.type: feedback` → a genuinely clean sweep; report it as such, naming the types you did find. As of 2026-07-16 this project is case (b): six memories, types `user` ×1 / `project` ×3 / `reference` ×2, zero `feedback`. Same shape as the `jq`-prints-`null` trap in AGENTS.md § *Dependency Versions*: absence-of-signal from a mis-aimed query is not evidence of absence — but a correctly-aimed query returning nothing IS.
+
+For each selected feedback memory, decide whether it **names a workflow primitive**. The recognised primitives form a closed enumerated set:
 
 <!-- anchor: auto-memory-primitive-keywords -->
 ```
 Slash commands:
   /task, /improve, /pr-commented, /bugfix, /interview, /context-reset,
-  /project-review, /ai-audit, /triage, /main-ci-failed, /pr-ci-failed, /pr-merged
+  /project-review, /ai-audit, /triage, /main-ci-failed, /pr-ci-failed, /pr-merged,
+  /next, /dependabot-pr, /verify-change
 
 Agent stems (file stems under .claude/agents/):
   self-improve, design, design-review, review-findings, self-review,
-  spec-writer, learnings-escalation-audit, triage-runner
+  spec-writer, learnings-escalation-audit, triage-runner,
+  code-writer, image-check
 
 AGENTS.md section headings:
   ## Workflow, ## Propagation Rule, ## Learning Log, ## Code Style
@@ -66,14 +76,14 @@ Verb-phrase keywords:
   boundary rule
 ```
 
-A new Skill / Subagent / section heading / verb-phrase keyword added to the project requires an **additive update** to this block. The set is not auto-generated from `.claude/` listings (over-broad — would match incidental references).
+A new Skill / Subagent / section heading / verb-phrase keyword added to the project requires an **additive update** to this block. The set is not auto-generated from `.claude/` listings (over-broad — would match incidental references). **Because the block is hand-maintained it drifts silently:** it omitted `code-writer`, `image-check`, `/next`, `/dependabot-pr`, and `/verify-change` until 2026-07-16, so memories naming exactly those primitives could not be detected. When running Step 1c, spot-check the block against `ls .claude/agents/` + `ls .claude/skills/` and report any drift in the `## Auto-memory candidates` section rather than silently sweeping with a stale set.
 
-**Cross-check against `ai-docs/learnings.md`.** A `feedback_*.md` is a **candidate** iff BOTH hold:
+**Cross-check against `ai-docs/learnings.md`.** A memory file is a **candidate** iff BOTH hold:
 
 1. It names ≥ 1 primitive from the block above, AND
 2. There is **no** `Kind: validation` entry in `ai-docs/learnings.md` whose `### YYYY-MM-DD — [category] — [short description]` heading OR `Rule:` field mentions the same primitive (substring match, case-insensitive — Subagent judgement applies for fuzzy topical matches).
 
-A single `feedback_*.md` naming N primitives can be a candidate if **any** subset of the named primitives is uncovered; the per-feedback-file collapse rule applies (one candidate row per file, listing the uncovered primitive(s) in the cross-check column — see Step 2c).
+A single memory file naming N primitives can be a candidate if **any** subset of the named primitives is uncovered; the per-memory-file collapse rule applies (one candidate row per file, listing the uncovered primitive(s) in the cross-check column — see Step 2c).
 
 **Prohibitions (the privacy boundary — read carefully):**
 
@@ -122,7 +132,7 @@ Pairs with Step 1c the way Step 2b pairs with Step 1b — takes the candidate se
 |---|---|
 | 1 + named workflow primitive + no matching `Kind: validation` entry in `learnings.md` | Emit a `## Auto-memory candidates` row; **needs parent-thread `Surface` consent before any routing decision** |
 
-**Per-feedback-file collapse rule.** One row per `feedback_*.md`, NOT one row per uncovered primitive. If a single `feedback_*.md` names multiple uncovered primitives, list them comma-separated in the *Workflow primitive named* column and combine their cross-check verdicts in the *Cross-check verdict* column. This keeps the consent UI legible (the user sees one prompt per memory file, not per primitive).
+**Per-memory-file collapse rule.** One row per feedback memory file, NOT one row per uncovered primitive. If a single memory names multiple uncovered primitives, list them comma-separated in the *Workflow primitive named* column and combine their cross-check verdicts in the *Cross-check verdict* column. This keeps the consent UI legible (the user sees one prompt per memory file, not per primitive).
 
 **Report-section shape.** The `## Auto-memory candidates` section is the third section in the Step 6 report, after `## Corrections proposed` and `## Carrots proposed`. Row format:
 
@@ -131,7 +141,7 @@ Pairs with Step 1c the way Step 2b pairs with Step 1b — takes the candidate se
 
 | Auto-memory file | Workflow primitive named | Cross-check verdict | Consent action |
 |---|---|---|---|
-| `feedback_<name>.md` | `<primitive>` (comma-separated if multiple) | no `Kind: validation` in `learnings.md` mentions `<primitive>` | (awaiting user) |
+| `<topic-slug>.md` (`metadata.type: feedback`) | `<primitive>` (comma-separated if multiple) | no `Kind: validation` in `learnings.md` mentions `<primitive>` | (awaiting user) |
 ```
 
 **Consent action column** records the parent thread's `AskUserQuestion` result. Initial value is `(awaiting user)`. After the parent thread dispatches the consent prompt and the user picks one option:

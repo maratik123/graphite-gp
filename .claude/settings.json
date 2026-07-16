@@ -48,6 +48,12 @@
             "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '(^|[ ;&|`])git[[:space:]]+commit\\b'; then ast-index update >/dev/null 2>&1 || true; fi; exit 0",
             "timeout": 30,
             "statusMessage": "Refreshing ast-index..."
+          },
+          {
+            "type": "command",
+            "command": "cmd=$(jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qF 'crates.io/api' && echo \"$cmd\" | grep -qE '(^|[[:space:];|&(])(curl|wget)[[:space:]]' && ! echo \"$cmd\" | grep -qiE '(^|[[:space:]])(-H|--header)[[:space:]]+[\"'\"'\"']?User-Agent|(^|[[:space:]])(-A|--user-agent)[[:space:]]'; then printf 'BLOCKED: crates.io API call without a User-Agent header.\\n\\ncrates.io rejects UA-less requests with a JSON *error body*, so `jq -r \".crate.max_stable_version\"` prints the literal `null` and exits 0 -- a fact-shaped non-answer, not data (AGENTS.md > Dependency Versions; ai-docs/dependency-versions.md > Failure mode).\\n\\nUse:\\n  curl -sS -H \"User-Agent: graphite-gp-agent (<contact-email>)\" \"https://crates.io/api/v1/crates/<name>\" | jq -r \".crate.max_stable_version\"\\n\\n(-A / --user-agent are accepted too.) A null from any version lookup means the QUERY FAILED -- re-run without the jq filter and read the raw body.\\n' >&2; exit 2; fi",
+            "timeout": 10,
+            "statusMessage": "Checking crates.io User-Agent..."
           }
         ]
       }
