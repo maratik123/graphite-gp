@@ -233,12 +233,59 @@ pub struct Centerline {
 }
 
 impl Centerline {
-    /// Samples the centerline at arc length `s`, wrapping around the closed loop.
+    /// Samples the centerline at arc length `s`, wrapping around the closed
+    /// loop (`at(length) ≡ at(0)`, `at(length + x) ≡ at(x)`, and a negative `s`
+    /// wraps positively); linearly interpolates `pos` and `tangent` between
+    /// the bracketing samples. Samples already carry `race_dir`-oriented
+    /// tangents, so the blend is oriented along `race_dir` by construction.
     ///
-    /// TODO(1): interpolate between the nearest samples.
-    pub fn at(&self, _s: f32) -> Option<CenterlineSample> {
-        todo!("centerline sampling (design doc §2)")
+    /// `None` only when `samples` is empty. Returns `samples[0]` when there is
+    /// a single sample, or when `length` is not a positive finite value
+    /// (guards div-by-zero / NaN).
+    ///
+    /// **Precondition:** `samples[0].s == 0` (the closed-loop centerline
+    /// invariant: the arc-length resample seeds the first sample at `s = 0`).
+    /// If violated, `at` still returns a *defined* value rather than
+    /// panicking, by falling back to the closing bracket `[samples[last],
+    /// samples[first]]`.
+    pub fn at(&self, query_s: f32) -> Option<CenterlineSample> {
+        let count = self.samples.len();
+        if count == 0 {
+            return None;
+        }
+        if count == 1 || self.length.is_nan() || self.length <= 0.0 {
+            return Some(self.samples[0]);
+        }
+        let wrapped_s = query_s.rem_euclid(self.length);
+        let lo = self
+            .samples
+            .iter()
+            .rposition(|sample| sample.s <= wrapped_s)
+            .unwrap_or_else(|| count.saturating_sub(1));
+        let hi = lo.checked_add(1).filter(|&h| h < count).unwrap_or(0);
+        let lo_sample = self.samples[lo];
+        let mut hi_sample = self.samples[hi];
+        if hi == 0 {
+            hi_sample.s += self.length;
+        }
+        let span = hi_sample.s - lo_sample.s;
+        let frac = if span > 0.0 {
+            (wrapped_s - lo_sample.s) / span
+        } else {
+            0.0
+        };
+        Some(CenterlineSample {
+            s: wrapped_s,
+            pos: lerp(lo_sample.pos, hi_sample.pos, frac),
+            tangent: lerp(lo_sample.tangent, hi_sample.tangent, frac),
+        })
     }
+}
+
+/// Component-wise linear interpolation `a + (b - a) * t` for a `(f32, f32)`
+/// pair.
+fn lerp(a: (f32, f32), b: (f32, f32), t: f32) -> (f32, f32) {
+    ((b.0 - a.0).mul_add(t, a.0), (b.1 - a.1).mul_add(t, a.1))
 }
 
 /// Speed metrics derived by the passability oracle (design doc §3). Not inputs
@@ -421,5 +468,97 @@ mod tests {
             field.tangent_at(&gate, Point::new(1, 1)),
             Some(FLAT_FALLBACK)
         );
+    }
+
+    // ---- Centerline::at (subtask 4) ------------------------------------
+
+    fn sample(s: f32, pos: (f32, f32), tangent: (f32, f32)) -> CenterlineSample {
+        CenterlineSample { s, pos, tangent }
+    }
+
+    fn assert_sample_eq(actual: CenterlineSample, expected: CenterlineSample) {
+        let eps = 1e-5;
+        assert!(
+            (actual.s - expected.s).abs() < eps,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.pos.0 - expected.pos.0).abs() < eps
+                && (actual.pos.1 - expected.pos.1).abs() < eps,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.tangent.0 - expected.tangent.0).abs() < eps
+                && (actual.tangent.1 - expected.tangent.1).abs() < eps,
+            "{actual:?} vs {expected:?}"
+        );
+    }
+
+    fn fixture_centerline() -> Centerline {
+        Centerline {
+            samples: vec![
+                sample(0.0, (0.0, 0.0), (1.0, 0.0)),
+                sample(1.0, (1.0, 0.0), (1.0, 0.0)),
+                sample(2.0, (1.0, 1.0), (0.0, 1.0)),
+            ],
+            length: 4.0,
+        }
+    }
+
+    #[test]
+    fn at_returns_none_for_empty_centerline() {
+        let cl = Centerline::default();
+        assert!(cl.at(0.0).is_none());
+    }
+
+    #[test]
+    fn at_returns_only_sample_when_single_or_zero_length() {
+        let cl = Centerline {
+            samples: vec![sample(0.0, (0.0, 0.0), (1.0, 0.0))],
+            length: 0.0,
+        };
+        assert_sample_eq(cl.at(3.0).unwrap(), cl.samples[0]);
+
+        let cl_multi_zero_len = Centerline {
+            samples: vec![
+                sample(0.0, (0.0, 0.0), (1.0, 0.0)),
+                sample(1.0, (1.0, 0.0), (1.0, 0.0)),
+            ],
+            length: 0.0,
+        };
+        assert_sample_eq(
+            cl_multi_zero_len.at(5.0).unwrap(),
+            cl_multi_zero_len.samples[0],
+        );
+    }
+
+    #[test]
+    fn at_wraps_by_length() {
+        let cl = fixture_centerline();
+        assert_sample_eq(cl.at(0.0).unwrap(), cl.samples[0]);
+        assert_sample_eq(cl.at(4.0).unwrap(), cl.at(0.0).unwrap());
+        assert_sample_eq(cl.at(4.5).unwrap(), cl.at(0.5).unwrap());
+    }
+
+    #[test]
+    fn at_interpolates_interior_and_closing_segment() {
+        let cl = fixture_centerline();
+        assert_sample_eq(cl.at(1.5).unwrap(), sample(1.5, (1.0, 0.5), (0.5, 0.5)));
+        assert_sample_eq(cl.at(3.0).unwrap(), sample(3.0, (0.5, 0.5), (0.5, 0.5)));
+    }
+
+    #[test]
+    fn at_is_total_even_when_first_sample_precondition_is_violated() {
+        // `samples[0].s == 0.5 != 0`, violating the documented precondition.
+        let cl = Centerline {
+            samples: vec![
+                sample(0.5, (0.0, 0.0), (1.0, 0.0)),
+                sample(1.5, (1.0, 0.0), (1.0, 0.0)),
+                sample(2.5, (1.0, 1.0), (0.0, 1.0)),
+            ],
+            length: 4.0,
+        };
+        // `wrapped_s = 0.2 < samples[0].s`: must return a defined value, not panic.
+        assert!(cl.at(0.2).is_some());
     }
 }
