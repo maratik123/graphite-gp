@@ -36,7 +36,10 @@ block 1, state + legal mask onto 3a).
 
 ## Status
 
-Block 3a in progress — the `TrackArtifact` contract is **finalized** (`SField`
+**Block 3a (the `gp-core` physics core) is complete** — every `block:core` issue is
+closed; next up per the §6 build order (`3a → (1 ∥ 2) → 4`) are block 1 (`gp-gen`,
+the Ф1–Ф7 generator pipeline) and, in parallel, block 2 (`gp-render`). The
+`TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
 contract types + read accessors on hand-filled fixtures, the block-1 generator
