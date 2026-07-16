@@ -2,7 +2,7 @@
 //! block 1 (generation) and consumed by blocks 2 (render), 3a (physics) and
 //! 4 (AI).
 
-use crate::geom::{Corridor, Orient, Point, Wall};
+use crate::geom::{Corridor, Orient, Point, Side, Wall};
 
 /// Global traversal orientation of the ring, fixed during generation (design
 /// doc §2, Ф1). Everything downstream — the lap counter, AI progress/reward,
@@ -15,18 +15,76 @@ pub enum RaceDir {
     Ccw,
 }
 
+/// The exact timing-gate segment used for [`StartFinish`]'s signed-crossing
+/// test (design doc §3, \[C2\]).
+///
+/// `behind` holds the *drivable* cross-section cells immediately behind the
+/// gate; each implied dual edge is `{cell: behind[i], side: forward}` — one
+/// edge ahead of the front row, spanning the cross-section. This is **not** a
+/// [`Wall`] set: a gate edge sits between two *drivable* cells (`D`'s
+/// interior), not on `D`'s `¬D` boundary — a future reader of
+/// `LapCounter::register_move` must not conflate the two.
+#[derive(Clone, Debug)]
+pub struct TimingGate {
+    /// The drivable cross-section cells immediately behind the gate.
+    pub behind: Vec<Point>,
+    /// The forward (`+race_dir`) side each `behind` cell's implied dual edge
+    /// faces.
+    pub forward: Side,
+}
+
+impl TimingGate {
+    /// The unit `(f32, f32)` direction of `forward`.
+    #[inline]
+    pub const fn forward_unit(&self) -> (f32, f32) {
+        side_unit_f32(self.forward)
+    }
+
+    /// Whether the dual edge between `a` and `b` is one of this gate's implied
+    /// cut edges.
+    ///
+    /// Order-independent / symmetric: `separates(a, b) == separates(b, a)` for
+    /// all `a`, `b` — a reversed-pair query (as a 4-neighbor gradient walk may
+    /// issue) must report the same cut, or the barrier silently leaks the
+    /// cross-cut jump into the gradient for one traversal direction.
+    pub fn separates(&self, a: Point, b: Point) -> bool {
+        let (dx, dy) = self.forward.delta();
+        let ahead_of = |p: Point| -> Option<Point> {
+            Some(Point::new(p.x.checked_add(dx)?, p.y.checked_add(dy)?))
+        };
+        self.behind.iter().any(|&behind| {
+            ahead_of(behind)
+                .is_some_and(|ahead| (behind == a && ahead == b) || (behind == b && ahead == a))
+        })
+    }
+}
+
+/// The unit `(f32, f32)` direction of `side`, via a literal `match` — no
+/// numeric cast.
+const fn side_unit_f32(side: Side) -> (f32, f32) {
+    match side {
+        Side::East => (1.0, 0.0),
+        Side::West => (-1.0, 0.0),
+        Side::North => (0.0, 1.0),
+        Side::South => (0.0, -1.0),
+    }
+}
+
 /// The start/finish line — a full chord cutting the annulus into a simply
 /// connected strip (design doc §3, lap counter).
 ///
 /// Being a *full* chord is what makes the signed-crossing lap counter provably
-/// sufficient.
+/// sufficient. `gate` carries the exact timing-gate segment(s) and forward
+/// direction that `LapCounter::register_move`'s half-open signed-crossing test
+/// needs.
 #[derive(Clone, Debug)]
 pub struct StartFinish {
     /// The drivable points forming the chord across the corridor.
     pub chord: Vec<Point>,
     /// Chord orientation across the corridor (H or V).
     pub orient: Orient,
-    // TODO(1): the exact gate segment(s) used for signed-crossing detection.
+    /// The exact timing-gate segment(s) used for the signed-crossing test.
+    pub gate: TimingGate,
 }
 
 /// One sample of the parameterized centerline.
@@ -92,4 +150,50 @@ pub struct TrackArtifact {
     pub centerline: Centerline,
     /// Oracle-derived speed metrics.
     pub metrics: TrackMetrics,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- TimingGate (subtask 1) --------------------------------------
+
+    #[test]
+    fn forward_unit_matches_each_side() {
+        let gate = |forward| TimingGate {
+            behind: vec![],
+            forward,
+        };
+        assert_eq!(gate(Side::East).forward_unit(), (1.0, 0.0));
+        assert_eq!(gate(Side::West).forward_unit(), (-1.0, 0.0));
+        assert_eq!(gate(Side::North).forward_unit(), (0.0, 1.0));
+        assert_eq!(gate(Side::South).forward_unit(), (0.0, -1.0));
+    }
+
+    #[test]
+    fn separates_true_only_for_the_implied_cut_edge() {
+        let gate = TimingGate {
+            behind: vec![Point::new(1, 1)],
+            forward: Side::East,
+        };
+        // The implied cut edge.
+        assert!(gate.separates(Point::new(1, 1), Point::new(2, 1)));
+        // Non-adjacent pair.
+        assert!(!gate.separates(Point::new(1, 1), Point::new(3, 1)));
+        // Lateral pair (not along `forward`).
+        assert!(!gate.separates(Point::new(1, 1), Point::new(1, 2)));
+        // A different, non-gate adjacent pair.
+        assert!(!gate.separates(Point::new(0, 1), Point::new(1, 1)));
+    }
+
+    #[test]
+    fn separates_is_symmetric() {
+        let gate = TimingGate {
+            behind: vec![Point::new(1, 1)],
+            forward: Side::East,
+        };
+        let (a, b) = (Point::new(1, 1), Point::new(2, 1));
+        assert!(gate.separates(a, b));
+        assert!(gate.separates(b, a));
+    }
 }
