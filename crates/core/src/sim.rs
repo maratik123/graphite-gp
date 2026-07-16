@@ -276,18 +276,168 @@ const fn crossing_event(from_c: i32, to_c: i32) -> i32 {
     }
 }
 
+/// The result of resolving a crash (design doc §3, `[D4]`/`[N5]`).
+///
+/// Carries the post-crash [`CarState`] plus the scrub-tick marker that forces
+/// the immediately-following move to be [`Action::Coast`] for exactly one tick.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CrashOutcome {
+    /// The post-crash kinematic state (respawn cell + quenched velocity).
+    pub state: CarState,
+    /// `true` while the scrub tick is still pending — the next move must be
+    /// [`Action::Coast`]. Cleared by [`CrashOutcome::consume_scrub`].
+    pub scrub: bool,
+}
+
+impl CrashOutcome {
+    /// The action mask available from this outcome: the singleton `{Coast}`
+    /// while [`CrashOutcome::scrub`] holds (`[N5]`'s "один ход без права
+    /// реакселерации"), otherwise the ordinary [`legal_mask`].
+    pub fn action_mask(self, d: &Corridor) -> BitFlags<Action> {
+        if self.scrub {
+            BitFlags::from(Action::Coast)
+        } else {
+            legal_mask(d, self.state)
+        }
+    }
+
+    /// Advances past the scrub tick. Total: while `scrub` holds, applies the
+    /// forced `Coast` (guaranteed legal, see [`resolve_crash`]) and clears the
+    /// marker; otherwise a no-op returning `self` unchanged — an
+    /// already-consumed outcome never double-advances.
+    #[must_use]
+    pub const fn consume_scrub(self) -> Self {
+        if self.scrub {
+            Self {
+                state: step(self.state, Action::Coast),
+                scrub: false,
+            }
+        } else {
+            self
+        }
+    }
+}
+
 /// Crash resolution — a wall collision, arising as a search dead-end where all 5
-/// moves leave `D` (design doc §3, marked **\[OPEN\]**).
+/// moves leave `D` (design doc §3, `[D4]`/`[N5]`, finalized).
 ///
-/// Leaning rule: zero the into-wall velocity component, keep the along-wall
-/// component with strong damping (e.g. `/2`), respawn at the last valid cell —
-/// so a crash never yields a controlled `v = 0` (which would make "brake by
-/// crashing" the dominant strategy). Fail-safe: if every move from the respawn
-/// state is illegal, damp again, down to `v = 0` in the limit.
+/// **Precondition:** `s.pos() ∈ D` and `legal_mask(d, s)` is empty (`s` is a
+/// genuine crash), and the coast chord `s.pos() → (s.x+s.vx, s.y+s.vy)` lies in
+/// [`supercover`]'s bounded-chord domain (a realistic single-move velocity,
+/// `|vx|, |vy| ≪ 1.5×10⁹`) — inherited verbatim, since `resolve_crash` walks
+/// that chord via `supercover`. An adversarially astronomical `v` is
+/// out-of-domain (unsupported, mirroring `supercover`/`step`/`gate_coord`); the
+/// residual `i32`-overflow edge and an out-of-precondition `s.pos() ∉ D` are
+/// still handled without panicking or hanging (see below).
 ///
-/// TODO(3a): finalize once the crash rule is settled (open question).
-pub fn resolve_crash(_d: &Corridor, _s: CarState) -> CarState {
-    todo!("crash rule (design doc §3 [OPEN])")
+/// **Algorithm:** walk the coast segment `A = s.pos() → B = (x+vx, y+vy)` in
+/// order (via the projection onto the travel direction) and respawn at `L`,
+/// the furthest swept cell whose supercover-prefix stays `⊆ D` (`A` itself is
+/// always a fallback, so `L` is well-defined). Classify the wall at `L` by
+/// probing its axis-neighbors in the travel direction: an into-wall axis
+/// zeroes that velocity component; a corner (both axes into-wall) zeroes both.
+/// The surviving along-wall component `t` is damped to `⌊t/2⌋` (integer `t/2`,
+/// truncation toward zero, sign preserved). If the forced `Coast` from `L` at
+/// the quenched velocity is still illegal, the fail-safe halves the whole
+/// vector (toward zero) and rechecks, terminating at `v=(0,0)` in the limit
+/// (`Coast` from `L ∈ D` at `v=0` is always legal). The outcome always carries
+/// `scrub: true` — a crash never yields a penalty-free controlled `v = 0`
+/// (`[N5]`).
+///
+/// **Documented fallback variant (not implemented):** if the `⌊t/2⌋` damping
+/// proves "finicky" in play/training, the design's alternative is `v = 0` plus
+/// skipping `P` ticks (a fixed time penalty) instead of the halved-velocity
+/// scrub — a calibration swap, not a scope change (spec **Deferred**).
+pub fn resolve_crash(d: &Corridor, s: CarState) -> CrashOutcome {
+    let a = s.pos();
+    let l = match a.x.checked_add(s.vx).zip(a.y.checked_add(s.vy)) {
+        Some((bx, by)) => respawn_cell(d, a, Point::new(bx, by)),
+        None => a,
+    };
+    if !d.contains(l) {
+        // Out of precondition (`A ∉ D`): cannot coast-check from `L` — do not
+        // enter the fail-safe loop (§ 5: the loop's termination proof requires
+        // `L ∈ D`).
+        return CrashOutcome {
+            state: CarState {
+                x: l.x,
+                y: l.y,
+                vx: 0,
+                vy: 0,
+            },
+            scrub: true,
+        };
+    }
+    let (mut vx, mut vy) = quench_velocity(d, l, s.vx, s.vy);
+    while !legal_move(
+        d,
+        CarState {
+            x: l.x,
+            y: l.y,
+            vx,
+            vy,
+        },
+        Action::Coast,
+    ) {
+        vx /= 2;
+        vy /= 2;
+    }
+    CrashOutcome {
+        state: CarState {
+            x: l.x,
+            y: l.y,
+            vx,
+            vy,
+        },
+        scrub: true,
+    }
+}
+
+/// The ordered coast-walk respawn cell (design doc §3, decision (1)): the
+/// furthest cell along `a → b`'s [`supercover`] whose projection onto the
+/// travel direction is strictly before the nearest non-`D` cell's projection.
+/// Falls back to `a` (always `∈ D` per [`resolve_crash`]'s precondition) when
+/// no such cell exists.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "bounded-chord precondition inherited from supercover (resolve_crash's \
+              documented precondition): |v| << 1.5e9 per move, so the i64 projection \
+              vx*(c.x-a.x) + vy*(c.y-a.y) cannot overflow within the documented domain"
+)]
+fn respawn_cell(d: &Corridor, a: Point, b: Point) -> Point {
+    let vx = i64::from(b.x) - i64::from(a.x);
+    let vy = i64::from(b.y) - i64::from(a.y);
+    let proj =
+        |c: Point| vx * (i64::from(c.x) - i64::from(a.x)) + vy * (i64::from(c.y) - i64::from(a.y));
+    let cover: Vec<Point> = supercover(a, b).collect();
+    let t_block = cover
+        .iter()
+        .filter(|&&c| !d.contains(c))
+        .map(|&c| proj(c))
+        .min()
+        .unwrap_or(i64::MAX);
+    cover
+        .into_iter()
+        .filter(|&c| proj(c) < t_block)
+        .max_by_key(|&c| (proj(c), c.x, c.y))
+        .unwrap_or(a)
+}
+
+/// The wall-normal velocity quench at respawn cell `l` (design doc §3,
+/// decisions (2)/(3)): an axis whose forward neighbor (`l + (sgn(vx), 0)` /
+/// `l + (0, sgn(vy))`) is not in `D` is into-wall and zeroed; the surviving
+/// along-wall component is damped to `⌊t/2⌋` (integer `t/2`). Both axes
+/// into-wall (a corner) zeroes both.
+fn quench_velocity(d: &Corridor, l: Point, vx: i32, vy: i32) -> (i32, i32) {
+    let into_wall_x =
+        l.x.checked_add(vx.signum())
+            .is_none_or(|nx| !d.contains(Point::new(nx, l.y)));
+    let into_wall_y =
+        l.y.checked_add(vy.signum())
+            .is_none_or(|ny| !d.contains(Point::new(l.x, ny)));
+    let vx = if into_wall_x { 0 } else { vx / 2 };
+    let vy = if into_wall_y { 0 } else { vy / 2 };
+    (vx, vy)
 }
 
 /// Resolves several cars occupying the same point (design doc §3) — a layer
@@ -686,6 +836,198 @@ mod tests {
         let before = lap.raw();
         lap.register_move(&sf, Point::new(2, 0), Point::new(2, 3));
         assert_eq!(lap.raw(), before);
+    }
+
+    /// A lint-clean fully-drivable rectangle `w × h` at origin `(0,0)`.
+    fn filled(w: usize, h: usize) -> Corridor {
+        let mut d = Corridor::new(Point::new(0, 0), w, h);
+        for y in 0..i32::try_from(h).unwrap() {
+            for x in 0..i32::try_from(w).unwrap() {
+                d.set(Point::new(x, y), true);
+            }
+        }
+        d
+    }
+
+    #[test]
+    fn resolve_crash_ac1_respawn_position_is_last_valid_cell() {
+        // AC1: filled(3,4), car(1,0,3,2). Sweep (1,0)->(4,2); t_block=8 at
+        // (3,1); L=(2,1). First confirm this is a genuine crash.
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert_eq!(out.state.pos(), Point::new(2, 1));
+    }
+
+    #[test]
+    fn resolve_crash_ac2_straight_wall_quenches_normal_damps_tangential() {
+        // AC2: same fixture as AC1. At L=(2,1): (3,1) not in D -> vx=0;
+        // (2,2) in D -> survivor vy, floor(2/2)=1.
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        let out = resolve_crash(&d, s);
+        assert_eq!(
+            out.state,
+            CarState {
+                x: 2,
+                y: 1,
+                vx: 0,
+                vy: 1
+            }
+        );
+
+        // Head-on: axis-aligned sweep along x, vy already 0 -> survivor
+        // floor(0/2)=0 locks the t/2 truncation at zero. filled(3,4), sweep
+        // (0,0)->(5,0): t_block=15 at x=3, L=(2,0); (3,0) not in D -> vx=0;
+        // (2,0)==L in D -> survivor vy, floor(0/2)=0.
+        let d2 = filled(3, 4);
+        let s2 = car(0, 0, 5, 0);
+        assert_eq!(legal_mask(&d2, s2), BitFlags::empty());
+        let out2 = resolve_crash(&d2, s2);
+        assert_eq!(
+            out2.state,
+            CarState {
+                x: 2,
+                y: 0,
+                vx: 0,
+                vy: 0
+            }
+        );
+
+        // Sign case: negative survivor -> negative floor(t/2). Mirror of the
+        // AC1 fixture about y (filled(3,4), car(1,3,3,-2)): L=(2,2); (3,2)
+        // not in D -> vx=0; (2,1) in D -> survivor vy, floor(-2/2)=-1.
+        let d3 = filled(3, 4);
+        let s3 = car(1, 3, 3, -2);
+        assert_eq!(legal_mask(&d3, s3), BitFlags::empty());
+        let out3 = resolve_crash(&d3, s3);
+        assert_eq!(
+            out3.state,
+            CarState {
+                x: 2,
+                y: 2,
+                vx: 0,
+                vy: -1
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_crash_ac3_concave_corner_zeroes_both_axes() {
+        // AC3: filled(3,3), car(0,0,3,3). Sweep (0,0)->(3,3); L=(2,2); both
+        // (3,2) and (2,3) not in D -> corner -> v=(0,0).
+        let d = filled(3, 3);
+        let s = car(0, 0, 3, 3);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert_eq!(
+            out.state,
+            CarState {
+                x: 2,
+                y: 2,
+                vx: 0,
+                vy: 0
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_crash_ac4_scrub_tick_blocks_reaccel_for_exactly_one_tick() {
+        // AC4: reuse the AC1/AC2 fixture (crash -> state=(2,1,0,1)).
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        let out = resolve_crash(&d, s);
+        assert!(out.scrub);
+        assert_eq!(out.action_mask(&d), BitFlags::from(Action::Coast));
+
+        let out2 = out.consume_scrub();
+        assert!(!out2.scrub);
+        assert_eq!(
+            out2.state,
+            CarState {
+                x: 2,
+                y: 2,
+                vx: 0,
+                vy: 1
+            }
+        );
+        assert_eq!(out2.action_mask(&d), legal_mask(&d, out2.state));
+        // Non-vacuous: the resumed mask differs from the scrub-only mask.
+        assert_ne!(legal_mask(&d, out2.state), BitFlags::from(Action::Coast));
+    }
+
+    #[test]
+    fn resolve_crash_ac5_fail_safe_halves_until_legal_and_never_free() {
+        // (a) loop fires and reduces a single-axis survivor to an exact state.
+        // filled(4,2), car(0,0,4,3): L=(2,1), quench -> (2,0); Coast(2,0) from
+        // (2,1) lands at (4,1) not in D -> halve -> (1,0); Coast(1,0) -> (3,1)
+        // in D, legal.
+        let d = filled(4, 2);
+        let s = car(0, 0, 4, 3);
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert_eq!(
+            out.state,
+            CarState {
+                x: 2,
+                y: 1,
+                vx: 1,
+                vy: 0
+            }
+        );
+        assert!(out.scrub);
+
+        // (b) the guaranteed (0,0) floor (AC3's corner outcome) still carries
+        // the scrub marker -- never a penalty-free controlled stop.
+        let d3 = filled(3, 3);
+        let s3 = car(0, 0, 3, 3);
+        let out3 = resolve_crash(&d3, s3);
+        assert_eq!((out3.state.vx, out3.state.vy), (0, 0));
+        assert!(out3.scrub);
+    }
+
+    #[test]
+    fn resolve_crash_ac6_is_pure_and_deterministic() {
+        let d = filled(3, 4);
+        let s = car(1, 0, 3, 2);
+        assert_eq!(resolve_crash(&d, s), resolve_crash(&d, s));
+    }
+
+    #[test]
+    fn resolve_crash_robustness_axis_aligned_overflow_with_a_in_d_no_panic_no_hang() {
+        // R3(a): A=(1,0) in D, legal_mask empty, B.x=1+i32::MAX overflows i32
+        // -> checked_add fails -> L=A (walk skipped). Chord is axis-aligned
+        // (dy=0) so the fail-safe halves v to a legal value without a giant
+        // supercover collect. Must return promptly (no panic, no hang).
+        let d = filled(5, 5);
+        let s = CarState {
+            x: 1,
+            y: 0,
+            vx: i32::MAX,
+            vy: 0,
+        };
+        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        let out = resolve_crash(&d, s);
+        assert!(out.scrub);
+    }
+
+    #[test]
+    fn resolve_crash_robustness_a_not_in_d_guard_returns_promptly() {
+        // R3(b): A not in D (nothing drivable) -- the L in D guard (design
+        // section 5) fires and degrades safely instead of hanging the
+        // fail-safe loop.
+        let d = Corridor::new(Point::new(0, 0), 5, 5);
+        let s = CarState {
+            x: i32::MAX,
+            y: 0,
+            vx: i32::MAX,
+            vy: 0,
+        };
+        let out = resolve_crash(&d, s);
+        assert_eq!(out.state.vx, 0);
+        assert_eq!(out.state.vy, 0);
+        assert!(out.scrub);
     }
 
     #[test]

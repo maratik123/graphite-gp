@@ -52,8 +52,12 @@ workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The `sim`
 `step` (accelerate-then-advance state advance) is implemented alongside the
 already-live `legal_move` / `legal_mask` legality path (issue #7), and the signed
 `LapCounter::register_move` — the half-open S/F crossing test over the half-grid
-timing gate, with the `legal_move`-first valid-finish conjunction (issue #8). The
-remaining algorithms (crash / collision resolution, generation pipeline, oracle,
+timing gate, with the `legal_move`-first valid-finish conjunction (issue #8).
+`sim::resolve_crash` — the quench-with-scrub crash rule (respawn at the last swept
+cell in `D`, normal→0 / tangential→`⌊t/2⌋`, one forced-`Coast` scrub tick, and an
+`L∈D`-guarded whole-vector-halving fail-safe that never yields a penalty-free
+`v=0`) — returns a `CrashOutcome` with `action_mask` / `consume_scrub` (issue #9).
+The remaining algorithms (collision resolution, generation pipeline, oracle,
 feature extraction, policy) are still `todo!()`. See the `TODO(<block>)` markers.
 
 ## Build
@@ -61,7 +65,7 @@ feature extraction, policy) are still `todo!()`. See the `TODO(<block>)` markers
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 82 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step + lap counter)
+cargo test             # 90 gp-core tests green (supercover + corridor-graph + Size/Rect + overflow-safety + typed legal_mask + track-artifact contract + sim step + lap counter + crash rule)
 ```
 
 MSRV: **Rust 1.97.0**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
