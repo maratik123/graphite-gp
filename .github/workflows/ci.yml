@@ -9,7 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   # Turn adjustable rustc lint warnings into hard errors for local crates across
-  # the build/test/docs compile lanes (respected as of Rust 1.97; MSRV is 1.97.0).
+  # the build/test/docs compile lanes (respected as of Rust 1.97; MSRV is 1.97.1).
   # Complements clippy's `-D warnings` and the workspace deny lint tables.
   CARGO_BUILD_WARNINGS: deny
 
