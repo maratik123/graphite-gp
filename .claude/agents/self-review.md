@@ -176,7 +176,7 @@ Severity levels: `blocker` · `major` · `minor` · `nit`
 
 ### 1. Verify every factual claim on a predominantly-prose diff
 
-*Default to* verifying every factual claim in the new prose whenever the diff is
+*Prefer* verifying every factual claim in the new prose whenever the diff is
 predominantly prose — instruction files, `ai-docs/**`, specs, designs, READMEs —
 rather than assessing whether the prose is well-argued. Re-derive each claim
 yourself; do not take the author's word.
