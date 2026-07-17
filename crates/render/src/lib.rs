@@ -14,6 +14,7 @@ use egui::Painter;
 use gp_core::sim::CarState;
 use gp_core::track::TrackArtifact;
 
+pub mod fonts;
 pub mod placeholder;
 pub mod tokens;
 
