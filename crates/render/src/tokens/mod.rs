@@ -37,7 +37,7 @@
 //! | 7 | `--bg-grid` | Decomposed: `effects::BG_GRID_RULING_WIDTH` + `effects::BG_GRID_COLOR` + pitch = `spacing::CELL`. A CSS gradient recipe, not a value. |
 //! | 8 | `--bg-dots` | Decomposed: `effects::BG_DOTS_RADIUS`, `effects::BG_DOTS_TRANSPARENT_STOP`, `effects::BG_DOTS_COLOR`. |
 //! | 9 | `--shadow-inset` | `effects::InsetShadow` — a distinct type; `epaint::Shadow` has no inner-shadow primitive. |
-//! | 10 | `--text-eyebrow-transform` | **Excluded.** A text-transform behaviour, not a value token; belongs to whichever component draws an eyebrow. |
+//! | 10 | `--text-eyebrow-transform` | **Excluded.** A text-transform behavior, not a value token; belongs to whichever component draws an eyebrow. |
 //!
 //! `--radius-pill` and `--shadow-0`/`--shadow-1`/`--shadow-2`/`--shadow-3`/
 //! `--shadow-pop`/`--focus-shadow` are branch (a) — **not** among the ten —

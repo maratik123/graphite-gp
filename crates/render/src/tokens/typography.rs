@@ -10,7 +10,7 @@
 //! read any of these four groups under a blanket "points" assumption.
 //!
 //! `--text-eyebrow-transform` is **excluded** (AC1 branch (b), disposition
-//! 10): it is a text-transform behaviour, not a value token, and belongs to
+//! 10): it is a text-transform behavior, not a value token, and belongs to
 //! whichever component draws an eyebrow (`gp-render` #13–#16).
 
 /// `--font-display`. Primary family name only.

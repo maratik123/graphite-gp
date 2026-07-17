@@ -57,7 +57,7 @@ pub const RADIUS_3: f32 = 10.0;
 ///
 /// Ported exactly as `f32` — **not** an exclusion, and not to be re-typed as
 /// `u8`. `From<f32> for CornerRadius` saturates `999.0` to `255` at the use
-/// site, which is epaint's documented behaviour, not a lossy re-typing here.
+/// site, which is epaint's documented behavior, not a lossy re-typing here.
 pub const RADIUS_PILL: f32 = 999.0;
 
 // ---- Border widths (pencil strokes) ----

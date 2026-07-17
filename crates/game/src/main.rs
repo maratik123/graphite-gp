@@ -27,7 +27,7 @@ impl eframe::App for GraphiteGpApp {
 ///
 /// # Errors
 /// Returns [`eframe::Error`] if the native window/graphics context fails to
-/// initialise (e.g. no compatible Vulkan/GL adapter).
+/// initialize (e.g. no compatible Vulkan/GL adapter).
 fn main() -> eframe::Result {
     eframe::run_native(
         "graphite-gp",

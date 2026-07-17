@@ -1,7 +1,7 @@
 //! `docs/design-system/tokens/colors.css` → Rust consts.
 //!
-//! 56 total: 38 base colours + 18 semantic aliases (each a const *reference*
-//! to a base colour, per the CSS's own `var(--x)` convention).
+//! 56 total: 38 base colors + 18 semantic aliases (each a const *reference*
+//! to a base color, per the CSS's own `var(--x)` convention).
 
 use egui::Color32;
 
@@ -150,12 +150,12 @@ pub const FOCUS_RING: Color32 = ACCENT;
 
 // ---- Ramps ----
 
-/// The six car colours, indexed by 0-based car index (AC3).
+/// The six car colors, indexed by 0-based car index (AC3).
 pub const CAR_COLORS: [Color32; 6] = [CAR_1, CAR_2, CAR_3, CAR_4, CAR_5, CAR_6];
 /// The speed heatmap ramp, ordered slow → fast (AC4).
 pub const HEAT_RAMP: [Color32; 4] = [HEAT_0, HEAT_1, HEAT_2, HEAT_3];
 
-/// Looks up a car's colour by its 0-based index; `None` if `index` is out of
+/// Looks up a car's color by its 0-based index; `None` if `index` is out of
 /// range.
 ///
 /// Deliberately not `const fn`: `<[T]>::get` is not yet const-stable
@@ -183,7 +183,7 @@ mod tests {
 
     const CSS: &str = include_str!("../../../../docs/design-system/tokens/colors.css");
 
-    /// Every base (non-alias) colour token, in source order.
+    /// Every base (non-alias) color token, in source order.
     const BASE: [(&str, Color32); 38] = [
         ("--paper-0", PAPER_0),
         ("--paper-1", PAPER_1),
@@ -268,7 +268,7 @@ mod tests {
         ("--focus-ring", FOCUS_RING, ACCENT, "--accent"),
     ];
 
-    /// Parses a `#RRGGBB` CSS colour literal. Test-only; the value handed in
+    /// Parses a `#RRGGBB` CSS color literal. Test-only; the value handed in
     /// always comes from `value_of`, which has already cut at `;` and trimmed.
     fn parse_hex_color(value: &str) -> Color32 {
         let hex = value
@@ -281,7 +281,7 @@ mod tests {
     }
 
     /// AC1/AC6/AC8 — every base token's parsed hex matches its const. The
-    /// parser cuts at `;`, never at end-of-line: 28 of these 56 colour
+    /// parser cuts at `;`, never at end-of-line: 28 of these 56 color
     /// declarations carry a trailing `/* ... */` comment (design finding 6).
     #[test]
     fn base_colors_match_css() {
@@ -326,7 +326,7 @@ mod tests {
     }
 
     /// AC6 — cross-file identity: car 1 is the accent, and the accent is the
-    /// ramp's fastest colour; a spot-check alias identity too.
+    /// ramp's fastest color; a spot-check alias identity too.
     #[test]
     fn cross_identities_hold() {
         assert_eq!(CAR_COLORS[0], ACCENT);

@@ -52,7 +52,7 @@ fn weighted_instance(bytes: &'static [u8], wght: f32) -> FontData {
     })
 }
 
-/// Build the app's [`FontDefinitions`].
+/// Builds the app's [`FontDefinitions`].
 ///
 /// Starts from egui's four bundled faces (via [`FontDefinitions::default`],
 /// never [`FontDefinitions::empty`] — that would silently drop egui's

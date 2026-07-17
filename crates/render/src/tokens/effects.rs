@@ -17,7 +17,7 @@
 //! round-trip*): `Color32::from_rgba_unmultiplied_const` premultiplies at
 //! construction, so the const's stored bytes are what epaint actually
 //! renders — the faithful thing to assert — even though a *round-trip* back
-//! through `to_srgba_unmultiplied()` is lossy for every shadow colour here
+//! through `to_srgba_unmultiplied()` is lossy for every shadow color here
 //! except `--focus-shadow`, which happens to round-trip exactly.
 
 use crate::tokens::color::{GRID_DOT, GRID_LINE};
@@ -107,7 +107,7 @@ pub const DUR_SLOW: Duration = Duration::from_millis(320);
 /// `--bg-grid`, decomposed (AC1 branch (b) #7): a CSS gradient recipe, not a
 /// value. The ruling-line width, in points.
 pub const BG_GRID_RULING_WIDTH: f32 = 1.0;
-/// `--bg-grid`'s ruling colour — the CSS's own `var(--grid-line)`.
+/// `--bg-grid`'s ruling color — the CSS's own `var(--grid-line)`.
 pub const BG_GRID_COLOR: Color32 = GRID_LINE;
 // `--bg-grid`'s pitch is `spacing::CELL` — reuse that const directly rather
 // than restating it here.
@@ -116,13 +116,13 @@ pub const BG_GRID_COLOR: Color32 = GRID_LINE;
 pub const BG_DOTS_RADIUS: f32 = 1.2;
 /// `--bg-dots`'s fully-transparent falloff stop, in points.
 pub const BG_DOTS_TRANSPARENT_STOP: f32 = 1.4;
-/// `--bg-dots`'s dot colour — the CSS's own `var(--grid-dot)`.
+/// `--bg-dots`'s dot color — the CSS's own `var(--grid-dot)`.
 pub const BG_DOTS_COLOR: Color32 = GRID_DOT;
 
 // ---- Focus ----
 
 /// `--focus-shadow`. CSS `rgba(226,74,43,0.35)`, alpha
-/// `round(0.35 * 255) = 89` — the one shadow colour here that round-trips
+/// `round(0.35 * 255) = 89` — the one shadow color here that round-trips
 /// exactly through `to_srgba_unmultiplied()` (AC6 carve-out).
 pub const FOCUS_SHADOW: Shadow = Shadow {
     offset: [0, 0],
@@ -152,7 +152,7 @@ mod tests {
     }
 
     /// AC1/AC6 — the four elevation shadows' geometry and stored (premultiplied)
-    /// colour bytes, matching the CSS numbers exactly.
+    /// color bytes, matching the CSS numbers exactly.
     #[test]
     fn elevation_shadows_match_css() {
         assert_eq!(SHADOW_1.offset, [0, 1]);
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(SHADOW_POP.color.to_array(), [6, 6, 5, 51]);
     }
 
-    /// `--shadow-inset` — same stored colour as `--shadow-3` (identical CSS
+    /// `--shadow-inset` — same stored color as `--shadow-3` (identical CSS
     /// alpha), distinct offset/blur/spread, and a distinct Rust type.
     #[test]
     fn shadow_inset_matches_css() {
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(SHADOW_INSET.color.to_array(), [5, 4, 4, 36]);
     }
 
-    /// `--focus-shadow` — the one shadow colour that round-trips exactly
+    /// `--focus-shadow` — the one shadow color that round-trips exactly
     /// (AC6 carve-out).
     #[test]
     fn focus_shadow_matches_css_and_round_trips() {
