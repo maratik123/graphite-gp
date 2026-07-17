@@ -116,7 +116,7 @@ The callout exists because Sonnet-mode sessions in the Claude Code harness auto-
 
 | Variant | Probe shape | Distinguishing phrase (verbatim) | Skills using it |
 |---|---|---|---|
-| A | Preamble-glob — the skill's `⚡ First` (or equivalent) preamble runs a `ls <glob>` probe that doubles as path discovery and RESUME/fresh routing | `"Locate the durable-state file via this skill's active-state probe"` | `/task`, `/project-review`, `/pr-commented`, `/main-ci-failed`, `/pr-ci-failed` |
+| A | Preamble-glob — the skill's `⚡ First` (or equivalent) preamble runs a `ls <glob>` probe that doubles as path discovery and RESUME/fresh routing | `"Locate the durable-state file via this skill's active-state probe"` | `/task`, `/project-review`, `/pr-commented`, `/main-ci-failed`, `/pr-ci-failed`, `/dependabot-pr` |
 | B | Fixed-glob single in-flight artefact — the durable state is a single named file under a known directory | `"If exactly one in-flight artefact exists"` | `/bugfix`, `/interview` |
 | C | Parent-routing — the skill has no own durable surface; it inherits whichever parent skill is active | `"Identify the **parent workflow**"` | `/context-reset` (also the canonical cross-link target) |
 

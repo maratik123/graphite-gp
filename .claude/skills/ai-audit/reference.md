@@ -262,8 +262,8 @@ for f in <changed-files>; do
     abs=$(realpath -m "$src_dir/$path")
     [ -e "$abs" ] || { echo "FILE MISSING: $f -> $path"; continue; }
     [ -z "$anchor" ] && continue
-    # heading-slug match: lowercase, strip non-alnum-non-hyphen, spaces->hyphens
-    awk '/^#{1,6}\s/{line=$0; gsub(/^#+\s+/,"",line); line=tolower(line); gsub(/[^a-z0-9 -]/,"",line); gsub(/ /,"-",line); gsub(/-+/,"-",line); sub(/^-+/,"",line); sub(/-+$/,"",line); print line}' "$abs" | grep -Fx "$anchor" >/dev/null || echo "ANCHOR MISSING: $f -> $path#$anchor"
+    # heading-slug match (GitHub algorithm): lowercase, strip to alnum/underscore/hyphen/space, spaces->hyphens; keep '_' and consecutive hyphens (GitHub does NOT drop underscores or collapse '--', so an em-dash heading like `A — B` slugs to `a--b`)
+    awk '/^#{1,6}\s/{line=$0; gsub(/^#+\s+/,"",line); line=tolower(line); gsub(/[^a-z0-9 _-]/,"",line); gsub(/ /,"-",line); sub(/^-+/,"",line); sub(/-+$/,"",line); print line}' "$abs" | grep -Fx "$anchor" >/dev/null || echo "ANCHOR MISSING: $f -> $path#$anchor"
   done
 done
 ```
@@ -281,7 +281,7 @@ Enforces one invariant: **every citation resolves for its reader.** A citation w
 **Recipe.** Run the script; it encodes all three probes.
 
 ```bash
-bash .claude/skills/ai-audit/scripts/check-citations.sh
+.claude/skills/ai-audit/scripts/check-citations.sh
 ```
 
 | Probe | Fires on |
