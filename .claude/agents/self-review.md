@@ -171,3 +171,27 @@ Severity levels: `blocker` · `major` · `minor` · `nit`
     - `major` / `blocker`: valid only if the reason is specific and technically correct (e.g., Rust type system enforces the constraint at compile time, genuine out-of-scope, well-known intentional design tradeoff with a named authority). Vague reasons ("probably fine", "too much work", "negligible") → re-open as `⬜ Open`.
     - `nit` / `minor`: more latitude, but a reason must be stated. No reason at all → re-open.
   - Focus on remaining `⬜ Open` items plus anything newly introduced.
+
+## Patterns
+
+### 1. Verify every factual claim on a predominantly-prose diff
+
+*Default to* verifying every factual claim in the new prose whenever the diff is
+predominantly prose — instruction files, `ai-docs/**`, specs, designs, READMEs —
+rather than assessing whether the prose is well-argued. Re-derive each claim
+yourself; do not take the author's word.
+
+**Why.** On such a diff the ordinary gates are structurally blind: `cargo
+build`/`test`/`clippy`/`doc` cannot fail on a false sentence, so a wrong claim
+ships green. Reviewing an all-prose `/improve` diff (12 instruction files, zero
+`.rs`) under an explicit verify-every-claim instruction produced **three**
+`major` defects across five rounds — every one a false claim, each falsified by a
+command under a minute: a hook documented as firing "only when the command
+invokes `curl`/`wget`" (a heredoc blocks it; no HTTP call is made), a claim that
+"all four UA spellings satisfy it" (four valid spellings were blocked), and a
+cited `const fn` precedent that is not `const`. A reviewer that reads prose *as
+prose* assesses argument quality, not truth.
+
+Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-16 —
+*directing `self-review` to verify factual claims in prose caught every `major`
+on an all-prose diff*.

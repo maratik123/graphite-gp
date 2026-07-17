@@ -86,7 +86,7 @@ Concentrating the rationale in one place keeps the per-skill callouts short (eac
 
 - Do NOT ask "continue?" between subtasks within a group — just proceed
 - Each `Agent` Tool call = 1 design-defined group; the Subagent commits after each subtask inside the group
-- Update progress.md after each subtask (current_step, last_passed_gate, Decisions log)
+- Update progress.md after each subtask (current_step, last_passed_gate, Decisions log). **A Decisions-log bullet is a durable claim, not a note** — it is gitignored but is read by every future context-reset, this skill included. Before writing "verified" / "confirmed" / "observed", ask: did **I**, in **this** invocation, run **that exact** command against **this** code? If the true support is "a prior agent measured something adjacent" or "the passing suite is consistent with this", write **that** — it is weaker, and that is the point. Mirrors `.claude/agents/code-writer.md` § Mode A (same rule, same boundary).
 - The next group's Agent is spawned by the orchestrator only after the current group's Agent returns
 
 ## `.progress.md` format (canonical)
