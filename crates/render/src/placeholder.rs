@@ -19,21 +19,29 @@
 //! the design system (the design system's radius ramp is 0/3/6/10, and its
 //! only dot radius is `--bg-dots`'s 1.2, not this scaffold's 1.0).
 
-use crate::tokens::{color, spacing};
-use egui::{Color32, Painter, Pos2, Rangef, Rect, Stroke, StrokeKind, pos2};
+use crate::fonts::{JETBRAINS_MONO_MEDIUM, ONEST_BOLD, ONEST_MEDIUM};
+use crate::tokens::{color, spacing, typography};
+use egui::{
+    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rangef, Rect, Stroke, StrokeKind, pos2,
+};
 
-/// The placeholder's fixed canvas: 192×128 logical points at `pixels_per_point
+/// The placeholder's fixed canvas: 320×192 logical points at `pixels_per_point
 /// = 1.0`. The single source of truth for the golden's size, consumed by the
 /// tessellation test and the golden test — `gp-game`'s window draws into
 /// whatever size the OS gives it (`ui.max_rect()`), so this const has no
 /// production (non-test) reader; see the `cfg_attr` below.
+///
+/// Grown from 192×128 (design `2026-07-17-render-onest-font-swap`, D2) to fit
+/// the three-row text sample the AC16 by-eye check needs — a too-small canvas
+/// would clip silently (egui clips at the painter's clip rect), which is
+/// exactly the failure class this task exists to remove.
 ///
 /// Built as a struct literal, not `Rect::from_min_size` — that constructor is
 /// not `const fn` on 0.35, and `Rect`'s fields are public.
 #[cfg_attr(not(test), allow(dead_code, reason = "test-only canvas fixture"))]
 const CANVAS_RECT: Rect = Rect {
     min: Pos2::ZERO,
-    max: Pos2::new(192.0, 128.0),
+    max: Pos2::new(320.0, 192.0),
 };
 
 /// Spacing between graph-paper ruling lines and dots. `tokens::spacing::CELL_SM`
@@ -63,6 +71,18 @@ const GRID_LINE: Color32 = color::GRID_LINE;
 /// `tokens::color::GRID_DOT` — the graph-paper dot at each ruling intersection.
 const GRID_DOT: Color32 = color::GRID_DOT;
 
+/// Row 1 sample text — the wordmark, in the display face at its heaviest
+/// registered weight (design `2026-07-17-render-onest-font-swap` § Test
+/// Design, D1/D3).
+const SAMPLE_ROW_1: &str = "GRAPHITE GP";
+/// Row 2 sample text — Cyrillic + en-dash + digits, exercising the display
+/// face's non-ASCII coverage (the glyph the swap exists for, `Ф`).
+const SAMPLE_ROW_2: &str = "Ф1 – Ф7";
+/// Row 3 sample text — mono telemetry with a middot, an arrow, and `✓` at the
+/// Badge's own weight (`--fw-medium`), reproducing the motivating use case
+/// exactly (D3).
+const SAMPLE_ROW_3: &str = "L3 · v4→6 ✓";
+
 /// Derived positions for the placeholder's content, private so the guard and
 /// the drawing path never write a probe coordinate twice.
 ///
@@ -85,6 +105,12 @@ struct PlaceholderGeometry {
     paper_probe: Pos2,
     /// A hairline probe pixel, on the stroke but off any grid line (AC9(b)).
     hairline_probe: Pos2,
+    /// Top-left anchor of the row-1 wordmark text (`Align2::LEFT_TOP`).
+    text_row_1: Pos2,
+    /// Top-left anchor of the row-2 Cyrillic sample text.
+    text_row_2: Pos2,
+    /// Top-left anchor of the row-3 mono telemetry sample text.
+    text_row_3: Pos2,
 }
 
 /// Derive every placeholder position from `rect`. Kept private — the guard
@@ -111,20 +137,35 @@ fn geometry(rect: Rect) -> PlaceholderGeometry {
     // pixel rather than exactly on a pixel boundary.
     let paper_probe = pos2(rect.min.x + 8.5, rect.min.y + 8.5);
     let hairline_probe = pos2(rect.min.x + 88.5, hairline_y);
+    // Text row anchors (design § Test Design's sample table) — all three sit
+    // below the hairline (`y > 100.5`) and clear both probes above, so every
+    // existing guard keeps its meaning.
+    let text_row_1 = pos2(rect.min.x + 16.0, rect.min.y + 106.0);
+    let text_row_2 = pos2(rect.min.x + 16.0, rect.min.y + 140.0);
+    let text_row_3 = pos2(rect.min.x + 16.0, rect.min.y + 168.0);
     PlaceholderGeometry {
         card_rect,
         hairline_y,
         hairline_x,
         paper_probe,
         hairline_probe,
+        text_row_1,
+        text_row_2,
+        text_row_3,
     }
 }
 
 /// Draws the scaffold placeholder frame into `rect`.
 ///
 /// Paints the paper background, a graph-paper ruling + dot motif, one
-/// crisp-radius card, and one hairline stroke. Draws no text (design
-/// *Font-proof amendment*).
+/// crisp-radius card, one hairline stroke, and a three-row font-proof text
+/// sample (design `2026-07-17-render-onest-font-swap` — wordmark, Cyrillic +
+/// en-dash + digits, mono telemetry with `✓`). **The caller must have
+/// installed [`crate::fonts::definitions`] into the drawing [`egui::Context`]
+/// first** — every row resolves through a [`FontFamily::Name`], which panics
+/// at layout time if unbound (the design's *Load-bearing premise*); this
+/// function does not (and, being draw-only per AC13, cannot) install fonts
+/// itself.
 ///
 /// `painter` is a borrowed draw context (design *Ownership override*) — this
 /// function does not own, construct, or store one. `rect` is explicit rather
@@ -149,6 +190,31 @@ pub fn draw_placeholder(painter: &Painter, rect: Rect) {
         geometry.hairline_x,
         geometry.hairline_y,
         Stroke::new(HAIRLINE_STROKE_WIDTH, HAIRLINE),
+    );
+
+    painter.text(
+        geometry.text_row_1,
+        Align2::LEFT_TOP,
+        SAMPLE_ROW_1,
+        FontId::new(typography::FS_H2, FontFamily::Name(ONEST_BOLD.into())),
+        color::TEXT_INK,
+    );
+    painter.text(
+        geometry.text_row_2,
+        Align2::LEFT_TOP,
+        SAMPLE_ROW_2,
+        FontId::new(typography::FS_H3, FontFamily::Name(ONEST_MEDIUM.into())),
+        color::TEXT_BODY,
+    );
+    painter.text(
+        geometry.text_row_3,
+        Align2::LEFT_TOP,
+        SAMPLE_ROW_3,
+        FontId::new(
+            typography::FS_SM,
+            FontFamily::Name(JETBRAINS_MONO_MEDIUM.into()),
+        ),
+        color::TEXT_MUTED,
     );
 }
 
@@ -207,9 +273,34 @@ mod tests {
     /// "non-empty": a non-empty `Vec<ClippedPrimitive>` can still carry
     /// zero-geometry meshes, which is precisely quartzite's actual defect
     /// (widgets that existed but had zero-size geometry).
+    ///
+    /// This test owns its `egui::Context` and calls `set_fonts` **before**
+    /// the first (and only) `run_ui` pass, so one pass suffices — `run_ui`'s
+    /// internal `begin_pass` consumes the deferred `new_font_definitions` and
+    /// the fonts are live for that same pass (design D11). `golden_guard`
+    /// below has no such window and needs a different mechanism — the two
+    /// must not be copied onto each other.
     #[test]
+    // Drawing the sample rasterises real glyphs — `epaint`'s glyph cache
+    // (`epaint::text::font::FontCell::allocate_glyph_uncached`,
+    // `epaint-0.35.0/src/text/font.rs:280`) reaches `vello_cpu`'s
+    // `U8Kernel::copy_solid`, whose body is a **checked**
+    // `bytemuck::cast_slice_mut::<u8, u32>` over the pixmap buffer. Native
+    // malloc over-aligns the buffer so the cast succeeds; Miri's allocator
+    // grants only `u8`'s alignment of 1, so the checked cast correctly
+    // refuses, panicking with `TargetAlignmentGreaterAndInputNotAligned`.
+    // This is a distinct abort site from `golden_guard`'s FFI/`dlopen`
+    // ignore below — do not copy that reason here, it would be a false
+    // justification for a different failure.
+    #[cfg_attr(
+        miri,
+        ignore = "drawing text rasterises glyphs via vello_cpu, whose checked \
+                  u8->u32 pixmap cast panics under Miri's 1-byte allocator \
+                  alignment (TargetAlignmentGreaterAndInputNotAligned)"
+    )]
     fn tessellation_smoke() {
         let ctx = egui::Context::default();
+        ctx.set_fonts(crate::fonts::definitions());
         let input = egui::RawInput {
             screen_rect: Some(CANVAS_RECT),
             ..Default::default()
@@ -239,14 +330,14 @@ mod tests {
     /// Read the pixel at `pos` out of a rendered `RgbaImage`.
     ///
     /// `RgbaImage::get_pixel` takes `u32`; `geometry()` returns `Pos2`
-    /// (`f32`). `CANVAS_RECT` is 192×128 at `pixels_per_point = 1.0`, and
+    /// (`f32`). `CANVAS_RECT` is 320×192 at `pixels_per_point = 1.0`, and
     /// every probe position returned by `geometry()` lies inside it, so the
     /// truncation below is in-domain and total.
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         reason = "probe positions come from `geometry()` and always land \
-                  inside the 192×128 CANVAS_RECT — truncation is in-domain"
+                  inside the 320×192 CANVAS_RECT — truncation is in-domain"
     )]
     fn pixel_at(image: &image::RgbaImage, pos: egui::Pos2) -> [u8; 4] {
         image.get_pixel(pos.x as u32, pos.y as u32).0
@@ -258,16 +349,34 @@ mod tests {
     /// internally and rasterise a *second*, different image object, so this
     /// calls `render()` once and feeds that same image to both the guard and
     /// `try_image_snapshot_options`).
+    ///
+    /// **AC14 — this is a structural guard, not a typographic one.**
+    /// `egui_kittest` hardcodes dify's anti-aliasing exemption with no
+    /// disabling knob, so AA-classified edge pixels (hairline / card stroke /
+    /// grid lines / glyph edges — text is almost entirely AA) may differ
+    /// silently with no diff artifact; the guarantee is bit-exact in **flat**
+    /// regions only, which AC9's paper probe covers. **Caught:** wrong face,
+    /// tofu, a mixed-typeface label, missing text, a weight silently
+    /// rendering Light — all change glyph shape/mass outside the AA-exempt
+    /// edges. **Not caught:** sub-pixel rasterisation drift from a
+    /// `skrifa`/`harfrust` bump — a deliberate omission, not a gap, or the
+    /// golden would redden on every dependency bump. Dies with the
+    /// placeholder at #17.
     #[test]
     // Miri cannot execute foreign functions, and this test drives wgpu, which
     // `dlopen`s the Vulkan ICD via `libloading` (`error: unsupported operation:
     // can't call foreign function `dlopen` on OS `linux``). Without this gate
     // the advisory workspace Miri job aborts here, losing this crate's whole
-    // binary — `tessellation_smoke` included, though it is pure CPU and passes
-    // under Miri — and, via cargo's fail-fast, every phase queued behind it
-    // (the doc-test phase never started). Other crates' unittest binaries happen
-    // to be scheduled earlier, so they survive; that is binary ordering, not a
-    // guarantee.
+    // binary and, via cargo's fail-fast, every phase queued behind it (the
+    // doc-test phase never started). Other crates' unittest binaries happen to
+    // be scheduled earlier, so they survive; that is binary ordering, not a
+    // guarantee. **Not** the only Miri abort site in this crate any more:
+    // `tessellation_smoke` above now draws the same text sample from a bare
+    // `Context` and carries its own, differently-caused, ignore — that one is
+    // a checked-cast panic in `vello_cpu`, reached without any FFI at all.
+    // Under Miri, gp-render then exercises only the `fonts.rs` + `tokens`
+    // tests, not the placeholder path — an accepted coverage loss (design
+    // § Risks), not an oversight.
     #[cfg_attr(
         miri,
         ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
@@ -291,12 +400,33 @@ mod tests {
 
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
 
+        // Fonts cannot be installed post-build: `Harness::from_builder` runs
+        // this closure at *build* time against a `None` ctx
+        // (`egui_kittest` `lib.rs:144-146`, `builder.rs:189,239`), so a
+        // post-build `set_fonts` line would be unreachable dead code, and
+        // `HarnessBuilder` has no font/context hook to pre-seed one from
+        // outside. Installing from *inside* the closure and drawing
+        // immediately would panic instead — every sample row is a
+        // `FontFamily::Name(..)`, unbound in a default `Context`
+        // (`FontsImpl::font`, `epaint fonts.rs:1027-1031`), and `set_fonts`
+        // is deferred: it only takes effect at the *next* pass's
+        // `begin_pass`. So frame 1 installs the fonts and returns
+        // **without drawing** — the early `return` below is load-bearing,
+        // not dead code, because the panic is a layout-time event and
+        // drawing nothing is a complete defence — and frame 2+ draws with
+        // every family bound (design § Test Design).
+        let mut fonts_installed = false;
         let mut harness = egui_kittest::Harness::builder()
             .with_size(CANVAS_RECT.size())
             .with_pixels_per_point(1.0)
             .with_theme(egui::Theme::Light)
             .renderer(renderer)
-            .build_ui(|ui| {
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
                 // `ui.painter()` is inset 8px by the harness's central panel
                 // margin, and `Painter::with_clip_rect` can only intersect,
                 // never widen (design finding 5) — so a full-canvas painter
@@ -304,6 +434,13 @@ mod tests {
                 let painter = ui.ctx().layer_painter(egui::LayerId::background());
                 draw_placeholder(&painter, CANVAS_RECT);
             });
+
+        // Unconditional — `run`/`run_ok`/`try_run` loop on *repaint
+        // requests*, which would make this depend on whether `set_fonts`
+        // happens to request one; `run_steps` guarantees a text-drawing pass
+        // regardless (`from_builder`'s own `run_ok()` may already have run
+        // frame 2, in which case this is simply one more identical frame).
+        harness.run_steps(1);
 
         debug_assert_eq!(CANVAS_RECT, harness.ctx.content_rect());
 
