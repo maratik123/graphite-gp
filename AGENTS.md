@@ -107,7 +107,7 @@ When adding or editing dependencies in `Cargo.toml`:
 - Use `0.x` for `0.x.y` versions — never pin the patch.
 - Use `x` for `x.y.z` versions — never pin minor or patch.
 - No `~` prefix — Cargo's default `^` semantics are sufficient.
-- After changing version constraints, run `cargo update` then `cargo build` to verify.
+- After changing a **dependency version constraint** (a `[dependencies]`/`[dev-dependencies]` version bump, or a new/removed dep), run `cargo update` then `cargo build` to verify — and **name which constraint changed before running it**. A `Cargo.toml` edit touching only package metadata (`license`, `description`, `authors`, …) has no dep-graph delta: run `cargo build` alone, which will not touch `Cargo.lock`. A bare `cargo update` there pulls unrelated transitive bumps into the lockfile. Confirm the delta is only the intended edges with `git diff --stat Cargo.lock` **before staging**.
 
 ## Workflow
 
@@ -197,6 +197,28 @@ Interpret user phrasing literally and conservatively. When uncertain — ask, do
 - **"Submit / push to PR"** = `git push` the branch to remote so commits appear in the open PR. **NOT** `gh pr merge`. Only merge when the user explicitly says "merge".
 - **"wtf?" / "what?" / "huh?"** (or similar surprise/frustration) = the previous action was the opposite of what the user wanted. **Stop immediately**, do not retry, ask what was wrong before doing anything else.
 - **IDE files** (`.idea/`, `*.iml`, `.vscode/`, `*.swp`, etc.) — never add, remove, modify, stage, or `.gitignore` them unless the user explicitly asks. "add ide files" most likely means **commit and track them** — confirm before acting.
+- **A verbal acknowledgement is not a fix.** When the user corrects a fact — especially one you have already written into a file — the correction is a **work item**, not a conversational beat. Reply **and**, in the same turn, `grep` the artifact for the wrong claim and edit it. Tell: any reply containing *"fair"*, *"good point"*, *"you're right"*, *"consistent with"*, or *"that closes it"* that is **not accompanied by an `Edit`** to whatever asserts the now-refuted thing.
+- **Deviating from user-approved scope requires an ask, not a notification.** *"I also did X — say the word if you'd rather I revert"* puts the burden of catching scope drift on the user. Ask **before** widening scope, even when the argument is compelling and the mirror cost looks low — and especially when the argument comes from a reviewer whose premise you have not run. A reviewer's finding is an argument, not a fact; run its premise before acting on it.
+
+## Patterns
+
+### 1. Verify a reviewer's retractions and suggestions as skeptically as its findings
+
+*Default to* verifying a reviewer's *retraction*, *salvage suggestion*, and
+*"leave it / harmless / follow-up"* call with the same command you would run
+against its original finding. A retraction is an assertion; a proposed fix is a
+claim that the fix works; a "harmless" ruling is a claim about harm.
+
+**The asymmetry to resist.** A finding feels like a challenge and invites
+checking, while a withdrawal or a wave-through feels like *relief* and invites
+acceptance — which is exactly when an unverified claim slips through, because
+agreeing costs nothing in the moment. *Prefer* overriding a reviewer only in the
+direction of **more** verification: declining a suggested fix because you tested
+it and it fails is sound; accepting one because it sounds right is not.
+
+Validated by [`ai-docs/learnings.md`](ai-docs/learnings.md) 2026-07-16 —
+*treating a reviewer's retractions and suggestions as skeptically as its
+findings*.
 
 ## Agent Docs
 
@@ -281,6 +303,7 @@ Run `/improve` when **≥3 unescalated correction entries**, **≥2 unescalated 
 
 ## Rust Test Conventions
 
+- **Miri aborts on the FIRST unsupported operation**, and cargo's fail-fast then drops every phase queued behind it — the offending crate's whole test binary plus the doc-test phase. Gate any test that can abort Miri with `#[cfg_attr(miri, ignore = "<why>")]` **in the same commit**. Per-test, **never** a crate-level `--exclude` (that also drops the crate's Miri-clean tests). The trigger is **"aborts under Miri", NOT "is FFI"** — the two in-tree gates have unrelated causes: `golden_guard` drives wgpu and `dlopen`s the Vulkan ICD (FFI), while `tessellation_smoke` has **no FFI** and aborts because drawing text runs `vello_cpu`'s checked `u8`→`u32` pixmap cast, which panics under Miri's 1-byte allocator alignment. Write the reason for **that test's own** abort; do not copy a sibling's — a wrong reason is a false justification for a different failure. Reproduce with the **workspace** command CI runs (`ci.yml:176`+`:188` → `MIRIFLAGS=-Zmiri-tree-borrows cargo miri test --workspace`; locally add `+nightly` to select the toolchain that has `miri`), never a narrower `-p` run. **Whether a red Miri BLOCKS merge is UNRESOLVED — do not assert either way** ([#76](https://github.com/maratik123/graphite-gp/issues/76)): `ci.yml:170-172` says *"Advisory only — no `miri-pass` gate is wired into branch protection"*, while the **active** `main-protection` ruleset lists `Miri / Tree Borrows` among its required status checks (`gh api repos/maratik123/graphite-gp/rulesets/18954622 --jq '.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context'`). **What IS measured (2026-07-17):** `continue-on-error: true` splits the two conclusions — on `973d99d` the check-run `Miri / Tree Borrows` reports **`failure`** while its workflow run (`29518271322`) rolls up to **`success`**. Consequence for you: **`gh run list` is BLIND to a red Miri** — it reports the roll-up, so an all-green run list is NOT evidence Miri passed; query `gh api repos/maratik123/graphite-gp/commits/<sha>/check-runs` instead. Per #76's own criterion a `failure` check-run makes the required-check entry live rather than inert — but that has never been exercised **at merge time** (973d99d was an intermediate commit; PR #70's merged head was green), so it stays a derivation, not a fact. Either way, treat a red Miri as a **regression to fix**, not a status to interpret. Check it after any PR adding a new dependency class.
 - Unit tests in the same file under a `#[cfg(test)]` module. Integration tests in `tests/`.
 - Use `rstest` for parameterized tests when useful; `mockall` for mocking traits; `pretty_assertions` encouraged for diffs.
 - Assert with `assert_eq!` / `assert_matches!`. **`assert_matches!` formats the scrutinee with `{:?}` on mismatch, so its type MUST impl `Debug`** (`Result` needs both `T` + `E`; `Box<dyn Trait>` needs a `Debug` supertrait) — `assert!(matches!(...))` imposes no such bound. If the scrutinee is non-`Debug`, leave `assert!(matches!(...))` as-is — do NOT add a production `#[derive(Debug)]` to satisfy a test-only assertion. Counting `assert!(matches!)` sites for a migration: the multi-line message form is invisible to single-line `rg 'assert!\(matches!'` — use `rg -U`.

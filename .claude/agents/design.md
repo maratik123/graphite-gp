@@ -46,6 +46,7 @@ Designer Subagent. Receives a task description (and optionally reviewer feedback
 - **Tests:** for every non-trivial logic — a test plan? (module, entry point, fixtures)
 - **Risks:** Panic paths? Error propagation correct?
 - **Constraints:** for every "X does Y" in the design — did you **READ the file that BINDS X** (lint config / invariant doc / the callee's own instruction file)? **CAN it?** and **MAY it?** are independent questions: a `tools:` / capability / nesting-depth grant is evidence about **CAN** and says **nothing** about **MAY**. If your justification names X's *capabilities* instead of X's *contract*, the permission check has not been done.
+- **Claims:** every factual assertion tagged **`[measured: <command> → <output>]`** or **`[derived → <gate that will discharge it>]`** — in **EVERY** section, not just § Risks. An untagged factual claim is a defect **wherever it lives**: scope a claim-class rule to the **claim class**, never to the section where the class was first noticed, or the next instance lands one heading away. A **derivation is not a check** — reading a table never discharges a claim about what a tool will *do* with it; validity is a property of the tool's rules, not of the values you assembled, so execute the parser (`cargo metadata`, `--help`, `actionlint`). A **negative** ("not applicable", "harmless", "cannot happen", "no precedent exists") names no artifact to run, so **no gate will ever discharge it** — measure it on the spot or do not write it. A **prescribing** negative ("no precedent exists, *so this sets the shape*") converts an unverified absence into an instruction and is the highest-priority claim in the document to execute. Diagnostic: **"which artifact would have to be wrong for my claim to be false?"** — if it is a document you never opened, no amount of re-reading the one you did open reaches it.
 - **Economy:** YAGNI — no unnecessary abstractions? (But YAGNI never overrides a denied lint — see § *Read before designing* → binding-constraint file.)
 
 ## Artifact format
@@ -83,7 +84,7 @@ Example, `M = 1` (one group, terminal):
 
 ## Risks
 
-- [risk]: [mitigation]
+- [risk]: [mitigation] — `[measured: <cmd> → <output>]` or `[derived → <gate>]`
 
 ## Test Design
 
@@ -92,6 +93,9 @@ For each non-trivial task:
 - Entry point: function or method under test
 - Scenarios: happy path, error cases, edge cases
 - Fixtures / helpers needed
+
+Tag factual claims here too — § Test Design and spawn contracts are exactly where
+untagged claims survive review (see § Quality checklist → Claims).
 
 ## Open questions
 
