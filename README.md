@@ -51,9 +51,13 @@ server. The **design tokens are landed** (issue #12): all 127 CSS tokens from
 [`docs/design-system/tokens/`](docs/design-system/tokens/) are ported to module-level
 `SCREAMING_SNAKE_CASE` consts in `gp_render::tokens` (117 value-checked against the
 CSS at test time, 10 in a documented exclusion table), and the two design-system
-faces — Space Grotesk + JetBrains Mono, vendored as OFL-1.1 variable `[wght]` files —
+faces — Onest + JetBrains Mono, vendored as OFL-1.1 variable `[wght]` files —
 are registered through `gp_render::fonts::definitions()`, which `gp-game` installs via
-`Context::set_fonts` (`gp-render` still holds no `egui::Context`). Block 2 continues at
+`Context::set_fonts` (`gp-render` still holds no `egui::Context`). Onest replaced the
+Space Grotesk placeholder at #73, which also turned egui's `default_fonts` off: the
+display face now carries the Cyrillic the design system's own `Ф1–Ф7` labels need, so
+egui's bundled fallbacks stopped being load-bearing and the release binary shrank
+**1,443,320 B (1.376 MiB)** — measured, not estimated. Block 2 continues at
 the component units (#13–#16), which style egui widgets from these consts. The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
