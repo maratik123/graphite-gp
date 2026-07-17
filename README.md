@@ -47,7 +47,14 @@ the Ф1–Ф7 generator pipeline) and, in parallel, block 2 (`gp-render`).
 `eframe`/`winit`/`wgpu`). `cargo run -p gp-game` opens a window drawing a
 placeholder frame — paper background, graph-paper motif, one card, one hairline —
 covered by an offscreen `egui_kittest` wgpu/Vulkan golden test that needs no display
-server. Block 2 continues at the design tokens (#12). The
+server. The **design tokens are landed** (issue #12): all 127 CSS tokens from
+[`docs/design-system/tokens/`](docs/design-system/tokens/) are ported to module-level
+`SCREAMING_SNAKE_CASE` consts in `gp_render::tokens` (117 value-checked against the
+CSS at test time, 10 in a documented exclusion table), and the two design-system
+faces — Space Grotesk + JetBrains Mono, vendored as OFL-1.1 variable `[wght]` files —
+are registered through `gp_render::fonts::definitions()`, which `gp-game` installs via
+`Context::set_fonts` (`gp-render` still holds no `egui::Context`). Block 2 continues at
+the component units (#13–#16), which style egui widgets from these consts. The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
@@ -88,7 +95,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 103 workspace tests green (97 gp-core; 2 gp-gen; 2 gp-render: tessellation smoke + golden guard; 2 doc-tests)
+cargo test             # 129 workspace tests green (97 gp-core; 28 gp-render: design tokens, fonts, tessellation smoke + golden guard; 2 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,

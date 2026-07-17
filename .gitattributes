@@ -1,0 +1,7 @@
+# Vendored font assets are byte-pinned to their upstream hashes (see
+# ai-docs/plans/2026-07-17-render-design-tokens.design.md § Vendoring pin).
+# `-text` disables EOL normalisation: without it, a `core.autocrlf` set in any
+# contributor's personal ~/.gitconfig rewrites the CRLF endings in Space
+# Grotesk's OFL.txt at `git add` time (4,495 -> 4,402 B, 93 CR stripped),
+# silently breaking the SHA-256 pin and the OFL's redistribution requirement.
+crates/render/fonts/** -text

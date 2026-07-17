@@ -6,7 +6,7 @@
 //! play share one, non-diverging physics implementation.
 //!
 //! Owns the window + event loop (a deliberate override of issue #11's text in
-//! favour of design doc §6 — see `ai-docs/key-decisions.md`); `gp-render`
+//! favor of design doc §6 — see `ai-docs/key-decisions.md`); `gp-render`
 //! stays draw-only.
 
 use eframe::egui;
@@ -27,11 +27,16 @@ impl eframe::App for GraphiteGpApp {
 ///
 /// # Errors
 /// Returns [`eframe::Error`] if the native window/graphics context fails to
-/// initialise (e.g. no compatible Vulkan/GL adapter).
+/// initialize (e.g. no compatible Vulkan/GL adapter).
 fn main() -> eframe::Result {
     eframe::run_native(
         "graphite-gp",
         eframe::NativeOptions::default(),
-        Box::new(|_creation_context| Ok(Box::new(GraphiteGpApp))),
+        Box::new(|creation_context| {
+            creation_context
+                .egui_ctx
+                .set_fonts(gp_render::fonts::definitions());
+            Ok(Box::new(GraphiteGpApp))
+        }),
     )
 }
