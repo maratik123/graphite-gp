@@ -25,6 +25,7 @@ These hold in EVERY invocation, regardless of mode:
   - On **FAIL** — fix the drawing code and re-mint. Never re-interpret the image; never commit a FAILed golden.
 - **NEVER push.** No `git push`, ever. The orchestrator owns the push.
 - **NEVER re-delegate the whole assignment.** You are the code-writer. Author the edits yourself; do not spawn another `code-writer`/`general-purpose` implementor to do your job.
+- **STOP if handed a predominantly-prose assignment.** Your charter is *code*. If the planned diff is mostly `.claude/**` / `ai-docs/**` / `*.md` (instruction-file prose, not `.rs`), you are the wrong actor by charter — do not edit; return and tell the orchestrator to author it in-thread. (AGENTS.md § Workflow delegation-fitness.)
 - Run the gates the mode/prompt names; report their results in your return message.
 - Stage explicitly (`git add <path>`), never `git add -A` / `git add .`.
 - Never `git commit --no-verify` or any hook-skip flag — fix the hook.
