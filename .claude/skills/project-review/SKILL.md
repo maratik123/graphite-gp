@@ -98,7 +98,7 @@ After every 3 fixes (or when all findings in a subtask are resolved):
 
 ### Step 4: Final verify
 
-> Skill orchestrators must consult the AC-verification-grep re-run gate documented in `review-findings.md` § 0 and `self-review.md` § 2 — every design's "AC<N> verified by: <command>" line MUST be re-run against the shipped artefact before the verdict is finalised (see `ai-docs/learnings.md` 2026-05-15 tooling entry on spec-writer `tools:` frontmatter).
+> Skill orchestrators must consult the AC-verification-grep re-run gate documented in `review-findings.md` § 0 and `self-review.md` § 2 — every design's "AC<N> verified by: <command>" line MUST be re-run against the shipped artefact before the verdict is finalised (see quartzite's `ai-docs/learnings.md` 2026-05-15 tooling entry on spec-writer `tools:` frontmatter — `maratik123/quartzite#295`).
 
 1. `cargo build` — PASS
 2. `cargo test` — all green

@@ -23,12 +23,12 @@ Run when **≥3 unescalated correction entries**, **≥2 unescalated validation 
 
 When the `self-improve` subagent returns a `## Auto-memory candidates` report section (per its Step 1c sweep + Step 2c routing), this `/improve` skill — the **parent thread** — MUST dispatch one `AskUserQuestion` per candidate row **before** any project-side write derived from that candidate. The subagent surfaces candidates as structured rows only; it does NOT execute routing. Consent dispatch lives here, in the parent thread, exactly as `interview/SKILL.md` surfaces spec-writer questions via parent-side `AskUserQuestion`.
 
-**Privacy boundary.** Project-side `/improve` writes NEVER originate from auto-memory alone; the consent prompt is the ONLY surfacing path. The Subagent reads `~/.claude/projects/<project-path-encoded>/memory/MEMORY.md` + each `*.md` memory beside it read-only — selecting the **feedback-type** memories by their `metadata.type: feedback` frontmatter, NOT by a `feedback_*` filename glob (the layer's naming convention changed; see `self-improve.md § Step 1c`) — and writes nothing back. See `self-improve.md § Anti-patterns` (`NEVER write to ~/.claude/projects/<project-path-encoded>/memory/*`).
+**Privacy boundary.** Project-side `/improve` writes NEVER originate from auto-memory alone; the consent prompt is the ONLY surfacing path. The Subagent reads `~/.claude/projects/<project-path-encoded>/memory/MEMORY.md` + each `*.md` memory beside it read-only — selecting the **feedback-type** memories by a `type: feedback` field (at top level OR nested under `metadata:`), NOT by a `feedback_*` filename glob (the layer's schema and naming conventions both changed independently; see `self-improve.md § Step 1c`) — and writes nothing back. See `self-improve.md § Anti-patterns` (`NEVER write to ~/.claude/projects/<project-path-encoded>/memory/*`).
 
 **Per-candidate prompt shape** (literal `AskUserQuestion` payload — one question per candidate):
 
 ```yaml
-question: "Auto-memory entry `<topic-slug>.md` (`metadata.type: feedback`) names workflow primitive `<primitive>` with no matching `Kind: validation` entry in `ai-docs/learnings.md`. Surface as a /improve candidate (would seed a `## Patterns` entry in `<target-skill-or-subagent>` after the next user-approved Carrot-pass step)?"
+question: "Auto-memory entry `<topic-slug>.md` (`type: feedback`) names workflow primitive `<primitive>` with no matching `Kind: validation` entry in `ai-docs/learnings.md`. Surface as a /improve candidate (would seed a `## Patterns` entry in `<target-skill-or-subagent>` after the next user-approved Carrot-pass step)?"
 header: "auto-memory"
 options:
   - label: "Surface"

@@ -75,7 +75,7 @@
 #   idempotent re-runs are safe).
 # - rmdir failing on non-empty directory is expected and ignored.
 #
-# Multi-close PRs (rare; e.g. `Closes #289` + `Closes #277` on PR #295):
+# Multi-close PRs (rare) -- e.g. maratik123/quartzite#295 closes #289 + #277:
 # the FIRST closing-keyword match wins. By convention the first-listed
 # issue is the primary /task tracking issue; satellite closures are
 # bundled cleanup items without their own spec. The same FIRST-match rule
