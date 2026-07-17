@@ -32,7 +32,7 @@
 //!
 //! | # | Token(s) | Disposition |
 //! |---|---|---|
-//! | 1–3 | `--font-display`, `--font-ui`, `--font-mono` | Primary family name only (`"Space Grotesk"` ×2, `"JetBrains Mono"`) — the CSS stack's fallbacks are a browser concept; egui supplies the fallback role structurally (`fonts.rs`). |
+//! | 1–3 | `--font-display`, `--font-ui`, `--font-mono` | Primary family name only (`"Onest"` ×2, `"JetBrains Mono"`) — the CSS stack's fallbacks are a browser concept; egui supplies the fallback role structurally (`fonts.rs`). |
 //! | 4–6 | `--ease-standard`, `--ease-out`, `--ease-in` | `[f32; 4]` control points — values exact, shape differs (no egui easing type). |
 //! | 7 | `--bg-grid` | Decomposed: `effects::BG_GRID_RULING_WIDTH` + `effects::BG_GRID_COLOR` + pitch = `spacing::CELL`. A CSS gradient recipe, not a value. |
 //! | 8 | `--bg-dots` | Decomposed: `effects::BG_DOTS_RADIUS`, `effects::BG_DOTS_TRANSPARENT_STOP`, `effects::BG_DOTS_COLOR`. |

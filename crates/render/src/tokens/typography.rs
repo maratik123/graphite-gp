@@ -18,9 +18,9 @@
 /// The CSS stack's fallbacks (`ui-sans-serif`, `system-ui`, `sans-serif`) are
 /// browser concepts; egui supplies the fallback role structurally via
 /// `FontDefinitions`' per-family list (see `fonts.rs`).
-pub const FONT_DISPLAY: &str = "Space Grotesk";
+pub const FONT_DISPLAY: &str = "Onest";
 /// `--font-ui`.
-pub const FONT_UI: &str = "Space Grotesk";
+pub const FONT_UI: &str = "Onest";
 /// `--font-mono`.
 pub const FONT_MONO: &str = "JetBrains Mono";
 
