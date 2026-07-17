@@ -32,6 +32,11 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "graphite-gp",
         eframe::NativeOptions::default(),
-        Box::new(|_creation_context| Ok(Box::new(GraphiteGpApp))),
+        Box::new(|creation_context| {
+            creation_context
+                .egui_ctx
+                .set_fonts(gp_render::fonts::definitions());
+            Ok(Box::new(GraphiteGpApp))
+        }),
     )
 }
