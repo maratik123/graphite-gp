@@ -192,6 +192,6 @@ invokes `curl`/`wget`" (a heredoc blocks it; no HTTP call is made), a claim that
 cited `const fn` precedent that is not `const`. A reviewer that reads prose *as
 prose* assesses argument quality, not truth.
 
-Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-16 —
-*directing `self-review` to verify factual claims in prose caught every `major`
-on an all-prose diff*.
+Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-16 and
+2026-07-17 (topic now at 2 occurrences) — *directing `self-review` to verify
+factual claims in prose caught every `major` on an all-prose diff, both times*.
