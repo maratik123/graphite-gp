@@ -1,13 +1,13 @@
 /* ============================================================
    Graphite GP — Typography tokens
-   Display/UI: Space Grotesk (geometric, technical).
+   Display/UI: Onest (geometric, technical).
    Data/telemetry: JetBrains Mono (coordinates, vectors, metrics).
    ============================================================ */
 
 :root {
   /* ---- Families ---- */
-  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
-  --font-ui:      'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Onest', ui-sans-serif, system-ui, sans-serif;
+  --font-ui:      'Onest', ui-sans-serif, system-ui, sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   /* ---- Type scale (px) — display heavy, tight tracking ---- */

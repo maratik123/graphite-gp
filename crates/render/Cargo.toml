@@ -12,9 +12,10 @@ workspace = true
 
 [dependencies]
 gp-core = { workspace = true }
-egui = "0.35"
+egui = { version = "0.35", default-features = false }
 
 [dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
 egui-wgpu = "0.35"
 image = "0.25"
+skrifa = "0.42"

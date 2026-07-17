@@ -274,6 +274,26 @@ never calls the builder. That file's own module doc says: *"Colors below are
 scaffold-local `Color32` consts, not the design-token module — #12 owns 'design
 tokens → Rust consts' and supersedes these."*
 
+> **Amendment 1 (2026-07-17, #73 `render-onest-font-swap`) — AC9 and AC10 only.**
+> #73 swapped the vendored display/UI face **Space Grotesk → Onest** and turned
+> egui's `default_fonts` feature **off**, which falsified two clauses as merged
+> here. AC9 named `SpaceGrotesk[wght].ttf` and pinned its axis cover as *"SG
+> 400–700 within 300–700"*; the vendored face is now `Onest[wght].ttf`, whose
+> `fvar` `wght` axis is min=100 / default=400 / max=900. AC10 required the builder
+> be *"built on `FontDefinitions::default()`, so egui's bundled fallback faces
+> survive"*, and its test to assert *"that egui's default fallback entries are
+> still present"*; with `default_fonts` off, those faces are no longer in the
+> dependency graph, so there are none to preserve. That clause does not merely
+> become wrong — it becomes **unfalsifiable**: `builtin_font_names()` returns `&[]`
+> under `#[cfg(not(feature = "default_fonts"))]`
+> (`epaint-0.35.0/src/text/fonts.rs:590-593`), so the old assertion's loop
+> **iterates zero times and still passes, asserting nothing**. A vacuous-but-green
+> test is precisely why AC10 is **replaced** rather than deleted — the
+> exact-family-list equality it now mandates cannot go vacuous. See #73's spec
+> § *Technical constraints* 1–3
+> (`ai-docs/plans/2026-07-17-render-onest-font-swap.spec.md`). **Every other
+> criterion stands as merged** — only AC9 and AC10 are amended.
+
 ## Acceptance Criteria
 
 | # | Criterion |
@@ -286,8 +306,8 @@ tokens → Rust consts' and supersedes these."*
 | AC6 | Tests assert exact round-trip for the issue's exemplars — accent = `#E24A2B`, `--cell` = 24, `--bw-heavy` = 3 — plus at least one alias identity (e.g. `SURFACE_PAGE == PAPER_1`) and one cross-file identity (`CAR_COLORS[0] == ACCENT == HEAT_RAMP[3]`). |
 | AC7 | Tests assert both ramps' **length and ordering** (car = 6, heatmap = 4, heatmap ordered slow → fast). |
 | AC8 | A test asserts the AC1 count, so a token added to the CSS later cannot silently go unported. |
-| AC9 | `SpaceGrotesk[wght].ttf` and `JetBrainsMono[wght].ttf` are vendored in `gp-render`, each beside its `OFL.txt`. A test asserts each face's bytes parse and that `FontData::variation_axes()` reports a `wght` axis whose range covers every weight the builder registers (SG 400–700 within 300–700; JBM 400–700 within 100–800). |
-| AC10 | The `FontDefinitions` builder returns a value registering **7** weight instances (SG 400/500/600/700; JBM 400/500/700) built on `FontDefinitions::default()`, so egui's bundled fallback faces survive. A test asserts the instance count, that both `FontFamily::Proportional` and `FontFamily::Monospace` resolve to a non-empty list, and that egui's default fallback entries are still present. |
+| AC9 | `Onest[wght].ttf` and `JetBrainsMono[wght].ttf` are vendored in `gp-render`, each beside its `OFL.txt`. A test asserts each face's bytes parse and that `FontData::variation_axes()` reports a `wght` axis whose range covers every weight the builder registers (Onest 400–700 within 100–900; JBM 400–700 within 100–800). |
+| AC10 | The `FontDefinitions` builder returns a value registering **7** weight instances (Onest 400/500/600/700; JBM 400/500/700) built **explicitly** on `FontDefinitions::empty()` — egui's bundled faces are no longer in the dependency graph (`default_fonts` off), so there are none to preserve. A test asserts the instance count and the **exact** family lists by **full-vector equality**: `FontFamily::Proportional == ["Onest-Regular"]` and `FontFamily::Monospace == ["JetBrainsMono-Regular", "Onest-Regular"]` — not `first()` / non-empty / `contains` checks. `Monospace`'s second entry is a deliberate proportional fallback for glyphs JetBrains Mono lacks (`✓` U+2713); JetBrains Mono stays **first** and the ordering is load-bearing. |
 | AC11 | `gp-game` calls `Context::set_fonts` with the builder's value in its `eframe::run_native` creation closure. `gp-render` still constructs no `Context`. |
 | AC12 | The golden `crates/render/tests/snapshots/placeholder.png` is **byte-unchanged** — no regen, no `image-check` spawn — with `placeholder.rs`'s six colour consts and two matching geometry consts now sourced from the token module. |
 | AC13 | `cargo tree -p gp-render --edges no-dev` still shows no `eframe` / `winit` / `wgpu` normal edge (#11 AC7 holds). |
