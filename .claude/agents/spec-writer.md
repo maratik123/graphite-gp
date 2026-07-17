@@ -212,7 +212,7 @@ The `design` Subagent (`.claude/agents/design.md`) handles:
 - Decomposition into atomic implementation tasks
 - Risk analysis with mitigations
 - Internal data shapes / API surface
-- Placement of a `static` / `fn` / `struct` / constant / macro that would be replicated across **≥ 3** crates or test binaries — flag the call-site count in Key Decisions and leave the shared-crate-vs-per-site-duplication choice to the `design` Subagent. Do **NOT** bake per-crate duplication into the spec on "minimal surface" / "no new crate" grounds (see `ai-docs/learnings.md` 2026-05-17 shared-crate entry).
+- Placement of a `static` / `fn` / `struct` / constant / macro that would be replicated across **≥ 3** crates or test binaries — flag the call-site count in Key Decisions and leave the shared-crate-vs-per-site-duplication choice to the `design` Subagent. Do **NOT** bake per-crate duplication into the spec on "minimal surface" / "no new crate" grounds (see the sibling **quartzite** project's `ai-docs/learnings.md` 2026-05-17 shared-crate entry).
 
 Don't pre-empt the `design` Subagent. Your job is to make the spec answerable; the `design` Subagent's job is to figure out how to implement it. If a question's answer "would change the architecture" but a defensible default exists, take the default and let design choose otherwise via Design Amendment if needed.
 

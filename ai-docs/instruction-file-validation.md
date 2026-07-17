@@ -376,8 +376,11 @@ signal, not a file-broken signal. Re-spawn subagents instead.
 ## Templates
 
 Concrete patterns derived during the first execution of the per-file workflow
-(issue #167, AGENTS.md rewrite). Future sessions applying this workflow to
-other Phase 1 files (#168–#171) can imitate these for consistency.
+(`maratik123/quartzite#167`, AGENTS.md rewrite). Future sessions applying this
+workflow to other Phase 1 files (`maratik123/quartzite#168`–`#171`) can imitate
+these for consistency. All Phase 1/2 issue refs on this page are the sibling
+**quartzite** project's, where this methodology was executed; they do not
+resolve against graphite-gp.
 
 ### Branch naming
 
@@ -684,7 +687,7 @@ parent agent runs the workflow:
 
 This breaks the I-drafted-probes-I-expected-to-pass loop. The trade-off is one extra subagent invocation upfront (~15-30 min).
 
-For Phase 1 retrospective (where this didn't fire), the existing replay batch (PR #176) provides external validation against ground truth — partial but real check on parent-agent bias.
+For Phase 1 retrospective (where this didn't fire), the existing replay batch (`maratik123/quartzite#176`, in the sibling project this methodology came from) provides external validation against ground truth — partial but real check on parent-agent bias.
 
 ### Reporting format for dual-model results
 
@@ -743,7 +746,7 @@ unambiguous in production conditions.*
 | **Probe-author selection bias** | The parent agent (driving the workflow) drafts the probes after reading the file | Risk that probes are unconsciously phrased to surface the rules I expect to be clear, not the rules at risk. The Gate 1 user-approval step partially counters this but doesn't eliminate it. | Decouple probe-authoring from rewrite-execution: a separate Opus subagent reads the file + learnings + style spec, drafts probes blind to whether the file is "expected" to pass. The rewrite-execution agent (parent) cannot influence probe wording. |
 | **Closed-question bias** | Probes are mostly yes/no, multiple-choice, or specific-fact | Closed answers produce convergence easily because the answer space is narrow. Open-ended probes ("explain how rule X applies to scenario Y in your own words") would surface interpretation differences that closed forms hide. | Mix in 1–2 open-ended probes per file. Rubric for open-ended is necessarily looser ("must mention concept A; must not contradict concept B") but divergence on open-ended probes is a stronger ambiguity signal than divergence on yes/no. |
 | **No post-validation feedback loop** | After a file passes, we don't track whether real `learnings.md` events keep happening on its rules | The actual test of clarity is "do new misread events on this file's rules occur after validation?" If yes, the test was a false-positive of clarity. Without surveillance, validation is one-shot and unverified. | Post-validation surveillance: monitor `learnings.md` for ~30 days after a file is closed as PASS. New entries targeting that file's rules → add to the file's issue as a re-open trigger. Codify in this plan as a "post-validation surveillance" rule before next use. |
-| **Step 16 minimal sample** | Opus semantic-preservation gate (the v4.2 distinctive contribution) fired exactly once across Phase 1 (#174 only — others had empty diffs) | Calling v4.2 "validated across 5 files" overstates evidence. Step 16 has 1 data point. | Run Step 16 explicitly on every Phase 2 file even when the diff seems trivially-preserving. Track Opus self-review verdicts across runs to build a track record on whether Opus catches subtle weakening Sonnet would miss. |
+| **Step 16 minimal sample** | Opus semantic-preservation gate (the v4.2 distinctive contribution) fired exactly once across Phase 1 (`maratik123/quartzite#174` only — others had empty diffs) | Calling v4.2 "validated across 5 files" overstates evidence. Step 16 has 1 data point. | Run Step 16 explicitly on every Phase 2 file even when the diff seems trivially-preserving. Track Opus self-review verdicts across runs to build a track record on whether Opus catches subtle weakening Sonnet would miss. |
 | **All-PASS-round-1 rate is a smell** | 45/45 probe convergences across 5 files, no iteration triggered | When every test passes on round 1 with no iteration, it's either (a) files genuinely clean, or (b) test not sensitive enough. Priors should split between these; Phase 1's results don't update strongly toward (a). | Add the calibration probe (below). If models converge confidently on a calibration-probe wrong answer, the test setup itself is converging on biases — strong signal that other PASS results are suspect. |
 | **No calibration probe** | No probe with intentionally-ambiguous file content | Without one, we cannot detect when convergence is the test's bias rather than the file's clarity. | Per file, include 1 calibration probe whose answer is **intentionally underspecified** in the file (a rule the file doesn't actually pin down). Both models converging on the same confident answer = setup itself is converging on training-data biases. Calibration failure = strong signal that PASS results from other probes are suspect. |
 
@@ -757,7 +760,7 @@ When a file passes v4.2, the closing comment should say:
 > [`## Known biases & limitations`](#known-biases--limitations).
 
 It should NOT say "the file is solid" or "the file is unambiguous". The
-Phase 1 closing comments (#168, #169, #170, #171) do use the stronger
+Phase 1 closing comments (`maratik123/quartzite#168`, `#169`, `#170`, `#171`) do use the stronger
 phrasing — those wordings overstate what the methodology proves.
 
 ### Phase 2 / future improvements
@@ -794,7 +797,7 @@ as an 8th change (third subagent run per file).
 | Probe-design lessons (avoid symmetric multi-choice; confusion-traps in required-absent) | ✅ Concrete portable knowledge |
 | Issue-tracking decoupled from PRs (closing comments as record) | ✅ Future readers can audit |
 | Strong validation of file clarity | ❌ **Overstated** — see limitations table above |
-| Step 16 (Opus self-review) cross-run track record | ❌ Only one data point (#174) |
+| Step 16 (Opus self-review) cross-run track record | ❌ Only one data point (`maratik123/quartzite#174`) |
 | Detection of methodology biases | ❌ Not built in — discovered post-hoc |
 
 Phase 1 was a **methodology shakedown** that produced good infrastructure

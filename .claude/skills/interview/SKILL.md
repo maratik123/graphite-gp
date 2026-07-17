@@ -47,7 +47,7 @@ Two pieces:
 | `round_cap` | 4 | Hard-coded in this skill; passed to subagent every invocation |
 | `questions_per_round_cap` | 3 | Hard-coded in this skill; passed to subagent every invocation |
 
-These constants are **not** configurable via skill arguments in this iteration. Future configurability is a separate concern (deferred — see issue #188 spec).
+These constants are **not** configurable via skill arguments in this iteration. Future configurability is a separate concern (deferred — see the sibling quartzite project's `maratik123/quartzite#188` spec).
 
 ## State file
 
@@ -236,7 +236,7 @@ If the user wants to stop after the interview ("just draft the spec, defer the i
 
 > **Default to** delegating every question and every spec write to the `spec-writer` Subagent. The orchestrator's role is plumbing — surface the Subagent's questions via `AskUserQuestion` and forward the user's answers as `prior_qa`; never draft a clarifying question yourself, even when the next question feels "obvious" from the user's last answer. Same for the spec body: never edit `*.spec.md` directly — even when the change feels like "just a typo" or "just a tweak the user asked for after `status: ready`". The `spec-writer` Subagent owns ALL writes to `*.spec.md` (mirrors the AXIOM in `.claude/skills/task/SKILL.md` above the Design Amendment header).
 >
-> _Validated by repeated user correction across multiple rounds: "from now and for future — don't ask by yourself, delegate to subagent" (auto-memory `feedback_interview_delegate_to_subagent.md`). See `ai-docs/learnings.md` 2026-05-24 entries on orchestrator-side direct spec edits._
+> _Validated by repeated user correction across multiple rounds: "from now and for future — don't ask by yourself, delegate to subagent". Recorded in the sibling **quartzite** project's memory namespace — `~/.claude/projects/-home-syt-RustroverProjects-quartzite/memory/feedback_interview_delegate_to_subagent.md` — and in quartzite's `ai-docs/learnings.md` 2026-05-24 entries on orchestrator-side direct spec edits. Both corrections happened **in quartzite**, not here; this repo's log begins 2026-07-13. The rule also stands locally on the AXIOM cross-referenced above._
 
 ## Anti-patterns
 

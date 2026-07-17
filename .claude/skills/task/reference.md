@@ -6,8 +6,8 @@ Reference material extracted from `SKILL.md` to keep the SKILL body under the pe
 
 The ⚡ First preamble's glob `ls ai-docs/plans/*.progress.md` is a flat match — it ignores branch and merge state. Two failure modes have already burned cycles in this repo:
 
-1. **Stale-merge.** The matched progress file's task already merged via a GitHub-UI merge that bypassed `/pr-merged` (gitignored `.progress.md` survived). RESUME-ing into this points at a completed task instead of starting the new one. _See `ai-docs/learnings.md` 2026-05-13 stale-`.progress.md` entry._
-2. **Wrong-branch parallel PR.** The matched progress file belongs to an unrelated in-flight PR on a different feature branch. RESUME-ing here cross-contaminates the two flows. _See `ai-docs/learnings.md` 2026-05-14 branch-aware-probe entry._
+1. **Stale-merge.** The matched progress file's task already merged via a GitHub-UI merge that bypassed `/pr-merged` (gitignored `.progress.md` survived). RESUME-ing into this points at a completed task instead of starting the new one. _See the sibling **quartzite** project's `ai-docs/learnings.md` 2026-05-13 stale-`.progress.md` entry._
+2. **Wrong-branch parallel PR.** The matched progress file belongs to an unrelated in-flight PR on a different feature branch. RESUME-ing here cross-contaminates the two flows. _See quartzite's `ai-docs/learnings.md` 2026-05-14 branch-aware-probe entry._
 
 **Validation sequence (run before the RESUME jump):**
 
@@ -136,7 +136,7 @@ If a Step 7 design-review GO verdict surfaces a `note` / `minor` / recommendatio
 8. **On ITERATE** → fix the design (or re-amend the spec if a contradiction surfaces) and re-run design-review (counts against the 3-round cap).
 9. **On STOP** → surface to user; do not proceed until the design / spec issue is resolved.
 
-> Folding a spec-amending note into the design alone is FORBIDDEN — the design would be built against the old spec without ever being verified against the new one. _See `ai-docs/learnings.md` 2026-05-15 (process) entry on spec amendment during GO-with-notes resolution._
+> Folding a spec-amending note into the design alone is FORBIDDEN — the design would be built against the old spec without ever being verified against the new one. _See quartzite's `ai-docs/learnings.md` 2026-05-15 (process) entry on spec amendment during GO-with-notes resolution._
 
 ## Steps 1–5 — spec creation delegation (detail)
 
@@ -213,18 +213,18 @@ Verify both spec and design (with GO verdict) exist AND that **every note / mino
 
 During Step 8 the orchestrator NEVER executes subtask code in its own context. Every group fans out through `/context-reset` — including the first group, and including designs whose total subtask count is one. The orchestrator's role during Step 8 is strictly *to spawn group handoffs, parse each subagent's progress-file delta, re-validate state, and spawn the next group's handoff* until the design's `## Handoff plan` is exhausted. Re-state the rule to yourself before deciding the next action: *"Did I just receive a group return? Then the next action is to spawn the next group's `/context-reset` handoff, until the design's `## Handoff plan` is exhausted. No exceptions for 'one more quick subtask in this turn' or 'the first group is small enough to do inline'."* See `.claude/skills/context-reset/SKILL.md` for the handoff protocol.
 
-**Failure modes this prevents.** Two PR-level incidents motivated the every-group redesign that replaced the prior runtime-gate regime:
+**Failure modes this prevents.** Two PR-level incidents in the sibling **quartzite** project (`maratik123/quartzite`, whence this harness was adapted) motivated the every-group redesign that replaced the prior runtime-gate regime:
 
-- **PR #339** — a long-lived orchestrator session hit auto-compaction mid-task. The compaction summary did not reproduce the strict step sequence faithfully and Step 10 (self-review) was silently omitted.
-- **PR #374** — a sonnet-model orchestrator session hit auto-compaction mid-Step-8. The post-compaction session showed *"context rot"*: skipped Step 9 verify gates, missed the Step 10 self-review spawn, and missed the runtime handoff trigger that should have fired after the 3rd subtask. The runtime trigger was load-bearing precisely when the compacted context could no longer reproduce it — the prior runtime-gate regime relied on the same context that compaction had just degraded.
+- **`maratik123/quartzite#339`** — a long-lived orchestrator session hit auto-compaction mid-task. The compaction summary did not reproduce the strict step sequence faithfully and Step 10 (self-review) was silently omitted.
+- **`maratik123/quartzite#374`** — a sonnet-model orchestrator session hit auto-compaction mid-Step-8. The post-compaction session showed *"context rot"*: skipped Step 9 verify gates, missed the Step 10 self-review spawn, and missed the runtime handoff trigger that should have fired after the 3rd subtask. The runtime trigger was load-bearing precisely when the compacted context could no longer reproduce it — the prior runtime-gate regime relied on the same context that compaction had just degraded.
 
 The every-group fan-out removes the failure mode structurally: the orchestrator's own context never grows long enough to trip compaction (Step 8 subtask work runs in short-lived subagent invocations), and the `## Handoff plan` is the per-group spec the orchestrator reads at each return.
 
-**Trigger source: design's `## Handoff plan` section.** As of the every-group redesign (PR for #375), the `design` Subagent produces a `## Handoff plan` section in the design document for **every** decomposition with M ≥ 1 (per `.claude/agents/design.md` § Rules → handoff-grouping). That section names the exact group boundaries and the per-group spawn order — pre-computed at design time. Single-subtask designs (M = 1) carry a `## Handoff plan` with one group, fanned out via one `/context-reset` invocation; M = 9 → 3 groups, fanned out via 3 `/context-reset` invocations. Every M ≥ 1 design now carries explicit per-group fan-out.
+**Trigger source: design's `## Handoff plan` section.** As of the every-group redesign (quartzite's PR for `maratik123/quartzite#375`), the `design` Subagent produces a `## Handoff plan` section in the design document for **every** decomposition with M ≥ 1 (per `.claude/agents/design.md` § Rules → handoff-grouping). That section names the exact group boundaries and the per-group spawn order — pre-computed at design time. Single-subtask designs (M = 1) carry a `## Handoff plan` with one group, fanned out via one `/context-reset` invocation; M = 9 → 3 groups, fanned out via 3 `/context-reset` invocations. Every M ≥ 1 design now carries explicit per-group fan-out.
 
 ## Step 8 — local FAIL investigation before push (AGENTS.md workflow corollary)
 
-When `cargo test` returns `FAILED`, identify the specific failing test (`grep "FAILED"` on the output) and reproduce it in isolation (`cargo test test_name_substring -- --nocapture`) before deciding the failure was transient. A subsequent green run is NOT proof of transience — different test-thread assignments or environment vars (DISPLAY, WAYLAND_DISPLAY) can flip the result. Only accept "transient" when the test is known flaky AND multiple reruns are consistently green. _See `ai-docs/learnings.md` 2026-05-11 entry for the winit-`EventLoop::new()`-on-worker-thread case._
+When `cargo test` returns `FAILED`, identify the specific failing test (`grep "FAILED"` on the output) and reproduce it in isolation (`cargo test test_name_substring -- --nocapture`) before deciding the failure was transient. A subsequent green run is NOT proof of transience — different test-thread assignments or environment vars (DISPLAY, WAYLAND_DISPLAY) can flip the result. Only accept "transient" when the test is known flaky AND multiple reruns are consistently green. _See quartzite's `ai-docs/learnings.md` 2026-05-11 entry for the winit-`EventLoop::new()`-on-worker-thread case._
 
 ## Step 9 — panic-index sync (detail)
 
