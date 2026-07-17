@@ -1601,6 +1601,7 @@ dependencies = [
  "egui_kittest",
  "gp-core",
  "image",
+ "skrifa",
 ]
 
 [[package]]

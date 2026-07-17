@@ -18,3 +18,4 @@ egui = "0.35"
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
 egui-wgpu = "0.35"
 image = "0.25"
+skrifa = "0.42"
