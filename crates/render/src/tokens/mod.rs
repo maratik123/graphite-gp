@@ -56,7 +56,7 @@ pub mod typography;
 ///
 /// Hoisted here so there is exactly one copy of the parser and exactly one
 /// `#[allow(clippy::float_cmp)]` site (`assert_f32`) for the whole crate —
-/// see `ai-docs/plans/2026-07-17-render-design-tokens.design.md` § *Remedy*.
+/// see design `2026-07-17-render-design-tokens` § *Remedy*.
 #[cfg(test)]
 pub(crate) mod css {
     /// The value text between `:` and the terminating `;`, for the declaration of

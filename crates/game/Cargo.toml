@@ -28,6 +28,6 @@ eframe = { version = "0.35", default-features = false, features = ["accesskit", 
 # Wayland client-side decorations silently fall back to a plainer
 # `FallbackFrame` instead of `AdwaitaFrame`, and libwayland is linked instead
 # of `dlopen`ed — nothing else in the workspace catches that regression, so
-# do not delete this as an "unused dependency" (AC18 in
-# ai-docs/plans/2026-07-17-render-onest-font-swap.spec.md verifies it).
+# do not delete this as an "unused dependency" (spec `2026-07-17-render-onest-font-swap`
+# AC18 verifies it).
 winit = { version = "0.30", default-features = true }

@@ -2,17 +2,16 @@
 //! builder that registers them.
 //!
 //! Both faces are variable fonts (a single `wght` axis) vendored from
-//! `google/fonts` at the commit pinned in
-//! `ai-docs/plans/2026-07-17-render-onest-font-swap.design.md` § Decomposition
-//! subtask 2, each beside its own `OFL.txt` (AC1, AC15). Onest's `wght` axis
-//! defaults to 400 (Regular), but every registered instance still carries an
-//! explicit [`egui::epaint::text::VariationCoords`] override — see the
-//! private `weighted_instance` helper's doc for why the default alone is not
-//! enough.
+//! `google/fonts` at the commit pinned in design `2026-07-17-render-onest-font-swap`
+//! § Decomposition subtask 2, each beside its own `OFL.txt` (AC1, #12 AC15).
+//! Onest's `wght` axis defaults to 400 (Regular), but every registered
+//! instance still carries an explicit [`egui::epaint::text::VariationCoords`]
+//! override — see the private `weighted_instance` helper's doc for why the
+//! default alone is not enough.
 //!
 //! `gp-render` only *produces* the [`FontDefinitions`] value returned by
 //! [`definitions`] — it never constructs an [`egui::Context`] (the crate stays
-//! draw-only, AC13). `gp-game` applies it via
+//! draw-only, #12 AC13). `gp-game` applies it via
 //! `cc.egui_ctx.set_fonts(gp_render::fonts::definitions())`.
 
 use egui::epaint::text::VariationCoords;

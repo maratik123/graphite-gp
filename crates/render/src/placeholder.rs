@@ -160,18 +160,22 @@ fn geometry(rect: Rect) -> PlaceholderGeometry {
 /// Paints the paper background, a graph-paper ruling + dot motif, one
 /// crisp-radius card, one hairline stroke, and a three-row font-proof text
 /// sample (design `2026-07-17-render-onest-font-swap` — wordmark, Cyrillic +
-/// en-dash + digits, mono telemetry with `✓`). **The caller must have
-/// installed [`crate::fonts::definitions`] into the drawing [`egui::Context`]
-/// first** — every row resolves through a [`FontFamily::Name`], which panics
-/// at layout time if unbound (the design's *Load-bearing premise*); this
-/// function does not (and, being draw-only per AC13, cannot) install fonts
-/// itself.
+/// en-dash + digits, mono telemetry with `✓`).
 ///
 /// `painter` is a borrowed draw context (design *Ownership override*) — this
 /// function does not own, construct, or store one. `rect` is explicit rather
 /// than derived from `painter.clip_rect()` because the clip rect depends on
 /// the painter's provenance (e.g. `egui_kittest`'s harness insets `Ui::painter()`
 /// by 8px); an explicit rect makes the output a pure function of `(rect)`.
+///
+/// # Panics
+///
+/// Panics at layout time if the caller has not installed
+/// [`crate::fonts::definitions`] into the drawing [`egui::Context`] first —
+/// every row resolves through a [`FontFamily::Name`], which epaint cannot
+/// lay out unbound (the design's *Load-bearing premise*). This function does
+/// not (and, being draw-only per #12 AC13, cannot) install fonts itself, so
+/// the precondition is entirely the caller's to satisfy.
 pub fn draw_placeholder(painter: &Painter, rect: Rect) {
     let geometry = geometry(rect);
 
