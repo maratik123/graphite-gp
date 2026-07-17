@@ -6,7 +6,7 @@
 //! play share one, non-diverging physics implementation.
 //!
 //! Owns the window + event loop (a deliberate override of issue #11's text in
-//! favour of design doc §6 — see `ai-docs/key-decisions.md`); `gp-render`
+//! favor of design doc §6 — see `ai-docs/key-decisions.md`); `gp-render`
 //! stays draw-only.
 
 use eframe::egui;
