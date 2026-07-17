@@ -167,10 +167,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # v1 policy: surface Miri findings in the CI summary without turning main or
-    # PR CI red. Advisory only — no `miri-pass` gate is wired into branch
-    # protection.
-    continue-on-error: true
+    # Miri is a real branch-protection gate (#76): the `miri-pass` aggregator
+    # below (context `Miri`) is required by `main-protection`, so a red Miri
+    # fails this job → the run → the aggregator, blocking merge. No
+    # `continue-on-error` — a red Miri must turn the run red, not just the check.
     env:
       # `-Zmiri-tree-borrows`: aliasing model per design.
       MIRIFLAGS: -Zmiri-tree-borrows
@@ -229,4 +229,19 @@ jobs:
       - run: |
           c="${{ needs.changes.result }}"
           r="${{ needs.docs.result }}"
+          if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
+
+  # Required branch-protection context `Miri` (#76). Mirrors build/test/clippy/
+  # docs-pass: an `if: always()` aggregator so a path-filtered `skipped` Miri
+  # passes, but a red `miri` job blocks merge. Required context points here, not
+  # at the raw `if:`-filtered `miri` job.
+  miri-pass:
+    name: Miri
+    needs: [changes, miri]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          c="${{ needs.changes.result }}"
+          r="${{ needs.miri.result }}"
           if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
