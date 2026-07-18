@@ -20,6 +20,8 @@ pub mod button;
 pub mod card;
 mod common;
 #[cfg(test)]
+mod forms_gallery;
+#[cfg(test)]
 mod gallery;
 pub mod icon_button;
 pub mod segmented_control;

@@ -186,7 +186,12 @@ impl<'a> SegmentedControl<'a> {
 
 /// The width (`SEG_PAD_X` padding either side of the measured label) of
 /// every segment in `options`, at `size`'s font.
-fn segment_widths(painter: &Painter, options: &[&str], size: Size) -> Vec<f32> {
+///
+/// `pub(crate)`, not private: `forms_gallery` (subtask 6) needs the same
+/// measured widths to size its own demo rects correctly — re-measuring here
+/// keeps the golden's chrome matching what `paint` will actually draw,
+/// rather than an independently-guessed width.
+pub(crate) fn segment_widths(painter: &Painter, options: &[&str], size: Size) -> Vec<f32> {
     let font_size = match size {
         Size::Sm => typography::FS_SM,
         Size::Md | Size::Lg => typography::FS_BODY,
