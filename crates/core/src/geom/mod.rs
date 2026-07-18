@@ -371,7 +371,19 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
 }
 
 #[cfg(test)]
+pub(crate) mod common {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Build an expected cell set from `(x, y)` literals.
+    pub(crate) fn cells(pts: &[(Coord, Coord)]) -> HashSet<Point> {
+        pts.iter().map(|&(x, y)| Point::new(x, y)).collect()
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::common::*;
     use super::*;
     use std::collections::HashSet;
 
@@ -379,11 +391,6 @@ mod tests {
     /// order (spec §4: the result is defined up to set equality).
     fn cover_set(a: Point, b: Point) -> HashSet<Point> {
         supercover(a, b).collect()
-    }
-
-    /// Build an expected cell set from `(x, y)` literals.
-    fn cells(pts: &[(Coord, Coord)]) -> HashSet<Point> {
-        pts.iter().map(|&(x, y)| Point::new(x, y)).collect()
     }
 
     #[test]

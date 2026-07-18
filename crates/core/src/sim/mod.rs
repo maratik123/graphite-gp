@@ -434,7 +434,24 @@ mod collision;
 pub use collision::resolve_collisions;
 
 #[cfg(test)]
+pub(crate) mod common {
+    use super::*;
+
+    /// A lint-clean fully-drivable rectangle `w × h` at origin `(0,0)`.
+    pub(crate) fn filled(w: usize, h: usize) -> Corridor {
+        let mut d = Corridor::new(Point::new(0, 0), w, h);
+        for y in 0..i32::try_from(h).unwrap() {
+            for x in 0..i32::try_from(w).unwrap() {
+                d.set(Point::new(x, y), true);
+            }
+        }
+        d
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::common::*;
     use super::*;
 
     #[test]
@@ -832,17 +849,6 @@ mod tests {
         let before = lap.raw();
         lap.register_move(&sf, Point::new(2, 0), Point::new(2, 3));
         assert_eq!(lap.raw(), before);
-    }
-
-    /// A lint-clean fully-drivable rectangle `w × h` at origin `(0,0)`.
-    fn filled(w: usize, h: usize) -> Corridor {
-        let mut d = Corridor::new(Point::new(0, 0), w, h);
-        for y in 0..i32::try_from(h).unwrap() {
-            for x in 0..i32::try_from(w).unwrap() {
-                d.set(Point::new(x, y), true);
-            }
-        }
-        d
     }
 
     #[test]

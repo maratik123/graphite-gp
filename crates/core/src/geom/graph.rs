@@ -333,12 +333,8 @@ pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::common::*;
     use std::collections::HashSet;
-
-    /// Build an expected cell set from `(x, y)` literals.
-    fn cells(pts: &[(Coord, Coord)]) -> HashSet<Point> {
-        pts.iter().map(|&(x, y)| Point::new(x, y)).collect()
-    }
 
     /// Build a corridor over the box `[origin, origin + (w, h))` with the given
     /// `(x, y)` cells marked drivable.
