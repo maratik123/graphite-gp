@@ -23,6 +23,7 @@ mod common;
 mod gallery;
 pub mod icon_button;
 pub mod slider;
+pub mod stepper;
 pub mod switch;
 pub mod tag;
 
@@ -32,5 +33,6 @@ pub use card::{Card, Elevation};
 pub use common::Size;
 pub use icon_button::{IconButton, Variant as IconButtonVariant};
 pub use slider::{Slider, SliderResponse};
+pub use stepper::{StepDir, Stepper, StepperResponse};
 pub use switch::{Switch, SwitchResponse};
 pub use tag::{Tag, TagResponse};
