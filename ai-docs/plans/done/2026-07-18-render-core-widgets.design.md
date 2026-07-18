@@ -5,6 +5,11 @@
 **Spec:** `ai-docs/plans/2026-07-18-render-core-widgets.spec.md`
 **Prerequisite:** #88 (SVG icon pipeline) — **landed** via merged PR #89; API live at
 `crates/render/src/icons.rs` `[measured: git log → 6fc43fb "Merge pull request #89 …render-svg-icon-pipeline"; gh issue view 88 → {"state":"CLOSED"}; git ls-files → icons.rs tracked]`.
+**Amended:** 2026-07-18 (post-PR #92) — see [§ Amendments](#amendments-2026-07-18-post-pr-92):
+(1) the pressed-state inset-shadow paint now **follows the button radius + softens** (no square
+hard bar); (2) the gallery golden **raises the per-pixel color `threshold`** to absorb
+cross-renderer text-AA noise. The Decomposition widget set, the three-layer architecture, and
+every AC are UNCHANGED.
 
 ## Approach
 
@@ -100,10 +105,12 @@ dev-dependency solely to open a window `[measured: grep -r eframe crates/render/
 **in-crate `#[cfg(test)]` module** so it can drive the crate-private `paint` layer with
 **forced** visual states (rest/hover/press/active/disabled) in one static frame — no input
 simulation. It is `#[cfg_attr(miri, ignore = "drives wgpu; dlopens the Vulkan ICD")]`
-(a red workspace Miri blocks merge), uses `SnapshotOptions::new().threshold(0.0)
-.failed_pixel_count_threshold(0)` (both required for exact compare — the 0.6 default is a
-trap), and asserts the resolved wgpu adapter is a CPU/software device, exactly as
-`golden_guard` does `[measured: placeholder.rs:384-520; golden-tests memory note]`.
+(a red workspace Miri blocks merge), uses `SnapshotOptions::new().threshold(1.0)
+.failed_pixel_count_threshold(0)` (**Amendment 2**: the raised per-pixel color `threshold`
+absorbs cross-renderer text-AA noise on this text-heavy golden — the blanket `0.6` default is
+still a trap, but `1.0` is a deliberately-measured content-matched value; the flat `placeholder.rs`
+golden stays exact at `threshold(0.0)`), and asserts the resolved wgpu adapter is a CPU/software
+device, exactly as `golden_guard` does `[measured: placeholder.rs:384-520; golden-tests memory note]`.
 Interactive hover/press verification is deferred to `gp-game` integration (out of scope).
 
 ### Per-widget prop surface (AC6: `.d.ts` → Rust)
@@ -137,14 +144,17 @@ All colors/metrics below already exist as `crate::tokens` consts unless flagged 
 `[measured: the five .jsx files + tokens/{color,spacing,typography,effects}.rs]`
 
 - **Button** bg = `pressed ? bgActive : (hovered ? bgHover : bgRest)`; border `bw-1` solid;
-  radius-2; `pressed` (enabled) → `SHADOW_INSET` + 1-pt downward content nudge; `disabled` →
+  radius-2; `pressed` (enabled) → `SHADOW_INSET` (painted per **Amendment 1** as a
+  radius-following, blur-softened top band — not a square flat bar) + 1-pt downward content
+  nudge; `disabled` →
   all resolved colors `gamma_multiply(DISABLED_OPACITY=0.45)`, `Sense::hover()` (no click).
   Per-variant table = spec's Button table (primary/secondary/ghost/danger). Sizes: sm
   `CONTROL_H_SM`/pad-x 12/`FS_SM`/gap 6; md `CONTROL_H_MD`/16/`FS_BODY`/gap 8; lg
   `CONTROL_H_LG`/22/`FS_TITLE`/gap 10. Font = Onest SemiBold (`Name(ONEST_SEMIBOLD)`).
 - **IconButton** square dim = sm 30/md 38/lg 46; bg/fg/border/pressBg per `IconButton.jsx`
   (active→`GRAPHITE_900` fill + `PAPER_0` fg + `GRAPHITE_900` border; ghost→transparent +
-  `GHOST_*_OVERLAY`; secondary→`PAPER_0/2/3` + `BORDER_STRONG`); radius-2; press → `SHADOW_INSET`.
+  `GHOST_*_OVERLAY`; secondary→`PAPER_0/2/3` + `BORDER_STRONG`); radius-2; press → `SHADOW_INSET`
+  (radius-following, blur-softened band per **Amendment 1**).
 - **Badge** height 20, pad-x 8, `FS_XS`, `FW_MEDIUM`, `LS_MONO`, radius-pill; solid → fg
   `PAPER_0` + `solidBg` + transparent border; tinted → per-tone `bg`/`fg`/`bd` (ok/warn fg =
   the two local consts). Font = JetBrains Mono Medium (`Name(JETBRAINS_MONO_MEDIUM)`).
@@ -164,13 +174,13 @@ All colors/metrics below already exist as `crate::tokens` consts unless flagged 
 
 | # | Task | Files | Depends on |
 |---|------|-------|------------|
-| 1 | Scaffold: `pub mod widgets` in `lib.rs`; `widgets/mod.rs` (module doc + `mod common`); `widgets/common.rs` with the shared `Size {Sm,Md,Lg}` enum, `GHOST_HOVER_OVERLAY`/`GHOST_PRESS_OVERLAY`/`DISABLED_OPACITY`/`GRID_WATERMARK_OPACITY` consts, and a shared `paint_surface` helper (rounded-rect fill + border via `CornerRadius::from`, optional `SHADOW_INSET` inner band, `gamma_multiply` opacity), + unit tests pinning the two overlay alpha values (15/31). | `crates/render/src/lib.rs`, `crates/render/src/widgets/mod.rs`, `crates/render/src/widgets/common.rs` | — |
+| 1 | Scaffold: `pub mod widgets` in `lib.rs`; `widgets/mod.rs` (module doc + `mod common`); `widgets/common.rs` with the shared `Size {Sm,Md,Lg}` enum, `GHOST_HOVER_OVERLAY`/`GHOST_PRESS_OVERLAY`/`DISABLED_OPACITY`/`GRID_WATERMARK_OPACITY` consts, and a shared `paint_surface` helper (rounded-rect fill + border via `CornerRadius::from`, optional `SHADOW_INSET` inner band — a per-corner-rounded, blur-softened `RectShape` per **Amendment 1** —, `gamma_multiply` opacity), + unit tests pinning the two overlay alpha values (15/31). | `crates/render/src/lib.rs`, `crates/render/src/widgets/mod.rs`, `crates/render/src/widgets/common.rs` | — |
 | 2 | **Badge** (stateless, simplest first): `BadgeProps` builder, `BadgeStyle`, `const fn resolve(tone, solid)`, `BADGE_OK_FG`/`BADGE_WARN_FG` consts, `paint`, `show`; resolve unit tests (tone → token, solid → fg/bg/border). Register `pub mod badge; pub use badge::Badge;` in `mod.rs`. | `crates/render/src/widgets/badge.rs`, `.../widgets/mod.rs` | 1 |
 | 3 | **Button**: `ButtonProps`, `ButtonStyle`, `const fn resolve(variant, size, hovered, pressed)`, `paint` (bg/border/radius/inset-shadow+nudge, icon slots via `icons::draw_icon`, label text), `show` (icon slots `Option<&TextureHandle>`, `full_width`, `enabled`); resolve tests (AC7: variant→color, size→height, pressed→`SHADOW_INSET`). Register in `mod.rs`. | `crates/render/src/widgets/button.rs`, `.../widgets/mod.rs` | 1 |
 | 4 | **IconButton**: props, `IconButtonStyle`, `const fn resolve(variant, active, hovered, pressed)`, `paint` (square dim, centered 18px icon, inset-shadow), `show` (`icon: &TextureHandle`, `label`→`on_hover_text`, `active`, `enabled`); resolve tests. Register in `mod.rs`. | `crates/render/src/widgets/icon_button.rs`, `.../widgets/mod.rs` | 1 |
 | 5 | **Tag**: props, `TagStyle`, `const fn resolve(selected)`, `paint` (square radius-0, dot, label, remove-× hit area), `show` → `TagResponse { response, remove_clicked }`; resolve tests. Register in `mod.rs`. | `crates/render/src/widgets/tag.rs`, `.../widgets/mod.rs` | 1 |
 | 6 | **Card**: props (`Elevation` enum, `padding` f32, `grid`, `selected`, title/eyebrow, optional right-slot closure), `CardStyle`, `const fn resolve(selected, elevation)`, `paint` (shadow via `Shadow::as_shape`, fill, border, clipped grid watermark, eyebrow+title header), `show(self, ui, add_contents)`; resolve tests (elevation→shadow, selected→border). Register in `mod.rs`. | `crates/render/src/widgets/card.rs`, `.../widgets/mod.rs` | 1 |
-| 7 | **Gallery golden (AC8)**: in-crate `#[cfg(test)]` module (`widgets/gallery.rs`, `#[cfg(test)]`) rendering the full variant/size/state matrix via `egui_kittest`+wgpu with forced states through the private `paint` layer; installs `fonts::definitions()` + an `IconSet`; `#[cfg_attr(miri, ignore)]`; `SnapshotOptions` threshold 0.0 + failed-pixel 0; CPU-adapter assertion; mint the golden PNG. Wire `#[cfg(test)] mod gallery;` in `mod.rs`. | `crates/render/src/widgets/gallery.rs`, `.../widgets/mod.rs`, `crates/render/tests/snapshots/` (minted PNG) | 2, 3, 4, 5, 6 |
+| 7 | **Gallery golden (AC8)**: in-crate `#[cfg(test)]` module (`widgets/gallery.rs`, `#[cfg(test)]`) rendering the full variant/size/state matrix via `egui_kittest`+wgpu with forced states through the private `paint` layer; installs `fonts::definitions()` + an `IconSet`; `#[cfg_attr(miri, ignore)]`; `SnapshotOptions` `threshold(1.0)` + `failed_pixel_count_threshold(0)` (**Amendment 2** — absorbs cross-renderer text-AA; `placeholder.rs` stays exact at `0.0`); CPU-adapter assertion; mint the golden PNG. Wire `#[cfg(test)] mod gallery;` in `mod.rs`. | `crates/render/src/widgets/gallery.rs`, `.../widgets/mod.rs`, `crates/render/tests/snapshots/` (minted PNG) | 2, 3, 4, 5, 6 |
 
 M = 7 (≤ 15 — no issue split needed).
 
@@ -223,6 +233,25 @@ a test artifact of a code subtask), so all subtasks route to one implementor mod
   (the widgets, like `draw_placeholder`, do not install fonts). Mitigation: document it on
   each `show`; the gallery installs fonts itself (frame-1-install / frame-2-draw pattern).
   — `[measured: placeholder.rs:170-178 # Panics; fonts.rs module doc]`
+- **Inset-shadow paint is an approximation, now visually correct (Amendment 1).** epaint has
+  no inner-shadow primitive; the pressed band is a single per-corner-rounded (top corners =
+  button radius, bottom squared) `RectShape` with `blur_width = f32::from(shadow.blur)` to soften.
+  It follows the button radius (zero square-corner protrusion) and reads as a soft shadow, not a
+  hard bar. Pure paint-layer — `resolve` and its AC7 Miri-clean tests are UNTOUCHED; zero
+  production panic (`RectShape::filled`/`add`/`with_clip_rect` cannot panic); arithmetic-safe
+  (positions built field-wise from raw-`f32` sums, `CornerRadius` from field copies + literal `0`,
+  `blur_width` via lossless `f32::from`). — `[measured: epaint-0.35.0/src/corner_radius.rs:13-25 per-corner nw/ne/sw/se; shapes/rect_shape.rs:44-50 blur_width; egui painter.rs:71 with_clip_rect axis-aligned]` `[derived → cargo clippy --workspace --all-targets -- -D warnings + gallery golden by-eye at re-mint]`
+- **Gallery golden cross-renderer text-AA non-reproducibility (Amendment 2).** A text-heavy
+  golden is not byte-reproducible; CI showed `Diff: 5` (5 of 152 raw-diff pixels survive dify's
+  AA-exemption) at `threshold(0.0)`. egui_kittest compares **raw**: a pixel counts when its YIQ
+  `squared_distance` delta `.abs() > threshold` — no `35215·t²` scaling (that lives in dify's CLI
+  `run()`, which egui_kittest never calls). The measured local-vs-CI diff is uniform 1-level
+  channel rounding (max delta `0.2498`, nothing above `0.5`). Mitigation: set the per-pixel color
+  `threshold` to `1.0` — 2× the conservative noise ceiling, absorbing 1–2-level rounding (a
+  2-level green diff ≈ 1.0) while a ≥3-level diff (≥2.25) or a real color regression (tens–hundreds
+  of YIQ delta) still fails; keep `failed_pixel_count_threshold(0)` (the color threshold is the
+  sole absorbing lever); the flat `placeholder.rs` golden stays exact at `threshold(0.0)`. Re-mint
+  locally after Amendment 1; image-check re-verifies at re-mint. — `[measured: dify-0.8.0 diff.rs:70-72 raw delta.abs()>threshold; yiq.rs:123-129 squared_distance; local-vs-CI diff = 152 px all 1-level rounding, max delta 0.2498; egui_kittest snapshot.rs:485 raw threshold, :491 count compare]` `[derived → AC9 CI green after re-mint]`
 - **File size.** Largest file (card.rs, ~300 lines incl. tests) stays under the soft 500/800
   limit. — `[derived → file-size review + cargo clippy too_many_lines]`
 
@@ -269,9 +298,12 @@ contract, not a comment. — `[derived → cargo test -p gp-render]`
 - Scenario: one `egui_kittest::Harness` frame, `with_pixels_per_point(1.0)`,
   `with_theme(Light)`, `RendererOptions::PREDICTABLE`, CPU-adapter assertion, fonts installed
   (frame-1-install/frame-2-draw), an `IconSet::new(ctx)` for the icon cells, then
-  `try_image_snapshot_options(&image, "widget_gallery", threshold 0.0 + failed_pixel 0)`.
-  Mint the golden PNG on first run (image-check verification of the minted golden happens at
-  mint time per the code-writer/image-check flow).
+  `try_image_snapshot_options(&image, "widget_gallery", threshold `**`1.0`**` + failed_pixel 0)`
+  (**Amendment 2** — the raised per-pixel color `threshold` absorbs cross-renderer text-AA on this
+  text-heavy golden; `placeholder.rs`'s own flat golden stays exact at `threshold 0.0`).
+  (Re-)mint the golden PNG **after Amendment 1** changes the pressed-button rendering; `image-check`
+  re-verifies the re-minted golden against the drawing code at mint time per the
+  code-writer/image-check flow — never in CI.
 - `#[cfg_attr(miri, ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)")]`.
 - **Selected-border width — expect the per-component mapping, not the AC prose.** The spec's
   AC4/AC5 prose both say "2-pt" selected border, but the per-component `.jsx` mapping (which
@@ -293,3 +325,132 @@ None blocking. The three spec Open questions are resolved above: interaction mod
 `Option<&egui::TextureHandle>` from a caller-owned `IconSet`), specimen form (decision 6 —
 in-crate Miri-ignored wgpu golden). All three were flagged in the spec as design's call
 ("via a Design Amendment"), so resolving them here is a design decision, not a spec change.
+
+## Amendments (2026-07-18, post-PR #92)
+
+Two documented decisions are revised after PR #92 review + CI feedback; the product owner (issue
+#13 owner) approved both. The Decomposition widget set, the three-layer architecture, and **every
+AC text** are UNCHANGED — only the paint-layer inset-shadow mechanism (Amendment 1) and the
+gallery-golden `SnapshotOptions` (Amendment 2) change.
+
+### Amendment 1 — inset-shadow paint: follow the radius + soften
+
+**Problem (PR #92 review — "gray bar over button").** `paint_inset_shadow`
+(`crates/render/src/widgets/common.rs:76-84`) approximates the pressed-state `SHADOW_INSET` as a
+FLAT full-width `rect_filled` band (`offset.y + blur = 3` pt tall) with `CornerRadius::ZERO`
+(square corners) and one solid alpha (36). On radius-2 paper/secondary buttons the square corners
+protrude past the button's rounded top corners and the solid band reads as a hard gray BAR — not
+the soft CSS `inset 0 1px 2px rgba(...)` the token intends. `[measured: common.rs:76-84 flat band, CornerRadius::ZERO, single rect_filled]`
+
+**Revised mechanism (chosen: a per-corner-rounded, blur-softened `RectShape`).** Replace the flat
+`rect_filled` with a single `epaint::RectShape` whose top corners follow the button radius and
+whose edges are softened by `blur_width`:
+
+- **Band rect (unchanged, arithmetic-safe).** `min = rect.min`, `max = Pos2::new(rect.max.x,
+  band_bottom)`, `band_bottom = (rect.min.y + band_height).min(rect.max.y)` — built field-wise
+  from raw-`f32` sums (never `Pos2 + Vec2`), the existing pattern that already passes the deny.
+- **(a) Follow the radius — per-corner `CornerRadius`.** Build `CornerRadius { nw: r.nw, ne: r.ne,
+  sw: 0, se: 0 }`, where `r = CornerRadius::from(radius)` is the button's own radius (already
+  computed in `paint_surface` at `common.rs:57`). Rounding ONLY the top corners to the button
+  radius makes the band's top-left/top-right coincide exactly with the button's rounded top
+  outline → **zero protrusion**; the bottom corners stay square (they sit inside the button under
+  content). `[measured: epaint-0.35.0/src/corner_radius.rs:13-25 pub nw/ne/sw/se: u8; :41 impl From<f32> for CornerRadius]`
+- **(b) Soften — `RectShape.blur_width`.** Set `blur_width = f32::from(shadow.blur)` (= `2.0` for
+  `SHADOW_INSET`). The blur fades the band's hard bottom edge (and top/side edges) so a 3-pt band
+  reads as a soft inset shadow, killing the "hard bar" look. `[measured: epaint-0.35.0/src/shapes/rect_shape.rs:44-50 blur_width "used to produce shadows and glow effects"; :98-111 RectShape::filled]`
+- **(optional) Contain bleed — clip to the button rect.** Draw through
+  `painter.with_clip_rect(rect)` so the blur bleed on the straight left/right/bottom edges stays
+  inside the button outline; the rounded top corners are handled by the shape's own per-corner
+  radius and already sit inside the clip. `[measured: egui-0.35.0/src/painter.rs:71 with_clip_rect(rect: Rect) — axis-aligned only]`
+- **Emit.** `let mut band = RectShape::filled(band_rect, band_radius, shadow.color); band.blur_width
+  = f32::from(shadow.blur); painter.add(band);` — `RectShape` → `Shape::Rect` is a free `From`
+  and `painter.add` takes `impl Into<Shape>`. `[measured: epaint-0.35.0/src/shapes/rect_shape.rs:218 impl From<RectShape> for Shape; egui painter.rs:213 add(impl Into<Shape>)]`
+
+The private `paint_inset_shadow` gains the button `CornerRadius` (threaded down from
+`paint_surface`, which already holds it) — **no widget-file change**: `paint_surface`'s
+`pub(crate)` signature (`radius: f32`) is unchanged; only the private helper's internal signature +
+body change.
+
+**Rejected alternatives.**
+- *Vertical alpha gradient via a hand-built `egui::epaint::Mesh`* (top row = `SHADOW_INSET` color,
+  bottom row = fully transparent). Gives a truer top→bottom fade, but a raw 4-vertex quad has
+  SQUARE corners — it **reintroduces the exact protrusion** the reviewer flagged. Rounding a
+  gradient mesh means hand-tessellating a per-corner-rounded rect with interpolated per-vertex
+  colors; no epaint helper does this, so it is substantial, fragile geometry (more panic/arithmetic
+  surface) for a 3-pt band. The blurred `RectShape` already reads as soft over so thin a band
+  without any of that. `[measured: epaint mesh.rs:60-74 Mesh is a raw indices+vertices list — no rounded-rect gradient helper]`
+- *Clipping alone.* egui clip rects are axis-aligned (`with_clip_rect(rect: Rect)`), so a clip
+  **cannot round the top corners** and cannot remove the protrusion. Retained only as optional
+  straight-edge bleed containment, never as the corner-follow mechanism. `[measured: egui painter.rs:71]`
+
+**Invariants preserved.** Pure paint-layer change — `resolve` and its AC7 Miri-clean tests are
+UNTOUCHED (`resolve` still returns `Option<InsetShadow>`; only the paint interpretation changes, so
+`resolve(..).press_shadow == Some(SHADOW_INSET)` still holds). Zero production panics. Strict-clippy
+`arithmetic_side_effects`-deny-safe (field-wise `Pos2`; `CornerRadius` from field copies + literal
+`0`; `blur_width` via the lossless `f32::from`; raw-`f32` `+` does not trip the deny, per the
+already-merged `common.rs:77-78`). Documented approximation, now visually correct.
+
+**AC impact.** None to the AC text. AC1 (Button) and AC2 (IconButton) press-state visuals now
+FOLLOW the button radius (rounded top corners) and read as a soft inset shadow rather than a square
+hard bar; the gallery golden is re-minted (see Amendment 2).
+
+### Amendment 2 — gallery golden: raise the per-pixel color `threshold`
+
+**Problem (PR #92 CI — non-reproducibility).** The gallery golden used exact-compare
+(`SnapshotOptions::new().threshold(0.0).failed_pixel_count_threshold(0)`, `gallery.rs:349-351`). It
+passes locally but FAILS on CI with `Diff: 5` — 5 text/AA glyph pixels differ between the
+local-mint renderer and CI's. The flat `placeholder.rs` golden passes exact-compare because it has
+NO text; a text-heavy golden is not byte-reproducible across renderers.
+
+**How egui_kittest's `threshold` actually works (corrected from the review — no `35215·t²`
+scaling).** egui_kittest calls `dify::diff::get_results(prev, new, threshold, …)` with the **raw**
+`SnapshotOptions.threshold` (`snapshot.rs:485`). Inside `get_results`, dify counts a pixel as
+`Different` when its YIQ `squared_distance` delta `.abs() > threshold`, **compared raw** (`diff.rs:70-72`).
+The `MAX_YIQ_POSSIBLE_DELTA · t²` = `35215·t²` scaling exists ONLY in dify's CLI `run()`
+(`diff.rs:150`), which egui_kittest never calls. So `threshold` here is a raw YIQ-`squared_distance`
+cutoff, where `squared_distance = 0.5053·Δy² + 0.299·Δi² + 0.1957·Δq²` (`yiq.rs:123-129`) — NOT the
+`0.1 → 352` figure the first draft asserted.
+
+**Measured cross-renderer noise (CI diff artifact vs local golden).** 152 pixels differ raw
+(dify's AA-detection exempts 147 → the reported `Diff: 5`). EVERY difference is a **1-level channel
+rounding** (predominantly green ±1, e.g. local g=189 vs CI g=188), all opaque (a=255). The **max
+`squared_distance` delta is `0.2498`** (a 1-level green diff = `0.5053·0.5866² + 0.299·0.2742² +
+0.1957·0.5226²` = `0.25`); nothing exceeds `0.5`.
+
+**Revised `SnapshotOptions`: set the per-pixel color `threshold` to `1.0`** — the sanctioned
+extension of PR #70's exact-compare baseline (that `threshold(0.0)` was a STARTING POINT always
+meant to be raised for exactly this AA/font-rendering case), applied to the one golden that has text:
+
+```
+SnapshotOptions::new().threshold(1.0).failed_pixel_count_threshold(0)
+```
+
+- **`threshold(1.0)` — the primary lever (product-owner-named).** `1.0` is **2× the conservative
+  noise ceiling** (measured max `0.2498`, nothing above `0.5`): it absorbs 1–2-level channel
+  rounding (a **2-level** green diff = `0.25·4 ≈ 1.0`, at the boundary and not counted), while a
+  **≥3-level** diff (`0.25·9 = 2.25` > 1.0) or any **real widget color regression** (a token
+  bg/border swap, a variant flip — per-pixel YIQ deltas in the **tens–hundreds** across
+  hundreds-to-thousands of pixels) still fails. `[measured: dify-0.8.0 diff.rs:70-72 raw delta.abs()>threshold; yiq.rs:123-129 squared_distance = 0.5053·Δy²+0.299·Δi²+0.1957·Δq²; local-vs-CI diff = 152 px all 1-level rounding, max delta 0.2498; egui_kittest-0.35.0/src/snapshot.rs:485 raw threshold, :491 count compare]`
+- **`failed_pixel_count_threshold(0)` — retained strict.** The color `threshold` is the **sole**
+  absorbing lever (the product owner's chosen mechanism); with 1-level noise below `1.0` the
+  wrong-pixel count is 0, so the count stays exact.
+- **`placeholder.rs` golden STAYS `threshold(0.0).failed_pixel_count_threshold(0)`.** It is
+  flat/byte-stable (no text), so exact-compare is correct there — only the text-heavy gallery needs
+  the color tolerance.
+
+**Reconciling "the 0.6 default is a trap".** Still true: `0.6` is egui_kittest's undifferentiated
+cross-backend blanket fallback, rejected as too loose and unable to distinguish AA noise from a real
+change. The lesson is NOT "exact-compare everywhere" — it is "match the tolerance to the content".
+Exact-compare (`threshold 0.0`) is right for FLAT, byte-stable content (`placeholder.rs`); a
+deliberately-**measured** per-pixel `threshold` (`1.0` = 2× the observed 1-level-rounding ceiling,
+≪ regression scale) is right for TEXT content whose AA is not byte-reproducible across renderers —
+not a blanket loosening.
+
+**Re-mint + image-check.** Amendment 1 changes the pressed-button rendering, so the gallery golden
+PNG is re-minted locally after Amendment 1 lands, and `image-check` re-verifies the re-minted golden
+against the drawing code at re-mint time (the existing code-writer/image-check mint flow) — never in
+CI.
+
+**AC impact.** None to the AC text. AC8 (gallery) and AC9 (green CI) both hold: the golden stays
+CI-gated (NOT removed from CI), now tolerant of cross-renderer text-AA noise via the raised
+per-pixel color threshold.

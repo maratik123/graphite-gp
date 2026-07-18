@@ -346,8 +346,14 @@ mod tests {
 
         let image = harness.render().expect("offscreen wgpu render failed");
 
+        // threshold(1.0): the measured cross-renderer noise is 1-level channel
+        // rounding (max YIQ squared_distance delta 0.2498, on AA text pixels).
+        // 1.0 is ~4x that max (2x a conservative 0.5 ceiling) and also clears a
+        // 2-level diff (~1.0), while a real color regression (deltas in the
+        // tens-hundreds) still fails. failed_pixel_count_threshold stays exact
+        // (0): the color threshold is the sole absorbing lever.
         let options = egui_kittest::SnapshotOptions::new()
-            .threshold(0.0)
+            .threshold(1.0)
             .failed_pixel_count_threshold(0);
         if let Err(err) =
             egui_kittest::try_image_snapshot_options(&image, "widget_gallery", &options)

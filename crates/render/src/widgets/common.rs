@@ -65,22 +65,37 @@ pub(crate) fn paint_surface(
         );
     }
     if let Some(shadow) = press_shadow {
-        paint_inset_shadow(painter, rect, shadow);
+        paint_inset_shadow(painter, rect, corner_radius, shadow);
     }
 }
 
-/// Approximates `--shadow-inset` as a flat darkening band along the top
-/// edge, `offset.y + blur` points tall — `epaint::Shadow` has no
-/// inner-shadow primitive to delegate to (see `tokens::effects::InsetShadow`'s
-/// own doc).
-fn paint_inset_shadow(painter: &Painter, rect: Rect, shadow: InsetShadow) {
+/// Approximates `--shadow-inset` as a soft, radius-following inset shadow
+/// along the top edge: a single blur-softened [`RectShape`] whose top
+/// corners follow the button's own `corner_radius` (zero protrusion past the
+/// button outline) and whose bottom corners stay square (hidden under
+/// content) — `epaint::Shadow` has no inner-shadow primitive to delegate to
+/// (see `tokens::effects::InsetShadow`'s own doc).
+fn paint_inset_shadow(
+    painter: &Painter,
+    rect: Rect,
+    corner_radius: CornerRadius,
+    shadow: InsetShadow,
+) {
     let band_height = f32::from(shadow.offset[1]) + f32::from(shadow.blur);
     let band_bottom = (rect.min.y + band_height).min(rect.max.y);
     let band_rect = Rect {
         min: rect.min,
         max: Pos2::new(rect.max.x, band_bottom),
     };
-    painter.rect_filled(band_rect, CornerRadius::ZERO, shadow.color);
+    let band_radius = CornerRadius {
+        nw: corner_radius.nw,
+        ne: corner_radius.ne,
+        sw: 0,
+        se: 0,
+    };
+    let mut band = egui::epaint::RectShape::filled(band_rect, band_radius, shadow.color);
+    band.blur_width = f32::from(shadow.blur);
+    painter.with_clip_rect(rect).add(band);
 }
 
 #[cfg(test)]
