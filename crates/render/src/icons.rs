@@ -3,7 +3,7 @@
 //!
 //! Vendors a curated Lucide (ISC) icon set under `crates/render/icons/` and
 //! bakes each into a cached `egui::TextureHandle` on demand
-//! ([`bake_texture`]) or eagerly for the whole curated set (`IconSet`).
+//! ([`bake_texture`]) or eagerly for the whole curated set ([`IconSet`]).
 //! Unlike marshrutka's `.unwrap()`-chain original, every fallible step here
 //! returns [`IconError`] — `gp-render` stays at zero production panics (see
 //! the design's "Fallible bake" section).
@@ -11,11 +11,12 @@
 use egui::epaint::textures::TextureOptions;
 use egui::{ColorImage, TextureHandle};
 use resvg::usvg::{Options, Transform, Tree};
+use std::collections::HashMap;
 use tiny_skia::Pixmap;
 
 /// Logical (DPI-independent) side length, in points, at which the curated icon set is baked.
 ///
-/// Consumed by the eager pre-bake (`IconSet::new`). Not the same axis as
+/// Consumed by the eager pre-bake ([`IconSet::new`]). Not the same axis as
 /// `tokens::typography::FS_TITLE` (a font-size token) — this is an icon
 /// glyph size.
 pub const ICON_LOGICAL_SIZE_PX: f32 = 18.0;
@@ -38,7 +39,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    /// Every vendored icon, in declaration order. Drives `IconSet::new`'s
+    /// Every vendored icon, in declaration order. Drives [`IconSet::new`]'s
     /// eager pre-bake loop.
     pub const ALL: [Self; 5] = [
         Self::Play,
@@ -166,6 +167,39 @@ pub fn bake_texture(
     Ok(ctx.load_texture(name, image, TextureOptions::default()))
 }
 
+/// The curated Lucide icon set, eagerly pre-baked into cached textures at
+/// construction (AC1, AC2).
+///
+/// Keyed by [`Icon`] alone (a single logical size, [`ICON_LOGICAL_SIZE_PX`]
+/// — see the design's "Baked size variants" resolution). A future
+/// `(Icon, size)` cache is additive, not a rewrite, if a second size is
+/// ever needed.
+pub struct IconSet(HashMap<Icon, TextureHandle>);
+
+impl IconSet {
+    /// Eagerly bakes every [`Icon::ALL`] variant at [`ICON_LOGICAL_SIZE_PX`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates the first [`IconError`] hit while baking any vendored
+    /// icon (unreachable for the vendored assets in practice, but `Result`
+    /// is honest since the same bake path is `pub` via [`bake_texture`]).
+    pub fn new(ctx: &egui::Context) -> Result<Self, IconError> {
+        let mut map = HashMap::with_capacity(Icon::ALL.len());
+        for icon in Icon::ALL {
+            let handle = bake_texture(ctx, icon.name(), icon.svg_bytes(), ICON_LOGICAL_SIZE_PX)?;
+            map.insert(icon, handle);
+        }
+        Ok(Self(map))
+    }
+
+    /// Looks up the cached texture for `icon`, if it was baked.
+    #[must_use]
+    pub fn get(&self, icon: Icon) -> Option<&TextureHandle> {
+        self.0.get(&icon)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +291,35 @@ mod tests {
             matches!(result, Err(IconError::Parse(_))),
             "expected IconError::Parse, got {result:?}"
         );
+    }
+
+    /// `Context::default()` needs no fonts/window to bake textures (the
+    /// marshrutka `init_emojis` test proves a bare Context suffices).
+    #[cfg_attr(
+        miri,
+        ignore = "bakes settings.svg at ICON_LOGICAL_SIZE_PX (18, ppp 1.0) \
+                  through IconSet::new, which panics under Miri at \
+                  tiny-skia-0.12.0/src/pipeline/mod.rs:205 (\"range end \
+                  index 330 out of range for slice of length 324\") — \
+                  isolated by bisecting Icon::ALL one variant at a time; \
+                  play/pause/grid-3x3/zoom-in all bake cleanly under Miri \
+                  at width 18, only settings.svg's stroke geometry \
+                  triggers this tiny-skia \"simd\" feature scanline \
+                  over-read (unrelated to the tessellation_smoke/vello_cpu \
+                  checked-cast abort class)"
+    )]
+    #[test]
+    fn icon_set_bakes_all_five() {
+        let ctx = egui::Context::default();
+        let set = IconSet::new(&ctx).expect("vendored icons bake");
+
+        let mut ids = HashSet::new();
+        for icon in Icon::ALL {
+            let handle = set.get(icon).expect("every vendored icon was baked");
+            assert!(
+                ids.insert(handle.id()),
+                "{icon:?}'s TextureHandle::id() collided with another icon's"
+            );
+        }
     }
 }
