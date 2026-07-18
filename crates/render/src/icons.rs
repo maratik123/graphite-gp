@@ -358,7 +358,7 @@ mod tests {
                 handle.name(),
                 <&'static str>::from(icon),
                 "{icon:?}'s baked TextureHandle name did not match its own key \
-                 (from_array slot↔variant mapping is order-sensitive)"
+                 (an enum_map! arm baked the wrong Icon)"
             );
             assert!(
                 ids.insert(handle.id()),
