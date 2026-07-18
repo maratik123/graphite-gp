@@ -128,7 +128,7 @@ impl<'a> Tag<'a> {
         clippy::too_many_arguments,
         reason = "paint layer takes every resolved input explicitly, per the design's 3-layer split"
     )]
-    fn paint(
+    pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
         style: &TagStyle,

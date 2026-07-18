@@ -154,7 +154,7 @@ impl<'a> Card<'a> {
     /// Panics at layout time if the caller has not installed
     /// [`crate::fonts::definitions`] first, when `eyebrow`/`title` is
     /// `Some`.
-    fn paint(
+    pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
         style: &CardStyle,

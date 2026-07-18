@@ -122,7 +122,7 @@ impl<'a> Badge<'a> {
     /// Panics at layout time if the caller has not installed
     /// [`crate::fonts::definitions`] into the drawing [`egui::Context`]
     /// first — this draws through `FontFamily::Name(fonts::JETBRAINS_MONO_MEDIUM)`.
-    fn paint(painter: &Painter, rect: Rect, style: &BadgeStyle, label: &str) {
+    pub(crate) fn paint(painter: &Painter, rect: Rect, style: &BadgeStyle, label: &str) {
         let corner_radius = CornerRadius::from(style.radius);
         painter.rect_filled(rect, corner_radius, style.bg);
         if style.border != Color32::TRANSPARENT {

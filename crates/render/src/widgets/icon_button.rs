@@ -161,7 +161,7 @@ impl<'a> IconButton<'a> {
     /// Draws the resolved `style` into `rect`: bg/border/radius, the
     /// pressed-state inset-shadow band, and the centered
     /// `icons::ICON_LOGICAL_SIZE_PX` glyph, honoring `enabled`'s opacity.
-    fn paint(
+    pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
         style: &IconButtonStyle,

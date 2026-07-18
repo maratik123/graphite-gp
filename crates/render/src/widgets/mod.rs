@@ -18,6 +18,8 @@ pub mod badge;
 pub mod button;
 pub mod card;
 mod common;
+#[cfg(test)]
+mod gallery;
 pub mod icon_button;
 pub mod tag;
 

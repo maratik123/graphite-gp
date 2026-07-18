@@ -238,7 +238,7 @@ impl<'a> Button<'a> {
         clippy::too_many_arguments,
         reason = "paint layer takes every resolved input explicitly, per the design's 3-layer split; splitting further would fragment one cohesive draw call"
     )]
-    fn paint(
+    pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
         style: &ButtonStyle,
