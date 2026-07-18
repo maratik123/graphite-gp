@@ -231,3 +231,9 @@ Append-only correction/validation log — the feed for `/improve`. See AGENTS.md
 **Rule:** When propagating a factual/policy claim (not just a rule add/exemption), the Propagation Rule's `.claude/ AGENTS.md ai-docs/` grep set is necessary but not sufficient — also sweep repo-root user-facing docs (`README.md`, `docs/**`) for the same claim. Completeness test: every LIVE doc must agree; history surfaces (`learnings.md`, `plans/done/**`, bugfix traces) stay untouched. Same family as [[2026-07-17 — process — re-authoring reverted delegate work by hand silently dropped a propagation]] — an incomplete propagation caught only by a later gate.
 **Kind:** correction
 **Escalated?** no
+
+### 2026-07-18 — search — single-line grep on a multi-line `#[cfg_attr(miri, …)]` attribute gave a false negative, nearly raising a false "missing Miri gate" alarm
+**What happened:** Verifying (#88) that the one aborting test was Miri-gated, I ran `grep -nB1 'cfg_attr(miri' icons.rs` and it returned NOTHING — I briefly read that as the gate being absent (a real red flag, since the running workspace Miri would then go red on an ungated aborting test). But the gate WAS present, in the multi-line form (`#[cfg_attr(\n    miri,\n    ignore = "…")]`), which a single-line pattern cannot match. This is the same class AGENTS.md § Rust Test Conventions already documents for the multi-line `assert!(matches!` message form ("invisible to single-line `rg`"). Caught by reading the actual test region.
+**Rule:** For any multi-line Rust construct (split attributes like `#[cfg_attr(\n …)]`, multi-line `assert!(matches!`, wrapped macro calls), a single-line `grep`/`rg` miss is a FALSE NEGATIVE, never proof of absence — use `rg -U` (multiline) or read the region. Treat a surprising "it's not there" grep result on a construct that SHOULD exist as a search-method failure first, code-absence second.
+**Kind:** correction
+**Escalated?** no

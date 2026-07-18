@@ -58,7 +58,11 @@ Space Grotesk placeholder at #73, which also turned egui's `default_fonts` off: 
 display face now carries the Cyrillic the design system's own `Ф1–Ф7` labels need, so
 egui's bundled fallbacks stopped being load-bearing and the release binary shrank
 **1,443,320 B (1.376 MiB)** — measured, not estimated. Block 2 continues at
-the component units (#13–#16), which style egui widgets from these consts. The
+the component units (#13–#16), which style egui widgets from these consts —
+the first landed is the **SVG icon pipeline (#88)**: `gp_render::icons` bakes vendored
+Lucide SVGs to egui textures via `resvg` + `tiny-skia` (ported from the sibling
+`marshrutka` project), the prerequisite for #13's Button/IconButton icon slots
+(#13 stays deferred until #88 merges). The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
@@ -99,7 +103,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 129 workspace tests green (97 gp-core; 28 gp-render: design tokens, fonts, tessellation smoke + golden guard; 2 gp-gen; 2 doc-tests)
+cargo test             # 138 workspace tests green (97 gp-core; 37 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline; 2 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
