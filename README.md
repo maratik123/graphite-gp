@@ -103,7 +103,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 138 workspace tests green (97 gp-core; 37 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline; 2 gp-gen; 2 doc-tests)
+cargo test             # 140 workspace tests green (98 gp-core; 38 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline; 2 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
