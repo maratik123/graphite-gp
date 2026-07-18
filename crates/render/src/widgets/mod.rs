@@ -17,7 +17,9 @@
 pub mod badge;
 pub mod button;
 mod common;
+pub mod icon_button;
 
 pub use badge::{Badge, Tone as BadgeTone};
 pub use button::{Button, Variant as ButtonVariant};
 pub use common::Size;
+pub use icon_button::{IconButton, Variant as IconButtonVariant};
