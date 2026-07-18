@@ -119,22 +119,12 @@ pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut ChaCha8
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sim::common::*;
     use rand::SeedableRng;
 
     /// A car at rest at `(x, y)` with velocity `(vx, vy)`.
     fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
         CarState { x, y, vx, vy }
-    }
-
-    /// A lint-clean fully-drivable rectangle `w × h` at origin `(0,0)`.
-    fn filled(w: usize, h: usize) -> Corridor {
-        let mut d = Corridor::new(Point::new(0, 0), w, h);
-        for y in 0..i32::try_from(h).unwrap() {
-            for x in 0..i32::try_from(w).unwrap() {
-                d.set(Point::new(x, y), true);
-            }
-        }
-        d
     }
 
     #[test]
