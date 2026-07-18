@@ -16,12 +16,14 @@
 
 pub mod badge;
 pub mod button;
+pub mod card;
 mod common;
 pub mod icon_button;
 pub mod tag;
 
 pub use badge::{Badge, Tone as BadgeTone};
 pub use button::{Button, Variant as ButtonVariant};
+pub use card::{Card, Elevation};
 pub use common::Size;
 pub use icon_button::{IconButton, Variant as IconButtonVariant};
 pub use tag::{Tag, TagResponse};

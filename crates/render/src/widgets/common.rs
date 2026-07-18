@@ -36,7 +36,6 @@ pub const GHOST_PRESS_OVERLAY: Color32 =
 pub const DISABLED_OPACITY: f32 = 0.45;
 
 /// Grid-watermark opacity multiplier (Card's faint background grid).
-#[allow(dead_code, reason = "consumed by card.rs in subtask 6")]
 pub const GRID_WATERMARK_OPACITY: f32 = 0.5;
 
 /// Draws a rounded-rect fill + border, plus an optional inset-shadow band
