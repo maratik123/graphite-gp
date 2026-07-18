@@ -16,6 +16,8 @@ egui = { version = "0.35", default-features = false }
 resvg = { version = "0.47", default-features = false }
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 thiserror = { workspace = true }
+strum = { workspace = true }
+enum-map = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }

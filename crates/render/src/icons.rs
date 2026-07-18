@@ -11,8 +11,8 @@
 use egui::epaint::textures::TextureOptions;
 use egui::layers::ShapeIdx;
 use egui::{Color32, ColorImage, Painter, Pos2, Rect, TextureHandle};
+use enum_map::{EnumMap, enum_map};
 use resvg::usvg::{Options, Transform, Tree};
-use std::collections::HashMap;
 use tiny_skia::Pixmap;
 
 /// Logical (DPI-independent) side length, in points, at which the curated icon set is baked.
@@ -25,31 +25,35 @@ pub const ICON_LOGICAL_SIZE_PX: f32 = 18.0;
 /// The curated Lucide icon set vendored under `crates/render/icons/`
 /// (design `2026-07-18-render-svg-icon-pipeline` — the five icons #13's
 /// `IconButton` row references).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::EnumIter,
+    strum::EnumCount,
+    strum::IntoStaticStr,
+    enum_map::Enum,
+)]
+#[strum(serialize_all = "kebab-case")]
 pub enum Icon {
     /// `play` — Lucide, ISC.
     Play,
     /// `pause` — Lucide, ISC.
     Pause,
     /// `grid-3x3` — Lucide, ISC.
+    #[strum(serialize = "grid-3x3")]
     Grid3x3,
     /// `zoom-in` — Lucide, ISC.
+    #[strum(serialize = "zoom-in")]
     ZoomIn,
     /// `settings` — Lucide, ISC.
     Settings,
 }
 
 impl Icon {
-    /// Every vendored icon, in declaration order. Drives [`IconSet::new`]'s
-    /// eager pre-bake loop.
-    pub const ALL: [Self; 5] = [
-        Self::Play,
-        Self::Pause,
-        Self::Grid3x3,
-        Self::ZoomIn,
-        Self::Settings,
-    ];
-
     /// The vendored SVG source bytes for this icon (`include_bytes!`,
     /// mirroring `fonts.rs`'s vendored-asset pattern).
     #[must_use]
@@ -60,19 +64,6 @@ impl Icon {
             Self::Grid3x3 => include_bytes!("../icons/grid-3x3.svg"),
             Self::ZoomIn => include_bytes!("../icons/zoom-in.svg"),
             Self::Settings => include_bytes!("../icons/settings.svg"),
-        }
-    }
-
-    /// The registration key / cache label for this icon (used as the
-    /// `ctx.load_texture` name and the `Debug`-friendly identifier).
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Play => "play",
-            Self::Pause => "pause",
-            Self::Grid3x3 => "grid-3x3",
-            Self::ZoomIn => "zoom-in",
-            Self::Settings => "settings",
         }
     }
 }
@@ -175,10 +166,10 @@ pub fn bake_texture(
 /// — see the design's "Baked size variants" resolution). A future
 /// `(Icon, size)` cache is additive, not a rewrite, if a second size is
 /// ever needed.
-pub struct IconSet(HashMap<Icon, TextureHandle>);
+pub struct IconSet(EnumMap<Icon, TextureHandle>);
 
 impl IconSet {
-    /// Eagerly bakes every [`Icon::ALL`] variant at [`ICON_LOGICAL_SIZE_PX`].
+    /// Eagerly bakes every [`Icon`] variant at [`ICON_LOGICAL_SIZE_PX`].
     ///
     /// # Errors
     ///
@@ -186,18 +177,32 @@ impl IconSet {
     /// icon (unreachable for the vendored assets in practice, but `Result`
     /// is honest since the same bake path is `pub` via [`bake_texture`]).
     pub fn new(ctx: &egui::Context) -> Result<Self, IconError> {
-        let mut map = HashMap::with_capacity(Icon::ALL.len());
-        for icon in Icon::ALL {
-            let handle = bake_texture(ctx, icon.name(), icon.svg_bytes(), ICON_LOGICAL_SIZE_PX)?;
-            map.insert(icon, handle);
-        }
+        let bake = |icon: Icon| {
+            bake_texture(
+                ctx,
+                <&'static str>::from(icon),
+                icon.svg_bytes(),
+                ICON_LOGICAL_SIZE_PX,
+            )
+        };
+        let map: EnumMap<Icon, TextureHandle> = enum_map! {
+            Icon::Play => bake(Icon::Play)?,
+            Icon::Pause => bake(Icon::Pause)?,
+            Icon::Grid3x3 => bake(Icon::Grid3x3)?,
+            Icon::ZoomIn => bake(Icon::ZoomIn)?,
+            Icon::Settings => bake(Icon::Settings)?,
+        };
         Ok(Self(map))
     }
 
-    /// Looks up the cached texture for `icon`, if it was baked.
-    #[must_use]
-    pub fn get(&self, icon: Icon) -> Option<&TextureHandle> {
-        self.0.get(&icon)
+    /// Looks up the cached texture for `icon`. Total — `EnumMap` guarantees
+    /// every variant was baked at construction.
+    ///
+    /// No explicit `#[must_use]` here: `TextureHandle` (the return type,
+    /// through the `&` reference) already carries it upstream, and stacking
+    /// a second one trips `clippy::double_must_use`.
+    pub fn get(&self, icon: Icon) -> &TextureHandle {
+        &self.0[icon]
     }
 }
 
@@ -224,6 +229,7 @@ pub fn draw_icon(painter: &Painter, handle: &TextureHandle, rect: Rect, tint: Co
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use strum::{EnumCount, IntoEnumIterator};
 
     /// Pre-step P's recorded byte sizes for the vendored SVGs (Lucide tag
     /// `1.25.0`) — the authoritative SHA-256 pin lives in the vendoring
@@ -241,7 +247,7 @@ mod tests {
 
     #[test]
     fn all_icons_have_nonempty_svg_bytes() {
-        for icon in Icon::ALL {
+        for icon in Icon::iter() {
             let bytes = icon.svg_bytes();
             assert!(!bytes.is_empty(), "{icon:?} svg_bytes() was empty");
             assert!(
@@ -264,13 +270,25 @@ mod tests {
 
     #[test]
     fn icon_all_and_names_are_the_five_distinct_variants() {
-        assert_eq!(Icon::ALL.len(), 5);
-        let names: HashSet<&str> = Icon::ALL.iter().map(|icon| icon.name()).collect();
+        assert_eq!(Icon::COUNT, 5);
+        let names: HashSet<&str> = Icon::iter().map(<&'static str>::from).collect();
         assert_eq!(
             names.len(),
             5,
-            "Icon::name() values were not pairwise distinct"
+            "Icon's IntoStaticStr values were not pairwise distinct"
         );
+    }
+
+    #[test]
+    fn icon_names_are_byte_exact_static_str() {
+        // AC5: strum's IntoStaticStr yields the exact pre-existing kebab
+        // keys, byte-identical to the removed hand-written `name()` match —
+        // these are the `ctx.load_texture` cache labels.
+        assert_eq!(<&'static str>::from(Icon::Play), "play");
+        assert_eq!(<&'static str>::from(Icon::Pause), "pause");
+        assert_eq!(<&'static str>::from(Icon::Grid3x3), "grid-3x3");
+        assert_eq!(<&'static str>::from(Icon::ZoomIn), "zoom-in");
+        assert_eq!(<&'static str>::from(Icon::Settings), "settings");
     }
 
     /// `play.svg`'s `viewBox` is a square `0 0 24 24` (verified against the
@@ -321,7 +339,7 @@ mod tests {
                   through IconSet::new, which panics under Miri at \
                   tiny-skia-0.12.0/src/pipeline/mod.rs:205 (\"range end \
                   index 330 out of range for slice of length 324\") — \
-                  isolated by bisecting Icon::ALL one variant at a time; \
+                  isolated by bisecting Icon::iter() one variant at a time; \
                   play/pause/grid-3x3/zoom-in all bake cleanly under Miri \
                   at width 18, only settings.svg's stroke geometry \
                   triggers this tiny-skia \"simd\" feature scanline \
@@ -334,8 +352,14 @@ mod tests {
         let set = IconSet::new(&ctx).expect("vendored icons bake");
 
         let mut ids = HashSet::new();
-        for icon in Icon::ALL {
-            let handle = set.get(icon).expect("every vendored icon was baked");
+        for icon in Icon::iter() {
+            let handle = set.get(icon);
+            assert_eq!(
+                handle.name(),
+                <&'static str>::from(icon),
+                "{icon:?}'s baked TextureHandle name did not match its own key \
+                 (an enum_map! arm baked the wrong Icon)"
+            );
             assert!(
                 ids.insert(handle.id()),
                 "{icon:?}'s TextureHandle::id() collided with another icon's"

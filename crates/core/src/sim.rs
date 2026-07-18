@@ -7,6 +7,7 @@
 use crate::geom::{Corridor, Point, Side, supercover};
 use crate::track::StartFinish;
 use enumflags2::bitflags;
+use strum::IntoEnumIterator;
 
 /// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
 /// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
@@ -41,7 +42,7 @@ impl CarState {
 /// foundation of every braking-distance argument in the design.
 #[bitflags]
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, strum::EnumIter)]
 // `#[bitflags]`-generated code triggers `clippy::use_self` (nursery) against
 // the enum's own declaration span; no `Self`-eligible code exists in this
 // hand-written block.
@@ -60,15 +61,6 @@ pub enum Action {
 }
 
 impl Action {
-    /// All five actions, in a fixed order (matches the policy's logit order).
-    pub const ALL: [Self; 5] = [
-        Self::Coast,
-        Self::East,
-        Self::West,
-        Self::North,
-        Self::South,
-    ];
-
     /// The acceleration `(a, b)` this action applies to velocity.
     #[inline]
     pub const fn accel(self) -> (i32, i32) {
@@ -115,13 +107,11 @@ pub fn legal_move(d: &Corridor, s: CarState, a: Action) -> bool {
     supercover(s.pos(), p1).all(|c| d.contains(c))
 }
 
-/// The legal-action mask for `s`, in [`Action::ALL`] order. Consumed by the
-/// player UI, the AI policy (as the pre-softmax `−inf` mask), and the oracle.
+/// The legal-action mask for `s`, in [`Action`] declaration order. Consumed by
+/// the player UI, the AI policy (as the pre-softmax `−inf` mask), and the
+/// oracle.
 pub fn legal_mask(d: &Corridor, s: CarState) -> BitFlags<Action> {
-    Action::ALL
-        .into_iter()
-        .filter(|&a| legal_move(d, s, a))
-        .collect()
+    Action::iter().filter(|&a| legal_move(d, s, a)).collect()
 }
 
 /// Advances one car by one (assumed-legal) action, returning the new state.
@@ -459,7 +449,7 @@ mod tests {
             vx: i32::MAX,
             vy: 0,
         };
-        for a in Action::ALL {
+        for a in Action::iter() {
             assert!(!legal_move(&d, s, a));
         }
         assert_eq!(legal_mask(&d, s), BitFlags::empty());
@@ -475,7 +465,7 @@ mod tests {
             vx: i32::MIN,
             vy: 0,
         };
-        for a in Action::ALL {
+        for a in Action::iter() {
             assert!(!legal_move(&d, s, a));
         }
         assert_eq!(legal_mask(&d, s), BitFlags::empty());
@@ -630,7 +620,7 @@ mod tests {
         // AC2: legal_mask contains exactly the actions for which legal_move is
         // true. Carve a corridor so the car at the center has only Coast/East/West
         // drivable — North/South lead off the carved shape — a proper subset of
-        // Action::ALL, so the check is non-vacuous in both directions.
+        // Action's declaration order, so the check is non-vacuous in both directions.
         let mut d = Corridor::new(Point::new(0, 0), 3, 3);
         d.set(Point::new(1, 1), true);
         d.set(Point::new(2, 1), true);
@@ -642,11 +632,27 @@ mod tests {
             vy: 0,
         };
         let mask = legal_mask(&d, s);
-        for a in Action::ALL {
+        for a in Action::iter() {
             assert_eq!(mask.contains(a), legal_move(&d, s, a));
         }
         assert!(!mask.is_empty());
         assert_ne!(mask, BitFlags::all());
+    }
+
+    #[test]
+    fn action_iter_is_declaration_order() {
+        // AC4: Action::iter() must preserve the policy's logit order —
+        // Coast, East, West, North, South — exactly as declared.
+        assert_eq!(
+            Action::iter().collect::<Vec<_>>(),
+            vec![
+                Action::Coast,
+                Action::East,
+                Action::West,
+                Action::North,
+                Action::South,
+            ]
+        );
     }
 
     use crate::geom::Orient;
