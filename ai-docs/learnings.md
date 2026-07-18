@@ -225,3 +225,9 @@ Append-only correction/validation log — the feed for `/improve`. See AGENTS.md
 **Rule (keep doing):** When a guard matches a textual defect, its own reference/checklist page is where false positives concentrate — budget for it, do not treat a flag there as noise. Discipline: describe the defect shape in prose; never spell a bare specimen standing alone; if a concrete example is needed, pair it with its fix on one line. Generalises to any lint/guard whose docs must exhibit the thing the lint forbids. Surfaced for `/improve` to decide whether to escalate into `agent-writing-style` guidance.
 **Kind:** validation
 **Escalated?** skill:ai-audit
+
+### 2026-07-18 — process — Propagation-Rule grep scope excludes repo-root docs (README), leaving a stale policy claim on first pass
+**What happened:** `/bugfix` #76 changed the Miri CI policy from "advisory" to "required gate" and propagated the claim to `AGENTS.md:308` and `ai-docs/context.md:46` by running the AGENTS.md § Propagation Rule grep over its documented target set (`.claude/ AGENTS.md ai-docs/`). `README.md:107` ("advisory Miri lane") carries the identical claim but lives at the repo root — outside that grep scope — so it shipped stale from the propagation pass. `self-review` Round 1 caught it as a `major` before push; Round 2 confirmed README was the last live-doc drift.
+**Rule:** When propagating a factual/policy claim (not just a rule add/exemption), the Propagation Rule's `.claude/ AGENTS.md ai-docs/` grep set is necessary but not sufficient — also sweep repo-root user-facing docs (`README.md`, `docs/**`) for the same claim. Completeness test: every LIVE doc must agree; history surfaces (`learnings.md`, `plans/done/**`, bugfix traces) stay untouched. Same family as [[2026-07-17 — process — re-authoring reverted delegate work by hand silently dropped a propagation]] — an incomplete propagation caught only by a later gate.
+**Kind:** correction
+**Escalated?** no
