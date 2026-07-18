@@ -43,10 +43,6 @@ pub const GRID_WATERMARK_OPACITY: f32 = 0.5;
 /// disabled ? 0.5 : 1` — a 3-site shared const, distinct from the core
 /// widgets' `DISABLED_OPACITY = 0.45` (design § Key decision 7;
 /// `SegmentedControl` has no `disabled` prop, so it is not a 4th site).
-#[allow(
-    dead_code,
-    reason = "consumed by switch.rs/slider.rs/stepper.rs in subtasks 2-4 (same PR); the test module below already reads it, but that is a separate --cfg test compilation unit"
-)]
 pub const FORMS_DISABLED_OPACITY: f32 = 0.5;
 
 /// Draws a rounded-rect fill + border.
