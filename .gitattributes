@@ -6,3 +6,12 @@
 # redistribution requirement. Face-independent — applies to every vendored
 # font subdirectory, not just the one that first motivated it.
 crates/render/fonts/** -text
+
+# Vendored Lucide icon assets (SVG source + ISC LICENSE) are byte-pinned to
+# their upstream SHA-256 (see design `2026-07-18-render-svg-icon-pipeline`
+# § Licensing + vendoring). `-text` disables EOL normalisation for the same
+# reason as the fonts block above: without it a contributor's `core.autocrlf`
+# rewrites the SVG/LICENSE EOLs at `git add` time, breaking the SHA-256 pin and
+# the exact-text ISC redistribution. `-text` (store bytes as downloaded from the
+# pinned Lucide tag), not `text eol=lf`.
+crates/render/icons/** -text
