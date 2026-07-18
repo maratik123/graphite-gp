@@ -112,20 +112,10 @@ impl<'a> SegmentedControl<'a> {
         size: Size,
     ) {
         painter.rect_filled(rect, spacing::RADIUS_2, color::PAPER_0);
-        painter.rect_stroke(
-            rect,
-            spacing::RADIUS_2,
-            Stroke::new(spacing::BW_1, color::GRAPHITE_900),
-            StrokeKind::Inside,
-        );
 
         let widths = segment_widths(painter, options, size);
         let clipped = painter.with_clip_rect(rect);
         let last = options.len().saturating_sub(1);
-        let divider_y_range = egui::Rangef::new(
-            rect.min.y + super::common::DIVIDER_EDGE_INSET,
-            rect.max.y - super::common::DIVIDER_EDGE_INSET,
-        );
         for (i, &label) in options.iter().enumerate() {
             let seg_rect = seg_rect_at(rect, &widths, i);
             let style = Self::resolve(Some(i) == selected, size);
@@ -170,7 +160,7 @@ impl<'a> SegmentedControl<'a> {
             if i > 0 {
                 clipped.vline(
                     seg_rect.min.x,
-                    divider_y_range,
+                    seg_rect.y_range(),
                     Stroke::new(spacing::BW_HAIR, color::GRAPHITE_900),
                 );
             }
@@ -186,6 +176,16 @@ impl<'a> SegmentedControl<'a> {
                 style.fg,
             );
         }
+        // Drawn LAST so the container border sits on top of the full-height
+        // dividers/segment fills and covers their ends (egui equivalent of
+        // the .jsx container's `overflow: hidden`) — round 2 fix for
+        // PR #95 review thread T#3609371837 (inconsistent divider heights).
+        painter.rect_stroke(
+            rect,
+            spacing::RADIUS_2,
+            Stroke::new(spacing::BW_1, color::GRAPHITE_900),
+            StrokeKind::Inside,
+        );
     }
 
     /// Allocates the measured total width, reads live pointer input for

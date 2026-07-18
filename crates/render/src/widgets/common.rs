@@ -6,7 +6,6 @@
 //! 2-site non-token exception (design § *Non-token source colors*), lifted
 //! here because Button and `IconButton` (2 files) both need them.
 
-use crate::tokens::spacing;
 use egui::{Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind};
 
 /// The three control sizes shared by every core widget that has one
@@ -45,16 +44,6 @@ pub const GRID_WATERMARK_OPACITY: f32 = 0.5;
 /// widgets' `DISABLED_OPACITY = 0.45` (design § Key decision 7;
 /// `SegmentedControl` has no `disabled` prop, so it is not a 4th site).
 pub const FORMS_DISABLED_OPACITY: f32 = 0.5;
-
-/// Vertical inset applied to a divider drawn inside a `RADIUS_2`-rounded
-/// container, so the hairline stops short of the top/bottom rounded corner
-/// instead of crossing/protruding through it (PR #95 review round 1: both
-/// `Stepper`'s `−`/`+` dividers and `SegmentedControl`'s inter-segment
-/// dividers drew the full `y_range()` of the container, overlapping the
-/// rounded border). Reuses `spacing::RADIUS_2`'s numeric value — clears the
-/// corner rounding by construction, shared by both sites since both round
-/// their outer box at `RADIUS_2`.
-pub const DIVIDER_EDGE_INSET: f32 = spacing::RADIUS_2;
 
 /// Draws a rounded-rect fill + border.
 ///

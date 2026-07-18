@@ -183,19 +183,19 @@ impl<'a> Stepper<'a> {
         let (box_rect, dec_rect, value_rect, inc_rect) = cells(rect, label.is_some());
 
         painter.rect_filled(box_rect, spacing::RADIUS_2, tint(style.bg));
+        let divider = Stroke::new(spacing::BW_HAIR, tint(style.divider));
+        painter.vline(dec_rect.max.x, box_rect.y_range(), divider);
+        painter.vline(value_rect.max.x, box_rect.y_range(), divider);
+        // Drawn LAST so the box border sits on top of the full-height
+        // dividers and covers their ends (egui equivalent of the .jsx
+        // container's `overflow: hidden`) — round 2 fix for PR #95 review
+        // thread T#3609371837 (inconsistent divider heights).
         painter.rect_stroke(
             box_rect,
             spacing::RADIUS_2,
             Stroke::new(spacing::BW_1, tint(style.border)),
             StrokeKind::Inside,
         );
-        let divider = Stroke::new(spacing::BW_HAIR, tint(style.divider));
-        let divider_y_range = egui::Rangef::new(
-            box_rect.min.y + super::common::DIVIDER_EDGE_INSET,
-            box_rect.max.y - super::common::DIVIDER_EDGE_INSET,
-        );
-        painter.vline(dec_rect.max.x, divider_y_range, divider);
-        painter.vline(value_rect.max.x, divider_y_range, divider);
 
         painter.text(
             dec_rect.center(),
