@@ -10,7 +10,7 @@ Read the `readme.md` file within this skill, and explore the other available fil
 
 If creating visual artifacts (slides, mocks, throwaway prototypes, etc), copy assets
 out and create static HTML files for the user to view — link `styles.css` for the
-tokens, use the graph-paper background motif, Space Grotesk + JetBrains Mono, and the
+tokens, use the graph-paper background motif, Onest + JetBrains Mono, and the
 GP-vermilion accent sparingly. If working on production code, copy assets and read
 the rules here to become an expert in designing with this brand.
 
@@ -18,7 +18,7 @@ Key facts:
 - **Aesthetic:** engineering graph paper marked in graphite, with racing telemetry.
   Warm paper cream ground, warm near-black ink, faint blue grid ruling, one vermilion
   accent, per-car chalk colors, a blue→red speed heatmap.
-- **Type:** Space Grotesk (display/UI, tight tracking), JetBrains Mono (all
+- **Type:** Onest (display/UI, tight tracking), JetBrains Mono (all
   coordinates, velocity vectors, telemetry). Both substituted from Google Fonts.
 - **Icons:** Lucide (CDN, substituted). Native marks are geometric: point/car,
   velocity vector, wall segment, S/F checker, move pad. No emoji.

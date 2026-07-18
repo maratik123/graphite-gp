@@ -88,7 +88,7 @@ but the paper + grid + pencil-stroke logic is always present.
   Asphalt is a desaturated warm grey corridor. Grid ruling is a faint engineering
   blue (`--grid-line #C3CEDD`). It is a restrained, near-duotone palette with color
   reserved for *meaning* (which car, how fast).
-- **Type.** Two families. **Space Grotesk** (geometric grotesk) for display + UI;
+- **Type.** Two families. **Onest** (geometric grotesk, Cyrillic support) for display + UI;
   **JetBrains Mono** for all coordinates, vectors, and telemetry. Display is tight
   (`--ls-display -0.02em`) and heavy; small labels are UPPERCASE at `+0.06em`. Big
   numerals (speed, lap) are a signature — set them large in mono or Grotesk 700.
@@ -187,7 +187,7 @@ new-race setup → the race view (graph-paper track + HUD + move pad) → the tr
 
 ## Caveats / substitutions
 
-- **Fonts substituted** (Space Grotesk + JetBrains Mono via Google Fonts) — no fonts
+- **Fonts substituted** (Onest + JetBrains Mono via Google Fonts) — no fonts
   ship with the source.
 - **Icons substituted** (Lucide via CDN) — no icon set in the source.
 - **No logo exists** — the wordmark is set in plain type (**GRAPHITE GP**). No mark
