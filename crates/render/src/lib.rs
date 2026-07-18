@@ -15,6 +15,7 @@ use gp_core::sim::CarState;
 use gp_core::track::TrackArtifact;
 
 pub mod fonts;
+pub mod icons;
 pub mod placeholder;
 pub mod tokens;
 
