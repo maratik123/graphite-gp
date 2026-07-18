@@ -20,8 +20,9 @@ the *spec* (`.d.ts` prop contract + `.jsx` style tables), not the web code.
    `.d.ts` adds `danger` beyond the issue body's three; AC6 "mirror the `.d.ts`"
    governs), sizes `sm` / `md` / `lg`, `iconLeft` + `iconRight` icon slots
    (consume the #88 SVG-icon pipeline — see Key decisions), `fullWidth`,
-   `disabled`, and hover/press visual states (hover-darken; press →
-   inset shadow + 1-pt downward nudge). UI face (Onest), semibold, radius-2.
+   `disabled`, and hover/press visual states (hover-darken; press → 1-pt
+   downward content nudge (the inset-shadow band is dropped — see the
+   Press-affordance amendment note)). UI face (Onest), semibold, radius-2.
 2. **IconButton** — square (dim = 30 / 38 / 46 for sm/md/lg), variants
    `secondary` / `ghost`, `active` toggle (graphite fill), `disabled`,
    hover/press; single glyph icon slot (consume the #88 SVG-icon pipeline);
@@ -44,7 +45,8 @@ the *spec* (`.d.ts` prop contract + `.jsx` style tables), not the web code.
 ### Per-component style mapping (ported from the `.jsx`; grounds the port)
 
 **Button** — `background: active ? bgActive : (hover ? bgHover : bgRest)`;
-`border: bw-1 solid <border>`; radius-2; press adds `SHADOW_INSET` + 1-pt nudge;
+`border: bw-1 solid <border>`; radius-2; press adds a 1-pt downward content
+nudge (no inset-shadow band);
 `disabled` → opacity 0.45.
 
 | variant | rest bg | hover bg | press bg | fg | border |
@@ -59,7 +61,8 @@ Sizes: sm `control-h-sm`/pad-x 12/`fs-sm`; md `control-h-md`/16/`fs-body`; lg
 
 **IconButton** — `bg: active ? graphite-900 : (variant ghost ? graphite@6%/12% :
 paper-0/2/3)`; `fg: active ? paper-0 : text-ink`; `border: active ? graphite-900
-: (ghost ? transparent : border-strong)`; radius-2; press → `SHADOW_INSET`.
+: (ghost ? transparent : border-strong)`; radius-2; press → the press
+background only (no inset-shadow band).
 
 **Badge** — height 20, pad-x 8, `fs-xs`, `fw-medium`, `ls-mono`, radius-pill.
 `solid` → fg `paper-0`, bg `solidBg`, transparent border; tinted → fg/bg/border
@@ -146,13 +149,13 @@ opacity.
 
 | # | Criterion |
 |---|-----------|
-| AC1 | Button renders `primary` / `secondary` / `ghost` / `danger` variants, `sm` / `md` / `lg` sizes, `iconLeft` (+`iconRight`), `fullWidth`, and `disabled`, with hover-darken and press → inset-shadow states, every color/metric sourced from `crate::tokens` per the Button mapping table. The `iconLeft`/`iconRight` slots draw a baked texture from #88's SVG-icon API (this AC's icon portion is gated on #88 landing). |
-| AC2 | IconButton renders as a square (30/38/46), supports `secondary` / `ghost` variants, the `active` toggle (graphite fill), `disabled`, and hover/press, per the IconButton mapping. The glyph slot draws a baked texture from #88's SVG-icon API (gated on #88 landing). |
+| AC1 | Button renders `primary` / `secondary` / `ghost` / `danger` variants, `sm` / `md` / `lg` sizes, `iconLeft` (+`iconRight`), `fullWidth`, and `disabled`, with hover-darken and press states (press = the darker press bg + a 1-pt downward content nudge; no inset-shadow band), every color/metric sourced from `crate::tokens` per the Button mapping table. The `iconLeft`/`iconRight` slots draw a baked texture from #88's SVG-icon API (this AC's icon portion is gated on #88 landing). |
+| AC2 | IconButton renders as a square (30/38/46), supports `secondary` / `ghost` variants, the `active` toggle (graphite fill), `disabled`, and hover/press, per the IconButton mapping (press = press bg; no inset-shadow band). The glyph slot draws a baked texture from #88's SVG-icon API (gated on #88 landing). |
 | AC3 | Badge renders the five tones in both `solid` and tinted forms, pill radius, mono face, per the Badge mapping. |
 | AC4 | Tag renders a square chip with optional leading color dot, the `selected` state (2-pt graphite border), and an optional remove affordance, per the Tag mapping. |
 | AC5 | Card renders the paper face, hairline border (`selected` → 2-pt graphite), radius-2, `elevation` 0–3 → shadow token, `eyebrow` + `title` header, optional `right` slot, and the optional grid watermark, per the Card mapping. |
 | AC6 | Each widget's public prop surface mirrors its `.d.ts` contract (variants / sizes / tones / flags / slots), minus the web-only props mapped or dropped per Key decisions; icon-slot props type against #88's icon handle/identifier. |
-| AC7 | The pure style-resolution layer has unit tests (Miri-clean) asserting the state→style mapping: variant → color token, size → height, tone → token, and pressed → `SHADOW_INSET`. |
+| AC7 | The pure style-resolution layer has unit tests (Miri-clean) asserting the state→style mapping: variant → color token, size → height, tone → token, and pressed → the press background token (e.g. primary pressed → `accent-press`). To encode the Press-affordance amendment's "darker press bg is a sufficient press cue" condition as a verifiable contract, the same unit tests also assert the resolved pressed bg is DARKER than the resolved hovered bg for each Button variant (`primary` / `secondary` / `ghost` / `danger`) and for IconButton — a Miri-clean comparison of the resolved `Color32` press vs hover bg by perceived luminance (or per-channel). |
 | AC8 | A specimen/gallery renders all five widgets across their variant/size/state matrix for by-eye comparison against `docs/design-system/guidelines/*.card.html`. |
 | AC9 | `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, the doc gate, and the workspace Miri job stay green (any wgpu golden is Miri-ignored). |
 
@@ -167,3 +170,25 @@ opacity.
 - **Specimen form** — whether the AC8 gallery is a shippable `examples/`
   binary, a test-only harness, or a golden-tested render is design's
   test-coverage call, not a spec constraint.
+
+## Amendments
+
+- **2026-07-18 — Press-affordance amendment (PR #92 review):** dropped the
+  `SHADOW_INSET` inset-shadow band from Button and IconButton. egui 0.35 has no
+  rounded-rect clip or alpha-mask primitive, so a soft inset shadow cannot be
+  masked to a button's rounded silhouette without the blur bleeding (protruding)
+  past the rounded corners — two prior attempts (a flat band, then a
+  radius-following `blur_width`-softened `RectShape`) each left a visual defect
+  the reviewer flagged, and a hand-tessellated mesh mask was judged too fragile.
+  Dropping the inset shadow is acceptable specifically **because the pressed bg is
+  darker than the hovered bg for every variant** (verified — press bg < hover bg
+  by perceived luminance / per-channel across Button `primary` / `secondary` /
+  `ghost` / `danger`, and likewise IconButton per its mapping), so the darker
+  press bg is a sufficient press cue on its own. The press cue is therefore the
+  darker press bg (Button + IconButton); Button additionally keeps the 1-pt
+  downward content nudge (IconButton's mapping never carried a nudge). The 1-pt
+  nudge is a paint-layer offset verified by the AC8 gallery
+  golden, not the Miri-clean resolve unit test — the resolve layer no longer
+  carries a `press_shadow` / `SHADOW_INSET` field; the pressed effect it exposes
+  is the bg color. `SHADOW_INSET` remains a valid token defined in
+  `tokens::effects`, just unused by these widgets.
