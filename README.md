@@ -59,10 +59,14 @@ display face now carries the Cyrillic the design system's own `Ф1–Ф7` labels
 egui's bundled fallbacks stopped being load-bearing and the release binary shrank
 **1,443,320 B (1.376 MiB)** — measured, not estimated. Block 2 continues at
 the component units (#13–#16), which style egui widgets from these consts —
-the first landed is the **SVG icon pipeline (#88)**: `gp_render::icons` bakes vendored
+the **SVG icon pipeline (#88)** landed first: `gp_render::icons` bakes vendored
 Lucide SVGs to egui textures via `resvg` + `tiny-skia` (ported from the sibling
-`marshrutka` project), the prerequisite for #13's Button/IconButton icon slots
-(#13 stays deferred until #88 merges). The
+`marshrutka` project). Building on it, the **core widgets (#13)** are now landed —
+`gp_render::widgets` ports the five design-system core components (Button,
+IconButton, Badge, Tag, Card) to native egui widgets styled entirely from
+`crate::tokens`, each split into a Miri-clean pure `const fn resolve` style layer,
+a private `paint` layer, and a public `show(ui) -> Response` interaction shell; a
+`#[cfg(test)]` wgpu gallery golden covers the full variant/size/state matrix. The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
@@ -103,7 +107,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 140 workspace tests green (98 gp-core; 38 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline; 2 gp-gen; 2 doc-tests)
+cargo test             # 168 workspace tests green (98 gp-core; 66 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline, core widgets + gallery golden; 2 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,

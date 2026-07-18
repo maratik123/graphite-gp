@@ -237,3 +237,9 @@ Append-only correction/validation log — the feed for `/improve`. See AGENTS.md
 **Rule:** For any multi-line Rust construct (split attributes like `#[cfg_attr(\n …)]`, multi-line `assert!(matches!`, wrapped macro calls), a single-line `grep`/`rg` miss is a FALSE NEGATIVE, never proof of absence — use `rg -U` (multiline) or read the region. Treat a surprising "it's not there" grep result on a construct that SHOULD exist as a search-method failure first, code-absence second.
 **Kind:** correction
 **Escalated?** no
+
+### 2026-07-18 — process — a `git mv` left staged in the index before a committing-subagent handoff got swept into that subagent's first commit
+**What happened:** During `/task 13`, I ran `git mv deferred/…spec.md plans/…spec.md` to activate the deferred spec, leaving the rename STAGED in the index, then handed off Step 8 to the `code-writer` subagent (Mode A, which commits per subtask). The code-writer's first commit (`fa2826b`, "scaffold widgets module") swept in the pre-staged spec rename alongside its own code — even though the code-writer staged explicitly, `git commit` captures the whole index, not just what the last `git add` added. Result was cosmetically wrong (a spec/doc move bundled into a code commit); harmless here because the spec moves to `done/` at Step 12 anyway.
+**Rule:** Before delegating to a subagent that commits (`code-writer` Mode A, or any Mode-B fix delegate), leave the index CLEAN — commit your own pre-staged changes first, or unstage them (`git restore --staged <path>`) so they stay working-tree-only until Step 12. A subagent's explicit `git add` is no protection against a dirty index. Corollary of the existing "verify the delegate can do the work before delegating" rule: also verify the working state you hand it is clean.
+**Kind:** correction
+**Escalated?** no
