@@ -190,8 +190,12 @@ impl<'a> Stepper<'a> {
             StrokeKind::Inside,
         );
         let divider = Stroke::new(spacing::BW_HAIR, tint(style.divider));
-        painter.vline(dec_rect.max.x, box_rect.y_range(), divider);
-        painter.vline(value_rect.max.x, box_rect.y_range(), divider);
+        let divider_y_range = egui::Rangef::new(
+            box_rect.min.y + super::common::DIVIDER_EDGE_INSET,
+            box_rect.max.y - super::common::DIVIDER_EDGE_INSET,
+        );
+        painter.vline(dec_rect.max.x, divider_y_range, divider);
+        painter.vline(value_rect.max.x, divider_y_range, divider);
 
         painter.text(
             dec_rect.center(),

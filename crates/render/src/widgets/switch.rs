@@ -10,12 +10,15 @@ const TRACK_W: f32 = 40.0;
 const TRACK_H: f32 = 22.0;
 /// Knob diameter (`Switch.jsx:31` `16×16`).
 const KNOB_D: f32 = 16.0;
-/// Knob inset from the track edge when unchecked (`Switch.jsx:33` `left: 2`).
-const KNOB_INSET: f32 = 2.0;
-/// Knob `x` offset (from the track's left edge) when checked. `Switch.jsx:33`
-/// hard-codes `left: checked ? 20 : 2` — asymmetric, NOT the symmetric
-/// `TRACK_W - KNOB_INSET - KNOB_D = 22` (design § Key decision, ratified
-/// against `Switch.jsx:33`).
+/// Knob inset from the track edge when unchecked. `Switch.jsx:33` hard-codes
+/// `left: 2`, but the product owner overrode that to `TRACK_W - KNOB_ON_X -
+/// KNOB_D = 4` (PR #95 review round 1): the `left: 2` off-state jammed the
+/// knob against the track's left border, visually asymmetric with the 4px
+/// gap the "on" state leaves on the right (`TRACK_W - KNOB_ON_X - KNOB_D`).
+/// `KNOB_ON_X` is unchanged — the reviewer confirmed "on" reads correctly.
+const KNOB_INSET: f32 = TRACK_W - KNOB_ON_X - KNOB_D;
+/// Knob `x` offset (from the track's left edge) when checked
+/// (`Switch.jsx:33` `left: checked ? 20 : 2`).
 const KNOB_ON_X: f32 = 20.0;
 /// Knob ring stroke width, equals `spacing::BW_1`.
 const KNOB_RING_W: f32 = spacing::BW_1;

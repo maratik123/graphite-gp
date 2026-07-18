@@ -174,9 +174,17 @@ Common: `disabled` → `enabled: bool` (inverted, as #13); `onChange` → the re
   `painter.add(SHADOW_1.as_shape(thumb_rect, thumb_radius))` — mirroring `card.rs:168-169`'s guarded
   `painter.add(style.shadow.as_shape(rect, corner_radius))` shadow draw (`Slider.jsx:45`
   `boxShadow: var(--shadow-1)`) `[measured: card.rs:169 painter.add(style.shadow.as_shape(rect, corner_radius)); tokens/effects.rs:32 SHADOW_1 = --shadow-1]`.
-  `enabled == false` → all draws `gamma_multiply(common::FORMS_DISABLED_OPACITY)` (the thumb shadow dims
-  via `Shadow { color: SHADOW_1.color.gamma_multiply(common::FORMS_DISABLED_OPACITY), ..SHADOW_1 }`, since
-  a `Shadow` shape has no per-primitive gamma path).
+  `enabled == false` → the track bg, fill bar, thumb **shadow**, and readout text dim via
+  `gamma_multiply(common::FORMS_DISABLED_OPACITY)` (the shadow dims through a `Shadow { color:
+  SHADOW_1.color.gamma_multiply(common::FORMS_DISABLED_OPACITY), ..SHADOW_1 }`, since a `Shadow` shape has
+  no per-primitive gamma path). **The thumb disc + ring are the exception — drawn opaque regardless of
+  `enabled`** (their `circle_filled`/`circle_stroke` use `style.thumb_fill`/`thumb_ring` directly, NOT the
+  `tint` applied to every other layer) — a **product-owner decision** (PR #95 review: "not opaque knob of
+  slider" → then "ring on disabled slider also should be opaque"): egui's opacity is a per-shape alpha
+  *multiply* (`egui-0.35.0/src/painter.rs:205` `transform_shape` → `multiply_opacity`), not true group
+  compositing, so a translucent knob would reveal the track/fill beneath it; the chosen approach is
+  "opaque knob + alpha-dim the rest" (the shadow still dims).
+  `[measured: slider.rs:251-256 circle_filled/circle_stroke use style.thumb_fill/thumb_ring, no tint; slider.rs:236-243 shadow dims when !enabled; egui-0.35.0/src/painter.rs:205 opacity_factor<1.0 → multiply_opacity per shape; PR #95 review]`
   Value logic: `fraction(value,min,max)`, `snap_clamp(value,min,max,step)` (both plain `fn`, per Key
   decision 2). `paint(painter, rect, &style, fraction, label, value_text, enabled)` (7 args — clean
   without an `#[allow]`: `too_many_arguments` fires at > 7 and there is no threshold override, exactly
@@ -192,13 +200,18 @@ Common: `disabled` → `enabled: bool` (inverted, as #13); `onChange` → the re
 - **Switch** (`Switch.d.ts`: `checked/label/disabled`). Builder: `checked: bool`, `label:
   Option<&str>`, `enabled: bool`. `resolve(checked) -> SwitchStyle`: track = `checked ? ACCENT :
   PAPER_3` (AC2), knob fill `PAPER_0`, knob ring `GRAPHITE_900`, track border `GRAPHITE_900`. Named
-  consts (`Switch.jsx:27-36`): `TRACK_W = 40.0`, `TRACK_H = 22.0`, `KNOB_D = 16.0`, `KNOB_INSET = 2.0`,
-  `KNOB_ON_X = 20.0` (`.jsx:33` `left: checked ? 20 : 2` — the checked knob x is hard-coded `20`, NOT the
-  symmetric `TRACK_W − KNOB_INSET − KNOB_D = 22`), track radius `RADIUS_PILL`, track border `BW_1`, knob
+  consts (`Switch.jsx:27-36`): `TRACK_W = 40.0`, `TRACK_H = 22.0`, `KNOB_D = 16.0`,
+  `KNOB_INSET = TRACK_W − KNOB_ON_X − KNOB_D = 4.0` (**product-owner override of `Switch.jsx:33`'s
+  off-state `left: 2`** — PR #95 review "Off knob too close to edge; On is ok" — making the off-knob
+  symmetric with the checked knob's 4px right-edge gap),
+  `KNOB_ON_X = 20.0` (`.jsx:33` `left: checked ? 20` — the **checked** knob x is the hard-coded `20`,
+  matching the `.jsx` and **unchanged**; `KNOB_INSET` is now *derived* from it above), track radius `RADIUS_PILL`, track border `BW_1`, knob
   ring `1.5` (= `BW_1`), label gap `10` (a local `LABEL_GAP = 10.0`). Knob x = `checked ? KNOB_ON_X :
-  KNOB_INSET` (= on `20`, off `2` — matches `Switch.jsx:33`'s asymmetric `left: checked ? 20 : 2`; the
-  earlier symmetric `TRACK_W − KNOB_INSET − KNOB_D = 22` was WRONG vs ground truth, so the specimen
-  matches `forms.card.html`) (paint reads `checked`) `[measured: Switch.jsx:33 left: checked ? 20 : 2]`. Label UI `ONEST_REGULAR` `FS_BODY` `TEXT_BODY`. `toggled(checked) -> !checked` (`const
+  KNOB_INSET` (= on `20`, off `4` — the **on** value `20` matches `Switch.jsx:33`'s `left: checked ? 20`;
+  the **off** value `KNOB_INSET = 4` (= `TRACK_W − KNOB_ON_X − KNOB_D`) is a **product-owner override** of
+  the `.jsx`'s `left: 2` (PR #95 review: "Off knob too close to edge; On is ok"), making the off-knob
+  symmetric with the checked knob's 4px gap — this is the shipped, intended value, so the specimen
+  matches `forms.card.html`) (paint reads `checked`) `[measured: switch.rs:19 KNOB_INSET = TRACK_W − KNOB_ON_X − KNOB_D = 4; switch.rs:22 KNOB_ON_X = 20; PR #95 review round 1]`. Label UI `ONEST_REGULAR` `FS_BODY` `TEXT_BODY`. `toggled(checked) -> !checked` (`const
   fn`). `paint(painter, rect, &style, checked, label, enabled)`. `show` → `SwitchResponse`
   (`Sense::click()`; `checked = if clicked { !self.checked } else { self.checked }`).
 - **SegmentedControl** (`SegmentedControl.d.ts`: `options/value/size`). Builder: `options: &'a

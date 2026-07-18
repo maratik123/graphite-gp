@@ -121,16 +121,56 @@ impl<'a> SegmentedControl<'a> {
 
         let widths = segment_widths(painter, options, size);
         let clipped = painter.with_clip_rect(rect);
+        let last = options.len().saturating_sub(1);
+        let divider_y_range = egui::Rangef::new(
+            rect.min.y + super::common::DIVIDER_EDGE_INSET,
+            rect.max.y - super::common::DIVIDER_EDGE_INSET,
+        );
         for (i, &label) in options.iter().enumerate() {
             let seg_rect = seg_rect_at(rect, &widths, i);
             let style = Self::resolve(Some(i) == selected, size);
             if Some(i) == selected {
-                clipped.rect_filled(seg_rect, 0, style.bg);
+                // Per-corner radius, not `0`: a bare rect clip cannot round
+                // corners, so a `0`-radius fill on the first/last selected
+                // segment squared off the outer `RADIUS_2` chrome corners
+                // (PR #95 review round 1). Round only the OUTER corners that
+                // coincide with the container's rounded edge; inner
+                // (neighbor-shared) corners and middle segments stay square.
+                // `CornerRadius::from(f32)` (not a raw `as u8` cast, which
+                // pedantic clippy denies for sign-loss/truncation) is the
+                // same conversion `common::paint_surface` and friends use
+                // for a uniform radius; taking `.nw` from that reuses it to
+                // get the single `u8` this per-corner struct needs.
+                let outer_radius = egui::CornerRadius::from(spacing::RADIUS_2).nw;
+                let corner_radius = if options.len() == 1 {
+                    egui::CornerRadius::same(outer_radius)
+                } else if i == 0 {
+                    egui::CornerRadius {
+                        nw: outer_radius,
+                        sw: outer_radius,
+                        ne: 0,
+                        se: 0,
+                    }
+                } else if i == last {
+                    egui::CornerRadius {
+                        ne: outer_radius,
+                        se: outer_radius,
+                        nw: 0,
+                        sw: 0,
+                    }
+                } else {
+                    egui::CornerRadius::ZERO
+                };
+                // No border-width inset needed here: the selected fill
+                // (`GRAPHITE_900`) is the same color as the outer border
+                // stroke, so the fill seamlessly covers the border at the
+                // rounded corner rather than needing to leave it visible.
+                clipped.rect_filled(seg_rect, corner_radius, style.bg);
             }
             if i > 0 {
                 clipped.vline(
                     seg_rect.min.x,
-                    seg_rect.y_range(),
+                    divider_y_range,
                     Stroke::new(spacing::BW_HAIR, color::GRAPHITE_900),
                 );
             }

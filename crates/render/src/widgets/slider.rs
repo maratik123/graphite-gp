@@ -242,15 +242,17 @@ impl<'a> Slider<'a> {
             }
         };
         painter.add(shadow.as_shape(thumb_rect, thumb_radius));
-        painter.circle_filled(
-            thumb_rect.center(),
-            style.thumb_d / 2.0,
-            tint(style.thumb_fill),
-        );
+        // Opaque regardless of `enabled` (PR #95 review): the whole knob
+        // (disc + ring) must never let the track/fill show through it, so
+        // both are drawn with their full-alpha style colors rather than the
+        // opacity-reducing `tint()` applied to every other layer. The
+        // disabled state still reads as dimmed via the track/fill/shadow/
+        // readout, which do use `tint`.
+        painter.circle_filled(thumb_rect.center(), style.thumb_d / 2.0, style.thumb_fill);
         painter.circle_stroke(
             thumb_rect.center(),
             style.thumb_d / 2.0,
-            Stroke::new(spacing::BW_2, tint(style.thumb_ring)),
+            Stroke::new(spacing::BW_2, style.thumb_ring),
         );
     }
 
