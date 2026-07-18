@@ -1,9 +1,10 @@
-//! Native `gp-render` core widgets (issue #13).
+//! Native `gp-render` core + forms widgets (issues #13, #14).
 //!
 //! Ports the five design-system core components — Button, `IconButton`,
-//! Badge, Tag, Card — to `egui`. Each widget's `.d.ts` prop contract +
-//! `.jsx` style tables are the port ground truth; style is sourced entirely
-//! from `crate::tokens`.
+//! Badge, Tag, Card — plus the four forms components — Slider, Switch,
+//! `SegmentedControl`, Stepper — to `egui`. Each widget's `.d.ts` prop
+//! contract + `.jsx` style tables are the port ground truth; style is
+//! sourced entirely from `crate::tokens`.
 //!
 //! Each widget is split into three layers (design § Approach):
 //!
