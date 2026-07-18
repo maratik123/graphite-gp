@@ -14,6 +14,8 @@
 //! 3. A public `show(self, ui) -> Response` interaction shell (egui builder
 //!    idiom) reading live pointer input.
 
+pub mod badge;
 mod common;
 
+pub use badge::{Badge, Tone as BadgeTone};
 pub use common::Size;
