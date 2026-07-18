@@ -8,6 +8,8 @@
 
 use std::ops::ControlFlow;
 
+use strum::IntoEnumIterator;
+
 use super::{Coord, Corridor, Point, Wall};
 
 /// One of a cell's four axis-aligned sides.
@@ -15,7 +17,7 @@ use super::{Coord, Corridor, Point, Wall};
 /// The outward direction from a drivable cell toward a non-drivable neighbor
 /// (design doc §1). Variant order mirrors [`Point::neighbors4`]: east, west,
 /// north, south.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, strum::EnumIter)]
 pub enum Side {
     /// The +x side — toward the eastern neighbor.
     East,
@@ -28,9 +30,6 @@ pub enum Side {
 }
 
 impl Side {
-    /// All four sides, in [`Point::neighbors4`] order: east, west, north, south.
-    pub const ALL: [Self; 4] = [Self::East, Self::West, Self::North, Self::South];
-
     /// The unit step `(dx, dy)` from a cell across this side to its neighbor.
     #[inline]
     pub const fn delta(self) -> (Coord, Coord) {
@@ -312,7 +311,7 @@ pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
         if !d.contains(cell) {
             continue;
         }
-        for side in Side::ALL {
+        for side in Side::iter() {
             let (dx, dy) = side.delta();
             // NOTE: does not reuse the saturating `Point::neighbors4` — a
             // saturated self-neighbor would test `d.contains(cell) == true`

@@ -32,6 +32,7 @@ gp-gen = { path = "crates/gen" }
 gp-render = { path = "crates/render" }
 gp-ai = { path = "crates/ai" }
 thiserror = "2"
+strum = { version = "0.28", features = ["derive"] }
 
 # Workspace-wide lint posture. Each crate opts in via `[lints] workspace = true`.
 # See `ai-docs/code-style.md` for the carve-out discipline behind the allows below.
