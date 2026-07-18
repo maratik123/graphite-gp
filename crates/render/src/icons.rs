@@ -9,7 +9,8 @@
 //! the design's "Fallible bake" section).
 
 use egui::epaint::textures::TextureOptions;
-use egui::{ColorImage, TextureHandle};
+use egui::layers::ShapeIdx;
+use egui::{Color32, ColorImage, Painter, Pos2, Rect, TextureHandle};
 use resvg::usvg::{Options, Transform, Tree};
 use std::collections::HashMap;
 use tiny_skia::Pixmap;
@@ -200,6 +201,25 @@ impl IconSet {
     }
 }
 
+/// The UV rect covering a baked icon texture's full extent (`Painter::image`
+/// draws the whole texture, never a sub-region — icons have no atlas).
+///
+/// A struct literal, not `Rect::from_min_size` (not `const fn` on 0.35),
+/// mirroring `placeholder.rs`'s `CANVAS_RECT` precedent.
+const FULL_UV: Rect = Rect {
+    min: Pos2::ZERO,
+    max: Pos2::new(1.0, 1.0),
+};
+
+/// Draws a baked icon texture into `rect`, honoring `tint` (including its
+/// alpha) (AC3).
+///
+/// Thin wrapper over `Painter::image` — the sole draw API this pipeline
+/// exposes; no new backend surface.
+pub fn draw_icon(painter: &Painter, handle: &TextureHandle, rect: Rect, tint: Color32) -> ShapeIdx {
+    painter.image(handle.id(), rect, FULL_UV, tint)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,5 +341,65 @@ mod tests {
                 "{icon:?}'s TextureHandle::id() collided with another icon's"
             );
         }
+    }
+
+    /// Builds a real [`TextureHandle`] from a hand-built 1x1
+    /// [`ColorImage::filled`] — bypassing resvg/tiny-skia entirely, so
+    /// Miri-clean — then inspects `run_ui`'s output shapes (no
+    /// tessellation) for the mesh `draw_icon` emits (AC3).
+    #[test]
+    fn draw_icon_emits_tinted_textured_mesh() {
+        let ctx = egui::Context::default();
+        let handle = ctx.load_texture(
+            "draw_icon_emits_tinted_textured_mesh",
+            ColorImage::filled([1, 1], Color32::WHITE),
+            TextureOptions::default(),
+        );
+        let rect = Rect::from_min_max(Pos2::new(10.0, 20.0), Pos2::new(30.0, 40.0));
+        let tint = Color32::from_rgba_premultiplied(128, 64, 32, 200);
+
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_icon(ui.painter(), &handle, rect, tint);
+        });
+
+        let meshes: Vec<&egui::Mesh> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) => Some(mesh.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            meshes.len(),
+            1,
+            "expected exactly one Shape::Mesh, got {}",
+            meshes.len()
+        );
+
+        let mesh = meshes[0];
+        assert_eq!(mesh.texture_id, handle.id());
+        for vertex in &mesh.vertices {
+            assert_eq!(vertex.color, tint, "vertex color did not honor tint/alpha");
+        }
+
+        let uv_corners: HashSet<(u32, u32)> = mesh
+            .vertices
+            .iter()
+            .map(|v| (v.uv.x.to_bits(), v.uv.y.to_bits()))
+            .collect();
+        let expected_corners: HashSet<(u32, u32)> = [
+            (FULL_UV.min.x, FULL_UV.min.y),
+            (FULL_UV.min.x, FULL_UV.max.y),
+            (FULL_UV.max.x, FULL_UV.min.y),
+            (FULL_UV.max.x, FULL_UV.max.y),
+        ]
+        .into_iter()
+        .map(|(x, y)| (x.to_bits(), y.to_bits()))
+        .collect();
+        assert_eq!(
+            uv_corners, expected_corners,
+            "mesh UV corners did not match FULL_UV"
+        );
     }
 }
