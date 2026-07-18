@@ -22,6 +22,7 @@ mod common;
 #[cfg(test)]
 mod gallery;
 pub mod icon_button;
+pub mod slider;
 pub mod switch;
 pub mod tag;
 
@@ -30,5 +31,6 @@ pub use button::{Button, Variant as ButtonVariant};
 pub use card::{Card, Elevation};
 pub use common::Size;
 pub use icon_button::{IconButton, Variant as IconButtonVariant};
+pub use slider::{Slider, SliderResponse};
 pub use switch::{Switch, SwitchResponse};
 pub use tag::{Tag, TagResponse};
