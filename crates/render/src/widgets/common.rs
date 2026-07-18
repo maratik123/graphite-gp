@@ -9,12 +9,6 @@
 use crate::tokens::effects::InsetShadow;
 use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Stroke, StrokeKind};
 
-// This scaffold subtask (Group A subtask 1) lands ahead of its consumers —
-// every item below is read by Button, IconButton, Badge, Tag, or Card once
-// those land (subtasks 2-6 of this same design decomposition, same PR). The
-// per-item `allow(dead_code)` below is temporary scaffolding noise, removed
-// as each consumer starts using the item.
-
 /// The three control sizes shared by every core widget that has one
 /// (`Button`, `IconButton`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,27 +24,15 @@ pub enum Size {
 /// Ghost-variant hover overlay. `rgba(32,30,26,0.06)`, alpha
 /// `round(0.06 * 255) = 15`; RGB channels equal `crate::tokens::color::GRAPHITE_900`.
 /// Not a token — appears at 2 sites (Button ghost, `IconButton` ghost).
-#[allow(
-    dead_code,
-    reason = "consumed by button.rs/icon_button.rs in subtasks 3-4"
-)]
 pub const GHOST_HOVER_OVERLAY: Color32 =
     Color32::from_rgba_unmultiplied_const(0x20, 0x1E, 0x1A, 15);
 /// Ghost-variant press overlay. `rgba(32,30,26,0.12)`, alpha
 /// `round(0.12 * 255) = 31`.
-#[allow(
-    dead_code,
-    reason = "consumed by button.rs/icon_button.rs in subtasks 3-4"
-)]
 pub const GHOST_PRESS_OVERLAY: Color32 =
     Color32::from_rgba_unmultiplied_const(0x20, 0x1E, 0x1A, 31);
 
 /// Disabled-state opacity multiplier applied at paint time (not inside any
 /// `resolve`, since `Color32::gamma_multiply` is not const-stable).
-#[allow(
-    dead_code,
-    reason = "consumed by button.rs/icon_button.rs in subtasks 3-4"
-)]
 pub const DISABLED_OPACITY: f32 = 0.45;
 
 /// Grid-watermark opacity multiplier (Card's faint background grid).
@@ -64,10 +46,6 @@ pub const GRID_WATERMARK_OPACITY: f32 = 0.5;
 /// rounded rect and darken it with the same pressed-state band. `radius` is
 /// a raw token `f32`; `CornerRadius::from(f32)` is applied here (deferred
 /// from `resolve`, which cannot call a non-const `From` impl).
-#[allow(
-    dead_code,
-    reason = "consumed by button.rs/icon_button.rs in subtasks 3-4"
-)]
 pub(crate) fn paint_surface(
     painter: &Painter,
     rect: Rect,
@@ -96,7 +74,6 @@ pub(crate) fn paint_surface(
 /// edge, `offset.y + blur` points tall — `epaint::Shadow` has no
 /// inner-shadow primitive to delegate to (see `tokens::effects::InsetShadow`'s
 /// own doc).
-#[allow(dead_code, reason = "consumed via paint_surface, subtasks 3-4")]
 fn paint_inset_shadow(painter: &Painter, rect: Rect, shadow: InsetShadow) {
     let band_height = f32::from(shadow.offset[1]) + f32::from(shadow.blur);
     let band_bottom = (rect.min.y + band_height).min(rect.max.y);

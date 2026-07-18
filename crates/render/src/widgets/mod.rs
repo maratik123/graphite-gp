@@ -15,7 +15,9 @@
 //!    idiom) reading live pointer input.
 
 pub mod badge;
+pub mod button;
 mod common;
 
 pub use badge::{Badge, Tone as BadgeTone};
+pub use button::{Button, Variant as ButtonVariant};
 pub use common::Size;
