@@ -3,8 +3,7 @@
 
 use super::Size;
 use crate::icons;
-use crate::tokens::effects::InsetShadow;
-use crate::tokens::{color, effects, spacing};
+use crate::tokens::{color, spacing};
 use egui::{Color32, Painter, Pos2, Rect, Response, Sense, TextureHandle, Ui};
 
 /// `IconButton` variant (`IconButton.d.ts` `variant`).
@@ -31,8 +30,6 @@ pub struct IconButtonStyle {
     pub dim: f32,
     /// Corner radius (`spacing::RADIUS_2`).
     pub radius: f32,
-    /// `Some(SHADOW_INSET)` when pressed.
-    pub press_shadow: Option<InsetShadow>,
 }
 
 /// `IconButton` props (`IconButton.d.ts`): glyph `children` → `icon`,
@@ -150,17 +147,15 @@ impl<'a> IconButton<'a> {
             border,
             dim: Self::dim_for(size),
             radius: spacing::RADIUS_2,
-            press_shadow: if pressed {
-                Some(effects::SHADOW_INSET)
-            } else {
-                None
-            },
         }
     }
 
-    /// Draws the resolved `style` into `rect`: bg/border/radius, the
-    /// pressed-state inset-shadow band, and the centered
-    /// `icons::ICON_LOGICAL_SIZE_PX` glyph, honoring `enabled`'s opacity.
+    /// Draws the resolved `style` into `rect`: bg/border/radius and the
+    /// centered `icons::ICON_LOGICAL_SIZE_PX` glyph, honoring `enabled`'s
+    /// opacity. The pressed-state inset-shadow band was dropped entirely
+    /// (design § Amendment 3) — press = the darker press bg baked into
+    /// `style.bg` only, no band, no content nudge (`IconButton`'s mapping
+    /// never carried a nudge).
     pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
@@ -182,7 +177,6 @@ impl<'a> IconButton<'a> {
             tint(style.bg),
             tint(style.border),
             spacing::BW_1,
-            style.press_shadow,
         );
 
         let half_gap = (rect.width() - icons::ICON_LOGICAL_SIZE_PX) / 2.0;
@@ -222,7 +216,7 @@ impl<'a> IconButton<'a> {
 #[cfg(test)]
 mod tests {
     use super::{IconButton, Size, Variant};
-    use crate::tokens::{color, effects, spacing};
+    use crate::tokens::{color, spacing};
 
     /// AC7 — `active` overrides variant/hover/press with the graphite fill.
     #[test]
@@ -281,16 +275,36 @@ mod tests {
         );
     }
 
-    /// AC7 — pressed → `SHADOW_INSET`.
+    /// AC7 — pressed → the press bg token, for secondary + ghost (design §
+    /// Amendment 3 — replaces the removed `press_shadow` assert, since
+    /// `IconButtonStyle` no longer has that field).
     #[test]
-    fn pressed_yields_inset_shadow() {
+    fn pressed_yields_press_bg_token() {
         assert_eq!(
-            IconButton::resolve(Variant::Secondary, Size::Md, false, false, true).press_shadow,
-            Some(effects::SHADOW_INSET)
+            IconButton::resolve(Variant::Secondary, Size::Md, false, false, true).bg,
+            color::PAPER_3
         );
         assert_eq!(
-            IconButton::resolve(Variant::Secondary, Size::Md, false, false, false).press_shadow,
-            None
+            IconButton::resolve(Variant::Ghost, Size::Md, false, false, true).bg,
+            super::super::common::GHOST_PRESS_OVERLAY
         );
+    }
+
+    /// AC7 — darker-press-bg-than-hover-bg invariant (design § Amendment 3 /
+    /// Test Design → Darkness metric), for secondary + ghost. Composited over
+    /// `PAPER_0` (identity for secondary, mandatory for ghost — `Color32` is
+    /// premultiplied). Strict `<`, no `clippy::float_cmp`.
+    #[test]
+    fn press_bg_is_darker_than_hover_bg_for_secondary_and_ghost() {
+        for variant in [Variant::Secondary, Variant::Ghost] {
+            let press_bg = IconButton::resolve(variant, Size::Md, false, false, true).bg;
+            let hover_bg = IconButton::resolve(variant, Size::Md, false, true, false).bg;
+            let press_intensity = color::PAPER_0.blend(press_bg).intensity();
+            let hover_intensity = color::PAPER_0.blend(hover_bg).intensity();
+            assert!(
+                press_intensity < hover_intensity,
+                "{variant:?}: press intensity {press_intensity} should be darker than hover intensity {hover_intensity}"
+            );
+        }
     }
 }

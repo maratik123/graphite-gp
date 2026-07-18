@@ -3,8 +3,7 @@
 
 use super::Size;
 use crate::icons::{self, ICON_LOGICAL_SIZE_PX};
-use crate::tokens::effects::InsetShadow;
-use crate::tokens::{color, effects, spacing, typography};
+use crate::tokens::{color, spacing, typography};
 use egui::{
     Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, TextureHandle, Ui,
 };
@@ -58,8 +57,6 @@ pub struct ButtonStyle {
     /// Corner radius (`spacing::RADIUS_2`, deferred to `CornerRadius::from`
     /// at the paint site).
     pub radius: f32,
-    /// `Some(SHADOW_INSET)` when pressed.
-    pub press_shadow: Option<InsetShadow>,
 }
 
 /// Button props (`Button.d.ts`): `variant`, `size`, `iconLeft`/`iconRight`,
@@ -217,17 +214,16 @@ impl<'a> Button<'a> {
             gap,
             font_size,
             radius: spacing::RADIUS_2,
-            press_shadow: if pressed {
-                Some(effects::SHADOW_INSET)
-            } else {
-                None
-            },
         }
     }
 
-    /// Draws the resolved `style` into `rect`: bg/border/radius, the
-    /// pressed-state inset-shadow band + 1-pt downward content nudge,
-    /// `icon_left`/label/`icon_right`, honoring `enabled`'s opacity.
+    /// Draws the resolved `style` into `rect`: bg/border/radius plus the
+    /// 1-pt downward content nudge when pressed, `icon_left`/label/
+    /// `icon_right`, honoring `enabled`'s opacity. The pressed-state
+    /// inset-shadow band was dropped entirely (design § Amendment 3) — the
+    /// darker press bg baked into `style.bg` is the sole press cue; `pressed`
+    /// here only drives the content nudge, since `ButtonStyle` no longer
+    /// carries a press-shadow field.
     ///
     /// # Panics
     ///
@@ -246,6 +242,7 @@ impl<'a> Button<'a> {
         icon_left: Option<&TextureHandle>,
         icon_right: Option<&TextureHandle>,
         enabled: bool,
+        pressed: bool,
     ) {
         let opacity = if enabled {
             1.0
@@ -254,10 +251,6 @@ impl<'a> Button<'a> {
         };
         let tint = |c: Color32| c.gamma_multiply(opacity);
 
-        // `press_shadow` is only `Some` when `show` resolved with
-        // `pressed == true`, which `show` only does while `enabled` — so
-        // opacity and the press shadow never co-occur; no tint needed on
-        // the shadow color itself.
         super::common::paint_surface(
             painter,
             rect,
@@ -265,15 +258,10 @@ impl<'a> Button<'a> {
             tint(style.bg),
             tint(style.border),
             spacing::BW_1,
-            style.press_shadow,
         );
 
         // 1-pt downward content nudge when pressed (enabled only).
-        let nudge = if enabled && style.press_shadow.is_some() {
-            1.0
-        } else {
-            0.0
-        };
+        let nudge = if enabled && pressed { 1.0 } else { 0.0 };
         let icon_y = rect.min.y + (rect.height() - ICON_LOGICAL_SIZE_PX) / 2.0 + nudge;
         let mut cursor_x = rect.min.x + style.pad_x;
         if let Some(icon) = icon_left {
@@ -321,7 +309,7 @@ impl<'a> Button<'a> {
     /// See the private `paint` layer's panics.
     pub fn show(self, ui: &mut Ui) -> Response {
         // Measured with rest-state style: height/pad_x/gap/font_size don't
-        // depend on hover/press, only bg/fg/border/press_shadow do.
+        // depend on hover/press, only bg/fg/border do.
         let metrics = Self::resolve(self.variant, self.size, false, false);
         let text_width = ui
             .painter()
@@ -369,6 +357,7 @@ impl<'a> Button<'a> {
                 self.icon_left,
                 self.icon_right,
                 self.enabled,
+                pressed,
             );
         }
         response
@@ -378,7 +367,7 @@ impl<'a> Button<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Button, Size, Variant};
-    use crate::tokens::{color, effects, spacing};
+    use crate::tokens::{color, spacing};
 
     /// AC7 — primary at rest.
     #[test]
@@ -423,17 +412,52 @@ mod tests {
         );
     }
 
-    /// AC7 — pressed → `SHADOW_INSET`, else `None`.
+    /// AC7 — pressed → the press bg token, per variant (design § Amendment 3
+    /// — replaces the removed `press_shadow == Some(SHADOW_INSET)` assert,
+    /// since `ButtonStyle` no longer has that field).
     #[test]
-    fn pressed_yields_inset_shadow() {
+    fn pressed_yields_press_bg_token() {
         assert_eq!(
-            Button::resolve(Variant::Primary, Size::Md, false, true).press_shadow,
-            Some(effects::SHADOW_INSET)
+            Button::resolve(Variant::Primary, Size::Md, false, true).bg,
+            color::ACCENT_PRESS
         );
         assert_eq!(
-            Button::resolve(Variant::Primary, Size::Md, false, false).press_shadow,
-            None
+            Button::resolve(Variant::Secondary, Size::Md, false, true).bg,
+            color::PAPER_3
         );
+        assert_eq!(
+            Button::resolve(Variant::Ghost, Size::Md, false, true).bg,
+            super::super::common::GHOST_PRESS_OVERLAY
+        );
+        assert_eq!(
+            Button::resolve(Variant::Danger, Size::Md, false, true).bg,
+            color::ACCENT_PRESS
+        );
+    }
+
+    /// AC7 — darker-press-bg-than-hover-bg invariant (design § Amendment 3 /
+    /// Test Design → Darkness metric), for every variant. Composited over
+    /// `PAPER_0` (identity for the opaque variants, mandatory for ghost —
+    /// `Color32` is premultiplied, so ghost's raw overlay channels compare in
+    /// the WRONG direction without compositing). Strict `<`, no
+    /// `clippy::float_cmp` (that lint fires only on `==`/`!=`).
+    #[test]
+    fn press_bg_is_darker_than_hover_bg_for_every_variant() {
+        for variant in [
+            Variant::Primary,
+            Variant::Secondary,
+            Variant::Ghost,
+            Variant::Danger,
+        ] {
+            let press_bg = Button::resolve(variant, Size::Md, false, true).bg;
+            let hover_bg = Button::resolve(variant, Size::Md, true, false).bg;
+            let press_intensity = color::PAPER_0.blend(press_bg).intensity();
+            let hover_intensity = color::PAPER_0.blend(hover_bg).intensity();
+            assert!(
+                press_intensity < hover_intensity,
+                "{variant:?}: press intensity {press_intensity} should be darker than hover intensity {hover_intensity}"
+            );
+        }
     }
 
     /// AC7 — danger's fg flips `DANGER` -> `TEXT_ON_ACCENT` once hovered or
