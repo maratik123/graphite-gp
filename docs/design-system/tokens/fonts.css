@@ -2,7 +2,7 @@
    Graphite GP — Fonts
    No fonts ship with the scaffold codebase (rendering backend not
    yet chosen). SUBSTITUTION (flagged in README):
-     • Onest — technical geometric grotesk for display/UI
+     • Onest — geometric grotesk with Cyrillic for display/UI
      • JetBrains Mono — coordinates, velocity vectors, telemetry
    Loaded from Google Fonts. Swap for licensed binaries + @font-face
    here if the project adopts official faces.
