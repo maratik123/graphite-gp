@@ -2,11 +2,16 @@
 //! bake half, design `2026-07-18-render-svg-icon-pipeline`).
 //!
 //! Vendors a curated Lucide (ISC) icon set under `crates/render/icons/` and
-//! bakes each into a cached `egui::TextureHandle` on demand (`bake_texture`)
-//! or eagerly for the whole curated set (`IconSet`). Unlike marshrutka's
-//! `.unwrap()`-chain original, every fallible step here returns
-//! [`IconError`] — `gp-render` stays at zero production panics (see the
-//! design's "Fallible bake" section).
+//! bakes each into a cached `egui::TextureHandle` on demand
+//! ([`bake_texture`]) or eagerly for the whole curated set (`IconSet`).
+//! Unlike marshrutka's `.unwrap()`-chain original, every fallible step here
+//! returns [`IconError`] — `gp-render` stays at zero production panics (see
+//! the design's "Fallible bake" section).
+
+use egui::epaint::textures::TextureOptions;
+use egui::{ColorImage, TextureHandle};
+use resvg::usvg::{Options, Transform, Tree};
+use tiny_skia::Pixmap;
 
 /// Logical (DPI-independent) side length, in points, at which the curated icon set is baked.
 ///
@@ -87,6 +92,80 @@ pub enum IconError {
     },
 }
 
+/// Bakes SVG source bytes into an [`egui::ColorImage`], Context-free and
+/// GPU-free (the CPU half of the pipeline — the AC5 unit tests drive this
+/// directly).
+///
+/// `logical_px` is the desired *width* in logical (DPI-independent) points;
+/// `ppp` is `egui::Context::pixels_per_point()`. The physical pixel width is
+/// `logical_px * ppp`, and the height is scaled to match the source SVG's
+/// aspect ratio.
+///
+/// # Errors
+///
+/// Returns [`IconError::Parse`] if `svg` is not a parseable SVG document, or
+/// [`IconError::PixmapAlloc`] if the computed physical size has a
+/// zero-length dimension.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "logical_px/ppp are positive, finite, and bounded by realistic \
+              UI sizes (icons render at tens of physical pixels); the \
+              f32->u32 physical-size cast and the u32->f32 transform-scale \
+              cast are both comfortably in-domain for that range"
+)]
+pub fn svg_to_color_image(svg: &[u8], logical_px: f32, ppp: f32) -> Result<ColorImage, IconError> {
+    let tree = Tree::from_data(svg, &Options::default())?;
+    let svg_size = tree.size();
+
+    let target_width = (logical_px * ppp).round() as u32;
+    let size =
+        svg_size
+            .to_int_size()
+            .scale_to_width(target_width)
+            .ok_or(IconError::PixmapAlloc {
+                width: target_width,
+                height: target_width,
+            })?;
+
+    let mut pixmap =
+        Pixmap::new(size.width(), size.height()).ok_or_else(|| IconError::PixmapAlloc {
+            width: size.width(),
+            height: size.height(),
+        })?;
+
+    let transform = Transform::from_scale(
+        size.width() as f32 / svg_size.width(),
+        size.height() as f32 / svg_size.height(),
+    );
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    Ok(ColorImage::from_rgba_premultiplied(
+        [pixmap.width() as usize, pixmap.height() as usize],
+        pixmap.data(),
+    ))
+}
+
+/// Bakes SVG source bytes into a cached [`egui::TextureHandle`] (AC1): the
+/// public, `Context`-touching surface wrapping [`svg_to_color_image`].
+///
+/// `name` becomes the texture's registration key (and `ctx.load_texture`'s
+/// cache label). DPI is read from `ctx.pixels_per_point()`.
+///
+/// # Errors
+///
+/// Propagates [`svg_to_color_image`]'s errors.
+pub fn bake_texture(
+    ctx: &egui::Context,
+    name: impl Into<String>,
+    svg: &[u8],
+    logical_px: f32,
+) -> Result<TextureHandle, IconError> {
+    let image = svg_to_color_image(svg, logical_px, ctx.pixels_per_point())?;
+    Ok(ctx.load_texture(name, image, TextureOptions::default()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +216,46 @@ mod tests {
             names.len(),
             5,
             "Icon::name() values were not pairwise distinct"
+        );
+    }
+
+    /// `play.svg`'s `viewBox` is a square `0 0 24 24` (verified against the
+    /// vendored asset); at `logical_px = 18.0, ppp = 2.0` the physical
+    /// target width is `18 * 2 = 36`, and scaling a square SVG to that
+    /// width yields an exact `36x36` physical size.
+    ///
+    /// Not Miri-gated: verified via `MIRIFLAGS=-Zmiri-tree-borrows cargo
+    /// miri test -p gp-render icons::tests::svg_to_color_image_produces_square_rgba`
+    /// that this resvg 0.47 / tiny-skia 0.12 raster call site does **not**
+    /// abort Miri — the design's risk premise (mirroring
+    /// `tessellation_smoke`'s `vello_cpu` checked-cast abort) does not hold
+    /// here, so no truthful gate reason exists.
+    #[test]
+    fn svg_to_color_image_produces_square_rgba() {
+        let image = svg_to_color_image(Icon::Play.svg_bytes(), ICON_LOGICAL_SIZE_PX, 2.0)
+            .expect("play.svg bakes cleanly");
+
+        assert_eq!(image.size, [36, 36]);
+        assert!(!image.pixels.is_empty(), "baked ColorImage had no pixels");
+
+        let alpha_values: HashSet<u8> = image.pixels.iter().map(egui::Color32::a).collect();
+        assert!(
+            alpha_values.len() > 1,
+            "expected varying alpha (opaque strokes over a transparent \
+             field), got a single alpha value {alpha_values:?}"
+        );
+    }
+
+    /// Not Miri-gated: verified via `MIRIFLAGS=-Zmiri-tree-borrows cargo
+    /// miri test -p gp-render icons::tests::svg_to_color_image_rejects_garbage`
+    /// that the `usvg::Tree::from_data` parse-error path does not abort
+    /// Miri either.
+    #[test]
+    fn svg_to_color_image_rejects_garbage() {
+        let result = svg_to_color_image(b"not an svg", 18.0, 1.0);
+        assert!(
+            matches!(result, Err(IconError::Parse(_))),
+            "expected IconError::Parse, got {result:?}"
         );
     }
 }
