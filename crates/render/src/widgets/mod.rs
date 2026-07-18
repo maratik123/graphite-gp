@@ -22,6 +22,7 @@ mod common;
 #[cfg(test)]
 mod gallery;
 pub mod icon_button;
+pub mod segmented_control;
 pub mod slider;
 pub mod stepper;
 pub mod switch;
@@ -32,6 +33,7 @@ pub use button::{Button, Variant as ButtonVariant};
 pub use card::{Card, Elevation};
 pub use common::Size;
 pub use icon_button::{IconButton, Variant as IconButtonVariant};
+pub use segmented_control::{SegmentedControl, SegmentedControlResponse};
 pub use slider::{Slider, SliderResponse};
 pub use stepper::{StepDir, Stepper, StepperResponse};
 pub use switch::{Switch, SwitchResponse};
