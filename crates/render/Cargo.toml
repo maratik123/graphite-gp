@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-license = "(MIT OR Apache-2.0) AND OFL-1.1"
+license = "(MIT OR Apache-2.0) AND OFL-1.1 AND ISC"
 
 [lints]
 workspace = true
@@ -13,6 +13,9 @@ workspace = true
 [dependencies]
 gp-core = { workspace = true }
 egui = { version = "0.35", default-features = false }
+resvg = { version = "0.47", default-features = false }
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
