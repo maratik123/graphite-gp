@@ -5,7 +5,7 @@
 //! `google/fonts` at the commit pinned in design `2026-07-17-render-onest-font-swap`
 //! § Decomposition subtask 2, each beside its own `OFL.txt` (AC1, #12 AC15).
 //! Onest's `wght` axis defaults to 400 (Regular), but every registered
-//! instance still carries an explicit [`egui::epaint::text::VariationCoords`]
+//! instance still carries an explicit [`VariationCoords`]
 //! override — see the private `weighted_instance` helper's doc for why the
 //! default alone is not enough.
 //!

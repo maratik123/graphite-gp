@@ -85,7 +85,7 @@ pub enum IconError {
     },
 }
 
-/// Bakes SVG source bytes into an [`egui::ColorImage`], Context-free and
+/// Bakes SVG source bytes into an [`ColorImage`], Context-free and
 /// GPU-free (the CPU half of the pipeline — the AC5 unit tests drive this
 /// directly).
 ///
@@ -140,7 +140,7 @@ pub fn svg_to_color_image(svg: &[u8], logical_px: f32, ppp: f32) -> Result<Color
     ))
 }
 
-/// Bakes SVG source bytes into a cached [`egui::TextureHandle`] (AC1): the
+/// Bakes SVG source bytes into a cached [`TextureHandle`] (AC1): the
 /// public, `Context`-touching surface wrapping [`svg_to_color_image`].
 ///
 /// `name` becomes the texture's registration key (and `ctx.load_texture`'s
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(image.size, [36, 36]);
         assert!(!image.pixels.is_empty(), "baked ColorImage had no pixels");
 
-        let alpha_values: HashSet<u8> = image.pixels.iter().map(egui::Color32::a).collect();
+        let alpha_values: HashSet<u8> = image.pixels.iter().map(Color32::a).collect();
         assert!(
             alpha_values.len() > 1,
             "expected varying alpha (opaque strokes over a transparent \
