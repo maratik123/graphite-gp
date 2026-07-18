@@ -146,7 +146,7 @@ impl<'a> Card<'a> {
     ///
     /// `right` and the body `children` are NOT drawn here — they are
     /// interactive `egui` content, handled by [`Self::show`] alone; `paint`
-    /// only draws what a plain [`egui::Painter`] can express, so the AC8
+    /// only draws what a plain [`Painter`] can express, so the AC8
     /// gallery can force any state through this layer directly.
     ///
     /// # Panics

@@ -232,9 +232,7 @@ impl<'a> Tag<'a> {
         let remove_response = self
             .show_remove
             .then(|| ui.interact(remove_rect, response.id.with("remove"), Sense::click()));
-        let remove_hovered = remove_response
-            .as_ref()
-            .is_some_and(egui::Response::hovered);
+        let remove_hovered = remove_response.as_ref().is_some_and(Response::hovered);
         let remove_clicked = remove_response.is_some_and(|r| r.clicked());
 
         if ui.is_rect_visible(rect) {
