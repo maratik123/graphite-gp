@@ -138,8 +138,9 @@ mod tests {
         BG_GRID_RULING_WIDTH, DUR_FAST, DUR_MED, DUR_SLOW, EASE_IN, EASE_OUT, EASE_STANDARD,
         FOCUS_SHADOW, SHADOW_0, SHADOW_1, SHADOW_2, SHADOW_3, SHADOW_INSET, SHADOW_POP,
     };
+    use crate::test_util::assert_f32;
     use crate::tokens::color::{GRID_DOT, GRID_LINE};
-    use crate::tokens::css::{assert_cubic_bezier, assert_f32, value_of};
+    use crate::tokens::css::{assert_cubic_bezier, value_of};
     use egui::Shadow;
     use std::time::Duration;
 

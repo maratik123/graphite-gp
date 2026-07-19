@@ -16,6 +16,8 @@ use gp_core::track::TrackArtifact;
 pub mod fonts;
 pub mod icons;
 pub mod placeholder;
+#[cfg(test)]
+mod test_util;
 pub mod tokens;
 pub mod track;
 pub mod widgets;

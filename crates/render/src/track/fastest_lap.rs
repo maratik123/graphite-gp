@@ -130,7 +130,7 @@ pub(crate) fn paint(painter: &Painter, transform: &TrackTransform, fastest_lap: 
 #[cfg(test)]
 mod tests {
     use super::{SEGMENTS_PER_SPAN, catmull_rom, paint};
-    use crate::tokens::css::assert_f32;
+    use crate::test_util::assert_f32;
     use crate::track::test_support::transform_10x10 as transform;
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::Point;

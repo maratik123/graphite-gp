@@ -54,9 +54,11 @@ pub mod typography;
 /// Shared CSS-parsing test infrastructure, used by every token submodule's
 /// `#[cfg(test)] mod tests` (`color`, `spacing`, `typography`, `effects`).
 ///
-/// Hoisted here so there is exactly one copy of the parser and exactly one
-/// `#[allow(clippy::float_cmp)]` site (`assert_f32`) for the whole crate —
-/// see design `2026-07-17-render-design-tokens` § *Remedy*.
+/// Hoisted here so there is exactly one copy of the CSS-token parser
+/// (`value_of`/`assert_token`/`assert_cubic_bezier`/`var_target`) for the
+/// whole crate — see design `2026-07-17-render-design-tokens` § *Remedy*.
+/// The shared `assert_f32`/`assert_f32_slice` helpers (and their single
+/// `#[allow(clippy::float_cmp)]` site) live in `crate::test_util`.
 #[cfg(test)]
 pub(crate) mod css {
     /// The value text between `:` and the terminating `;`, for the declaration of
@@ -89,31 +91,6 @@ pub(crate) mod css {
             .trim()
     }
 
-    /// The ONLY float-comparison site in the crate.
-    ///
-    /// NOTE: must NOT be named `*_eq` / `eq_*` — `clippy::float_cmp` silently skips
-    /// such fns, which would make the `#[allow]` below inert and the suppression
-    /// accidental rather than declared.
-    #[allow(
-        clippy::float_cmp,
-        reason = "CSS text and the const are two spellings of one decimal; Rust's \
-                  float parsing and float literals are both correctly rounded, so \
-                  they yield bit-identical f32 even for values like 1.05 that are \
-                  inexact in binary. Exact equality is the intended contract - an \
-                  epsilon would mask the token drift AC8 exists to catch."
-    )]
-    pub(crate) fn assert_f32(label: &str, got: f32, want: f32) {
-        assert_eq!(got, want, "{label}: CSS value != const");
-    }
-
-    /// Element-wise `f32` comparison, naming the differing index on failure.
-    pub(crate) fn assert_f32_slice(label: &str, got: &[f32], want: &[f32]) {
-        assert_eq!(got.len(), want.len(), "{label}: length mismatch");
-        for (index, (g, w)) in got.iter().zip(want.iter()).enumerate() {
-            assert_f32(&format!("{label}[{index}]"), *g, *w);
-        }
-    }
-
     /// Parses a `px`/`em`/bare-numeric token value out of `css` and compares it
     /// against `want` via `assert_f32`.
     pub(crate) fn assert_token(css: &str, name: &str, want: f32) {
@@ -126,7 +103,7 @@ pub(crate) mod css {
             .trim()
             .parse()
             .unwrap_or_else(|_| panic!("token {name}: unhandled unit in {raw:?}"));
-        assert_f32(name, got, want);
+        crate::test_util::assert_f32(name, got, want);
     }
 
     /// Parses a `cubic-bezier(a, b, c, d)` token value and compares its four
@@ -147,7 +124,7 @@ pub(crate) mod css {
                     .unwrap_or_else(|_| panic!("token {name}: bad control point {p:?}"))
             })
             .collect();
-        assert_f32_slice(name, &got, &want);
+        crate::test_util::assert_f32_slice(name, &got, &want);
     }
 
     /// Extracts the `--x` target name out of a `var(--x)` token value.
@@ -165,18 +142,7 @@ pub(crate) mod css {
     /// the subtask that first consumes them.
     #[cfg(test)]
     mod tests {
-        use super::{assert_cubic_bezier, assert_f32, assert_f32_slice, assert_token, var_target};
-
-        #[test]
-        fn assert_f32_accepts_a_css_parsed_equal_value() {
-            let got: f32 = "1.05".parse().expect("valid float literal");
-            assert_f32("probe", got, 1.05);
-        }
-
-        #[test]
-        fn assert_f32_slice_accepts_equal_arrays() {
-            assert_f32_slice("probe", &[0.2, 0.0, 0.1, 1.0], &[0.2, 0.0, 0.1, 1.0]);
-        }
+        use super::{assert_cubic_bezier, assert_token, var_target};
 
         #[test]
         fn assert_token_parses_px_em_and_bare_numbers() {

@@ -395,17 +395,17 @@ mod tests {
     /// AC7 — size → height for every size.
     #[test]
     fn size_maps_to_control_height() {
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "sm height",
             Button::resolve(Variant::Secondary, Size::Sm, false, false).height,
             spacing::CONTROL_H_SM,
         );
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "md height",
             Button::resolve(Variant::Secondary, Size::Md, false, false).height,
             spacing::CONTROL_H_MD,
         );
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "lg height",
             Button::resolve(Variant::Secondary, Size::Lg, false, false).height,
             spacing::CONTROL_H_LG,

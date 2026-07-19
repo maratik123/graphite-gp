@@ -189,8 +189,8 @@ mod tests {
     use super::super::regions::{self, LoopRoles};
     use super::super::walls;
     use super::{TrackTransform, normalize, paint, ramp_color, speed_bounds};
+    use crate::test_util::assert_f32;
     use crate::tokens::color::{HEAT_0, HEAT_1, HEAT_3, SURFACE_INFIELD};
-    use crate::tokens::css::assert_f32;
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Corridor, Point, walls_from_boundary};
 

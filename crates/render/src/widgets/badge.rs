@@ -236,12 +236,12 @@ mod tests {
     /// AC7 — pill radius is `spacing::RADIUS_PILL` regardless of tone/solid.
     #[test]
     fn resolve_radius_is_always_pill() {
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "Badge::resolve(Neutral, false).radius",
             Badge::resolve(Tone::Neutral, false).radius,
             spacing::RADIUS_PILL,
         );
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "Badge::resolve(Danger, true).radius",
             Badge::resolve(Tone::Danger, true).radius,
             spacing::RADIUS_PILL,

@@ -265,7 +265,7 @@ mod tests {
         let style = Tag::resolve(false);
         assert_eq!(style.bg, color::PAPER_0);
         assert_eq!(style.border, color::BORDER_HAIRLINE);
-        crate::tokens::css::assert_f32("rest border_width", style.border_width, spacing::BW_HAIR);
+        crate::test_util::assert_f32("rest border_width", style.border_width, spacing::BW_HAIR);
     }
 
     /// AC7 — selected: `paper-2` + `bw-1` `border-strong` (the design's
@@ -275,7 +275,7 @@ mod tests {
         let style = Tag::resolve(true);
         assert_eq!(style.bg, color::PAPER_2);
         assert_eq!(style.border, color::BORDER_STRONG);
-        crate::tokens::css::assert_f32("selected border_width", style.border_width, spacing::BW_1);
+        crate::test_util::assert_f32("selected border_width", style.border_width, spacing::BW_1);
     }
 
     /// `fg` is always `text-ink`, regardless of `selected`.

@@ -378,7 +378,7 @@ mod tests {
     fn selected_uses_strong_border() {
         let selected = Card::resolve(true, Elevation::Level1);
         assert_eq!(selected.border, color::BORDER_STRONG);
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "selected border_width",
             selected.border_width,
             spacing::BW_2,
@@ -386,7 +386,7 @@ mod tests {
 
         let rest = Card::resolve(false, Elevation::Level1);
         assert_eq!(rest.border, color::BORDER_HAIRLINE);
-        crate::tokens::css::assert_f32("rest border_width", rest.border_width, spacing::BW_HAIR);
+        crate::test_util::assert_f32("rest border_width", rest.border_width, spacing::BW_HAIR);
     }
 
     /// Fill is always `surface-card`; radius is always `RADIUS_2`.
@@ -396,8 +396,8 @@ mod tests {
         let b = Card::resolve(true, Elevation::Level3);
         assert_eq!(a.fill, color::SURFACE_CARD);
         assert_eq!(b.fill, color::SURFACE_CARD);
-        crate::tokens::css::assert_f32("radius a", a.radius, spacing::RADIUS_2);
-        crate::tokens::css::assert_f32("radius b", b.radius, spacing::RADIUS_2);
+        crate::test_util::assert_f32("radius a", a.radius, spacing::RADIUS_2);
+        crate::test_util::assert_f32("radius b", b.radius, spacing::RADIUS_2);
     }
 
     /// `Elevation::default()` is `Level1` (design: "default 1").
@@ -416,6 +416,6 @@ mod tests {
         assert!(!card.grid);
         assert!(!card.selected);
         assert_eq!(card.elevation, Elevation::Level1);
-        crate::tokens::css::assert_f32("default padding", card.padding, spacing::SPACE_5);
+        crate::test_util::assert_f32("default padding", card.padding, spacing::SPACE_5);
     }
 }

@@ -341,7 +341,7 @@ mod tests {
 
     /// Tolerant `f32` compare — a computed snap result is not bit-identical
     /// to a decimal literal for every input (design § Test Design), so this
-    /// is used instead of `crate::tokens::css::assert_f32`'s exact compare.
+    /// is used instead of `crate::test_util::assert_f32`'s exact compare.
     fn assert_close(label: &str, got: f32, want: f32) {
         assert!(
             (got - want).abs() < 1e-5,
@@ -358,9 +358,9 @@ mod tests {
         assert_eq!(style.thumb_fill, color::PAPER_0);
         assert_eq!(style.thumb_ring, color::GRAPHITE_900);
         assert_eq!(style.thumb_shadow, effects::SHADOW_1);
-        crate::tokens::css::assert_f32("track_h", style.track_h, 4.0);
-        crate::tokens::css::assert_f32("thumb_d", style.thumb_d, 18.0);
-        crate::tokens::css::assert_f32("radius", style.radius, spacing::RADIUS_PILL);
+        crate::test_util::assert_f32("track_h", style.track_h, 4.0);
+        crate::test_util::assert_f32("thumb_d", style.thumb_d, 18.0);
+        crate::test_util::assert_f32("radius", style.radius, spacing::RADIUS_PILL);
     }
 
     /// AC1 — fractional-step snapping, incl. the ULP case.
@@ -407,9 +407,9 @@ mod tests {
     #[test]
     fn new_has_expected_defaults() {
         let slider = Slider::new(50.0);
-        crate::tokens::css::assert_f32("min", slider.min, 0.0);
-        crate::tokens::css::assert_f32("max", slider.max, 100.0);
-        crate::tokens::css::assert_f32("step", slider.step, 1.0);
+        crate::test_util::assert_f32("min", slider.min, 0.0);
+        crate::test_util::assert_f32("max", slider.max, 100.0);
+        crate::test_util::assert_f32("step", slider.step, 1.0);
         assert!(slider.label.is_none());
         assert!(slider.show_value);
         assert!(slider.enabled);

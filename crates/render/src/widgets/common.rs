@@ -127,6 +127,6 @@ mod tests {
     /// Design, `common.rs` unit test) as a tested contract, not a comment.
     #[test]
     fn forms_disabled_opacity_is_half() {
-        crate::tokens::css::assert_f32("FORMS_DISABLED_OPACITY", FORMS_DISABLED_OPACITY, 0.5);
+        crate::test_util::assert_f32("FORMS_DISABLED_OPACITY", FORMS_DISABLED_OPACITY, 0.5);
     }
 }
