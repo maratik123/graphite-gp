@@ -32,6 +32,14 @@ Mechanically enforced by `clippy::arithmetic_side_effects = "deny"` (workspace-w
 ## Magic numbers
 Semantic numeric literals → module-level `const SCREAMING_SNAKE_CASE`. Self-evident constants (`0`, `1`, `-1`, `2`) and test fixtures exempt.
 
+## Golden-image thresholds
+Golden snapshot tests (`egui_kittest`) pick their compare tolerance by **content class**, not by copy-paste from a sibling golden:
+
+- **Text-bearing goldens** — anything that renders glyphs, labels, numerals, or icons (arrows, sublabels) — use the crate's established **measured** text threshold `.threshold(1.0).failed_pixel_count_threshold(0)`. Cross-renderer AA / font rounding gives 1-level channel deltas on text pixels that exact compare (`threshold(0.0)`) fails in CI while passing local mint. In-tree precedent (all four text goldens): `widget_gallery` (`gallery.rs`), `forms_gallery`, `game_gallery`, `movepad_gallery`.
+- **Flat / byte-stable goldens** — solid fills, no text (e.g. `placeholder`) — stay exact `.threshold(0.0).failed_pixel_count_threshold(0)`. In-tree precedent: `placeholder` (`placeholder.rs`).
+
+`failed_pixel_count_threshold(0)` stays exact in both classes — the colour `threshold` is the sole absorbing lever. Do **not** adopt a "mint at 0.0, bump to 1.0 only if CI reds" strategy for a text golden: it knowingly schedules a wasted red-CI round on a question the precedent has already answered. `image-check` cannot catch a wrong threshold — it owns presence / shape / colour / position and explicitly disclaims AA / rounding, which the golden's exact compare owns.
+
 ## Error types
 `thiserror` for new error enum/struct; hand-rolled `Display`/`Error` only where the derive cannot express it.
 
