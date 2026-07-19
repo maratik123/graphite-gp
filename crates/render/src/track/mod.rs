@@ -10,6 +10,7 @@ mod car;
 mod fastest_lap;
 #[cfg(test)]
 mod golden;
+mod grid;
 mod heatmap;
 mod regions;
 mod sf;
@@ -23,11 +24,10 @@ use crate::Overlays;
 use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
 
-/// The documented back-to-front draw order (AC5/AC9): `outfield → asphalt →
-/// infield → heatmap → walls → fastest_lap → S/F → cars`. [`draw_frame`]
-/// follows this order exactly; `layer_order_is_documented` pins the list
-/// itself as a tested contract (subtask 3 extends this further to the final
-/// 9-entry list).
+/// The documented back-to-front draw order (AC5/AC9, final): `outfield →
+/// asphalt → infield → heatmap → grid → walls → fastest_lap → S/F → cars`.
+/// [`draw_frame`] follows this order exactly; `layer_order_is_documented`
+/// pins the list itself as a tested contract.
 #[cfg_attr(
     not(test),
     allow(
@@ -36,11 +36,12 @@ use gp_core::track::TrackArtifact;
                   contract (AC9) rather than a value draw_frame reads at runtime"
     )
 )]
-pub(crate) const LAYER_ORDER: [&str; 8] = [
+pub(crate) const LAYER_ORDER: [&str; 9] = [
     "outfield",
     "asphalt",
     "infield",
     "heatmap",
+    "grid",
     "walls",
     "fastest_lap",
     "sf",
@@ -50,10 +51,12 @@ pub(crate) const LAYER_ORDER: [&str; 8] = [
 /// Draws one frame of the track canvas (design doc §4) into `rect`, back to
 /// front per [`LAYER_ORDER`]: the three regions (`regions::fill` — outfield,
 /// asphalt, infield in that order), the `speed_heatmap` analytics overlay
-/// (layer 1b, over the asphalt, design § Key decisions 1), the
-/// Chaikin-smoothed, M6-guarded walls, the `fastest_lap` analytics overlay
-/// (layer 5, over the walls, design § Key decisions 3), the checkered S/F
-/// chord, then every car (trail, dot, velocity arrow, optional "you" ring).
+/// (layer 1b, over the asphalt, design § Key decisions 1), the notebook-
+/// sheet `grid` overlay (layer 4, over the regions, design § Key decisions
+/// 4), the Chaikin-smoothed, M6-guarded walls, the `fastest_lap` analytics
+/// overlay (layer 5, over the walls, design § Key decisions 3), the
+/// checkered S/F chord, then every car (trail, dot, velocity arrow,
+/// optional "you" ring).
 ///
 /// `overlays` drives which analytics/grid layers are drawn (design § Key
 /// decisions) — each flag adds or removes exactly its own layer's shapes;
@@ -84,6 +87,10 @@ pub(crate) fn draw_frame(
         heatmap::paint(painter, &transform, &track.metrics.speed_heatmap);
     }
 
+    if overlays.grid {
+        grid::paint(painter, rect, &transform);
+    }
+
     walls::paint(painter, &transform, &smoothed_loops);
 
     if overlays.fastest_lap {
@@ -107,9 +114,9 @@ mod tests {
     use gp_core::sim::CarState;
     use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
 
-    /// AC5/AC9 — the documented back-to-front layer order is exactly
-    /// `outfield → asphalt → infield → heatmap → walls → fastest_lap → sf →
-    /// cars` (subtask 3 extends this further to the final 9-entry list).
+    /// AC5/AC9 — the documented back-to-front layer order is exactly (final,
+    /// 9-entry list) `outfield → asphalt → infield → heatmap → grid → walls
+    /// → fastest_lap → sf → cars`.
     #[test]
     fn layer_order_is_documented() {
         assert_eq!(
@@ -119,6 +126,7 @@ mod tests {
                 "asphalt",
                 "infield",
                 "heatmap",
+                "grid",
                 "walls",
                 "fastest_lap",
                 "sf",
@@ -210,24 +218,9 @@ mod tests {
         assert_ne!(shapes, "[]", "render_frame produced no shapes");
     }
 
-    /// AC9 — every `Overlays` flag is inert: turning them all on produces
-    /// byte-identical drawn shapes to the default (all-off) frame, since
-    /// layers 4/5 (grid, analytics) are deferred (Q2).
-    #[test]
-    fn overlays_are_inert() {
-        let track = fixture_track();
-        let cars: [CarRender<'_>; 0] = [];
-        let default_shapes = render_shapes(&track, &cars, false, Overlays::default());
-        let all_on_shapes = render_shapes(
-            &track,
-            &cars,
-            false,
-            Overlays {
-                speed_heatmap: true,
-                fastest_lap: true,
-                grid: true,
-            },
-        );
-        assert_eq!(default_shapes, all_on_shapes);
-    }
+    // `overlays_are_inert` (AC9, #17) is retired here (AC5): the `grid`
+    // overlay wired in subtask 3 draws unconditionally on metrics, so
+    // turning every flag on is no longer byte-identical to all-off. Subtask
+    // 4 replaces this with the full per-overlay difference/no-op/pure-visual
+    // suite (design § Test Design, subtask 4).
 }
