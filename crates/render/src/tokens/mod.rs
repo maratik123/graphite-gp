@@ -61,48 +61,68 @@ pub mod typography;
 /// `#[allow(clippy::float_cmp)]` site) live in `crate::test_util`.
 #[cfg(test)]
 pub(crate) mod css {
-    /// The value text between `:` and the terminating `;`, for the declaration of
-    /// `name` that starts a line (finding 6 + the prefix-collision clause).
+    use cssparser::{Delimiter, Parser, ParserInput, Token};
+
+    /// Recursively walks `parser`'s token stream — descending into any
+    /// block (`:root { … }` in the real files) — and records the raw value
+    /// text of the first declaration named `name` into `found`.
     ///
-    /// Anchored by SEARCHING the occurrences, not by taking the first: `--bg-grid`
-    /// occurs in comment prose at `effects.css:27` before its real declaration at
-    /// line 29, so a `split_once` anchor binds to the comment and dies. Deliberately
-    /// free of index arithmetic — `clippy::arithmetic_side_effects` is a workspace
-    /// `deny` and fires on the `colon + 1` spelling of this same function.
+    /// Always drains the level it is called on to completion: `Parser::
+    /// parse_nested_block` requires its closure to consume the whole block
+    /// (it errors otherwise), so an early `return` on first match is not an
+    /// option — this loops to the end and just skips writing `found` again
+    /// once it is `Some`. Being a real CSS tokenizer rather than a text
+    /// search, it treats `--bg-grid` inside a comment as trivia (not a
+    /// false match) and separates `--cell` from `--cell-sm` by ident
+    /// boundary rather than by hand.
+    fn scan_declarations<'a>(parser: &mut Parser<'a, '_>, name: &str, found: &mut Option<&'a str>) {
+        loop {
+            let Ok(token) = parser.next().cloned() else {
+                return;
+            };
+            match token {
+                Token::CurlyBracketBlock => {
+                    let _ = parser.parse_nested_block(|input| {
+                        scan_declarations(input, name, found);
+                        Ok::<(), cssparser::ParseError<'a, ()>>(())
+                    });
+                }
+                Token::Ident(ident) if found.is_none() && ident.as_ref() == name => {
+                    if parser.expect_colon().is_err() {
+                        continue;
+                    }
+                    let start = parser.state();
+                    let _ = parser.parse_until_before(Delimiter::Semicolon, |input| {
+                        while input.next().is_ok() {}
+                        Ok::<(), cssparser::ParseError<'a, ()>>(())
+                    });
+                    *found = Some(parser.slice_from(start.position()).trim());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The value text between `:` and the terminating `;`, for the declaration of
+    /// `name`, parsed via a real CSS tokenizer rather than a text search.
     pub(crate) fn value_of<'a>(css: &'a str, name: &str) -> &'a str {
-        let rest = css
-            .match_indices(name)
-            .find_map(|(idx, _)| {
-                let (before, at) = css.split_at(idx);
-                let after = at.strip_prefix(name)?;
-                // Rule 1b: the next non-space char must be `:` — `--cell` vs `--cell-sm`.
-                let value = after.trim_start().strip_prefix(':')?;
-                // Rule 1a: the declaration must start a line.
-                before
-                    .lines()
-                    .next_back()
-                    .is_none_or(|l| l.trim().is_empty())
-                    .then_some(value)
-            })
-            .unwrap_or_else(|| panic!("token {name}: no declaration starts a line"));
-        rest.split_once(';')
-            .unwrap_or_else(|| panic!("token {name}: value has no terminating ';'"))
-            .0
-            .trim()
+        let mut input = ParserInput::new(css);
+        let mut parser = Parser::new(&mut input);
+        let mut found = None;
+        scan_declarations(&mut parser, name, &mut found);
+        found.unwrap_or_else(|| panic!("token {name}: no matching declaration"))
     }
 
     /// Parses a `px`/`em`/bare-numeric token value out of `css` and compares it
     /// against `want` via `assert_f32`.
     pub(crate) fn assert_token(css: &str, name: &str, want: f32) {
         let raw = value_of(css, name);
-        let numeric = raw
-            .strip_suffix("px")
-            .or_else(|| raw.strip_suffix("em"))
-            .unwrap_or(raw);
-        let got: f32 = numeric
-            .trim()
-            .parse()
-            .unwrap_or_else(|_| panic!("token {name}: unhandled unit in {raw:?}"));
+        let mut input = ParserInput::new(raw);
+        let mut parser = Parser::new(&mut input);
+        let got = match parser.next() {
+            Ok(&Token::Dimension { value, .. } | &Token::Number { value, .. }) => value,
+            other => panic!("token {name}: unhandled unit in {raw:?} ({other:?})"),
+        };
         crate::test_util::assert_f32(name, got, want);
     }
 
@@ -142,18 +162,32 @@ pub(crate) mod css {
     /// the subtask that first consumes them.
     #[cfg(test)]
     mod tests {
-        use super::{assert_cubic_bezier, assert_token, var_target};
+        use super::{assert_cubic_bezier, assert_token, value_of, var_target};
 
         #[test]
         fn assert_token_parses_px_em_and_bare_numbers() {
-            // Indented like the real CSS files: `value_of`'s "starts a line"
-            // rule checks that only whitespace precedes the match on its own
-            // line, which a column-0 fixture (no indentation at all) cannot
-            // exercise the same way the real, indented CSS does.
             const CSS: &str = "  --a: 24px;\n  --b: -0.02em;\n  --c: 700;\n";
             assert_token(CSS, "--a", 24.0);
             assert_token(CSS, "--b", -0.02);
             assert_token(CSS, "--c", 700.0);
+        }
+
+        /// `--cell` must not match the `--cell-sm` declaration (or vice
+        /// versa) — the tokenizer's ident boundary must separate them.
+        #[test]
+        fn value_of_does_not_match_a_prefix() {
+            const CSS: &str = "  --cell: 24px;\n  --cell-sm: 16px;\n";
+            assert_eq!(value_of(CSS, "--cell"), "24px");
+            assert_eq!(value_of(CSS, "--cell-sm"), "16px");
+        }
+
+        /// A `--x` declaration mentioned inside a comment, before its real
+        /// declaration, must not be picked up as a false match — mirrors
+        /// `effects.css`'s `--bg-grid` usage note preceding its declaration.
+        #[test]
+        fn value_of_ignores_comment_mentions() {
+            const CSS: &str = "  /* see --token below */\n  --token: 1px;\n";
+            assert_eq!(value_of(CSS, "--token"), "1px");
         }
 
         #[test]
