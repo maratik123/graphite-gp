@@ -21,6 +21,8 @@ pub mod tokens;
 pub mod track;
 pub mod widgets;
 
+pub use track::CarRender;
+
 /// Optional analytics overlays (design doc §4).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Overlays {
