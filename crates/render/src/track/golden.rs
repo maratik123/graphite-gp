@@ -23,32 +23,34 @@ const CANVAS_RECT: Rect = Rect {
     max: Pos2::new(320.0, 320.0),
 };
 
-/// A hand-built 3×3-ring `TrackArtifact` (the same shape as this crate's
-/// unit-test fixtures) over a 5×5 bbox, with a 3-cell S/F chord across the
-/// ring's top row. Every field `draw_frame` does not read stays at its
-/// cheapest valid default.
+/// Amendment — widened golden fixture (PR #100): a hand-built chunky
+/// rounded-rect corridor `TrackArtifact` over a 16×16 bbox — the outer block
+/// `x∈[2,13] × y∈[2,13]` minus a centered hole `x∈[6,9] × y∈[6,9]`, a thick
+/// loop with 4-cell-wide arms. The S/F chord is a `Vertical` column across
+/// the bottom straight (thin in x = racing direction), matching `Track.jsx`'s
+/// cross-track checkered bar. Every field `draw_frame` does not read stays at
+/// its cheapest valid default.
 fn scene_track() -> TrackArtifact {
-    let cells: Vec<(i32, i32)> = [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 2),
-        (3, 2),
-        (1, 3),
-        (2, 3),
-        (3, 3),
-    ]
-    .to_vec();
-    let mut corridor = Corridor::new(Point::new(0, 0), 5, 5);
-    for (x, y) in cells {
-        corridor.set(Point::new(x, y), true);
+    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
+    for x in 2..=13 {
+        for y in 2..=13 {
+            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
+            if !in_hole {
+                corridor.set(Point::new(x, y), true);
+            }
+        }
     }
     let walls = walls_from_boundary(&corridor);
     TrackArtifact {
         walls,
         sf: StartFinish {
-            chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
-            orient: Orient::Horizontal,
+            chord: vec![
+                Point::new(7, 2),
+                Point::new(7, 3),
+                Point::new(7, 4),
+                Point::new(7, 5),
+            ],
+            orient: Orient::Vertical,
             gate: TimingGate {
                 behind: vec![],
                 forward: Side::East,
@@ -64,19 +66,20 @@ fn scene_track() -> TrackArtifact {
 }
 
 /// Draws the full scene into `rect` via the public `render_frame` entry
-/// point: the ring track plus two cars — a moving, trailed "you" car (mid
-/// move-animation, drawing the dashed ring + velocity arrow) and a
-/// stationary rival (no arrow, matching `Track.jsx:95`'s guard).
+/// point: the widened corridor plus two cars — a moving, trailed "you" car
+/// near the S/F on the bottom straight (mid move-animation, drawing the
+/// dashed ring + velocity arrow) and a stationary rival parked on another arm
+/// (no arrow, matching `Track.jsx:95`'s guard).
 fn draw_scene(painter: &Painter, rect: Rect) {
     let track = scene_track();
-    let you_trail = [Point::new(1, 1), Point::new(2, 1)];
+    let you_trail = [Point::new(2, 3), Point::new(3, 3)];
     let rival_trail: [Point; 0] = [];
     let cars = [
         CarRender::new(
             CarState {
-                x: 2,
-                y: 1,
-                vx: 1,
+                x: 4,
+                y: 3,
+                vx: 2,
                 vy: 0,
             },
             0,
@@ -86,8 +89,8 @@ fn draw_scene(painter: &Painter, rect: Rect) {
         ),
         CarRender::new(
             CarState {
-                x: 3,
-                y: 3,
+                x: 11,
+                y: 7,
                 vx: 0,
                 vy: 0,
             },

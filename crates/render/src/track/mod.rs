@@ -35,7 +35,7 @@ use gp_core::track::TrackArtifact;
 pub(crate) const LAYER_ORDER: [&str; 6] = ["outfield", "asphalt", "infield", "walls", "sf", "cars"];
 
 /// Draws one frame of the track canvas (design doc §4) into `rect`, back to
-/// front per [`LAYER_ORDER`]: the three regions (`regions::paint` — outfield,
+/// front per [`LAYER_ORDER`]: the three regions (`regions::fill` — outfield,
 /// asphalt, infield in that order), the Chaikin-smoothed, M6-guarded walls,
 /// the checkered S/F chord, then every car (trail, dot, velocity arrow,
 /// optional "you" ring).
@@ -53,18 +53,21 @@ pub(crate) fn draw_frame(
 ) {
     let transform = TrackTransform::new(&track.corridor, rect);
 
-    let region_cells = regions::classify(&track.corridor);
-    regions::paint(painter, rect, &transform, &region_cells);
-
     let wall_loops = walls::chain_walls(&track.walls);
     let smoothed_loops: Vec<Vec<(f32, f32)>> = wall_loops
         .iter()
         .map(|loop_corners| walls::chaikin_smooth(&track.corridor, loop_corners))
         .collect();
+
+    // Amendment — Rounded track (PR #100): fill and stroke share the exact
+    // same smoothed loops, so they cannot disagree at a corner by
+    // construction (design § Decision, "Boundary reuse").
+    let loop_roles = regions::classify_loops(&smoothed_loops);
+    regions::fill(painter, rect, &transform, &smoothed_loops, &loop_roles);
     walls::paint(painter, &transform, &smoothed_loops);
 
     let checker = sf::checker_cells(&track.sf.chord);
-    sf::paint(painter, &transform, &checker);
+    sf::paint(painter, &transform, &checker, track.sf.orient);
 
     for render in cars {
         car::paint(painter, &transform, render, render.progress, reduced_motion);

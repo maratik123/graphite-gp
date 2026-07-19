@@ -17,8 +17,11 @@ Layers to draw (back to front, design doc §4):
 
 1. **Regions.** Outfield = paper background (`SURFACE_PAGE`/`PAPER_1`); infield
    (the bounded ¬D hole, so the loop reads) in a distinct tint
-   (`SURFACE_INFIELD`/`PAPER_2`); asphalt = union of unit cells over the points
-   of `D` (`TrackArtifact.corridor`), filled `SURFACE_ASPHALT`/`ASPHALT_1`.
+   (`SURFACE_INFIELD`/`PAPER_2`); asphalt covers exactly the cells of `D`
+   (`TrackArtifact.corridor`), filled `SURFACE_ASPHALT`/`ASPHALT_1`. The asphalt
+   outer boundary and the infield hole are filled to the **same Chaikin-smoothed
+   boundary the walls trace** (see Q1 / AC7), not to raw axis-aligned unit
+   squares — so fill and outline agree at every corner (rounded track).
 2. **Walls.** The fill boundary of `D` on the half-grid (`TrackArtifact.walls`,
    from `gp_core::geom::walls_from_boundary`), stroked `WALL` — never through a
    point.
@@ -33,11 +36,15 @@ Layers to draw (back to front, design doc §4):
    `(x,y)→(x+vx,y+vy)`; `supercover` has already certified the chord ⊆ `D`
    (design doc §4). Reduced-motion respected (snap to final, no slide).
 
-**Cosmetic Chaikin wall smoothing is in scope (Q1).** Walls stay the fill
-boundary of `D` on the half-grid; the smoothing is purely cosmetic and, per M6
-(design doc §4), must stay within the half-cell gap — never cross an integer
-point, never enter a grazeable cell, never change the drivable set `D`. The
-smoothing geometry ships with an M6 guard and tests (see Acceptance Criteria).
+**Cosmetic Chaikin smoothing is in scope (Q1), shaping both the wall stroke and
+the region fills.** The smoothing produces *one* boundary: the walls stroke it
+and the asphalt/infield fills are filled to it, so fill and outline agree at
+every corner (the "rounded track" fix). Walls stay the fill boundary of `D` on
+the half-grid; the smoothing is purely cosmetic and, per M6 (design doc §4),
+must stay within the half-cell gap — never cross an integer point, never enter a
+grazeable cell, never change the drivable set `D` (the covered cell set still
+equals `D`). The smoothing geometry ships with an M6 guard and tests (see
+Acceptance Criteria).
 
 ## Out of scope
 
@@ -70,11 +77,12 @@ smoothing geometry ships with an M6 guard and tests (see Acceptance Criteria).
 |---|---|
 | Entry point | `render_frame` stops being `todo!()` and draws layers 1,2,3,6 back-to-front. Its signature may evolve (AGENTS.md: clean breaks, no API-stability contract) — exact shape is the `design` Subagent's call. |
 | Coordinate mapping | Map the corridor bounding box (`Corridor::origin`/`width`/`height`) into the painter's target rect (`painter.clip_rect()`), preserving aspect ratio. Lattice `y` increases northward (`Point`), egui screen `y` increases downward → the transform flips `y`. Cell size derived from the fit. |
-| Asphalt = `D` | Draw one unit square (±0.5 cell) centered on each drivable point, or an equivalent traced fill, so the rendered asphalt cell set equals `D` exactly (testable). |
+| Asphalt = `D` | Asphalt covers exactly the cell set `D` (testable: rendered asphalt cell set equals `D`), but is filled to the Chaikin-smoothed boundary the walls trace — **not** raw unit squares. The smoothing is sub-cell (within the half-cell gap), so which cells are covered is unchanged. See the *Rounded track (PR #100)* row. |
 | Infield derivation | Outfield = ¬D cells reachable from the bbox border; infield = the remaining bounded ¬D component(s). Computed in `gp-render` from existing `gp-core` primitives (flood/complement), no `gp-core` change unless `design` finds it cleaner. |
 | Car render input | `CarState` (`x,y,vx,vy`) carries no color/trail/identity. Extend the per-car render input (a render-facing struct: state + palette index/color + trail positions + "you" flag + animation progress). Caller (`gp-game`) supplies trail history and the animation clock; `gp-render` does **not** buffer history (draw-only). Exact struct shape → `design`. |
 | Move-animation ownership | `gp-render` provides pure interpolation-at-progress drawing (`pos = lerp((x,y),(x+vx,y+vy),t)`, linear); the clock + reduced-motion decision come from the caller. Reduced-motion = progress snapped to final. |
-| Wall smoothing (M6) | **Q1 → Chaikin now.** Implement cosmetic Chaikin smoothing this task, guarded so smoothed vertices stay within the half-cell gap and never enter a grazeable cell (M6), never altering `D`. Walls remain the fill boundary on the half-grid, never through an integer point. Ships with smoothing geometry + M6 guard tests. |
+| Wall smoothing (M6) | **Q1 → Chaikin now.** Implement cosmetic Chaikin smoothing this task, guarded so smoothed vertices stay within the half-cell gap and never enter a grazeable cell (M6), never altering `D`. The **same** smoothed boundary shapes both the wall stroke and the region fills (asphalt outer boundary + infield hole) — one boundary, so fill and outline agree at every corner. Walls remain the fill boundary on the half-grid, never through an integer point. Ships with smoothing geometry + M6 guard tests. |
+| Rounded track (PR #100) | **Amendment (PR-review).** First implementation filled asphalt/infield as raw axis-aligned unit squares (sharp corners) while walls were Chaikin-smoothed (beveled corners), so fill and outline disagreed at every corner — cream notches on the outer ring, hatched slivers at the infield-hole corners. Fix: region fills follow the **same** smoothed boundary the walls trace (fill-follows-smoothed-boundary). Touches AC1 + AC7 only; all other ACs unchanged; golden (AC8) re-minted. |
 | Layers 4 & 5 | **Q2 → defer both.** Ship layers 1,2,3,6 only. Grid (layer 4) + analytics overlays (layer 5) are a later task. Do **not** wire the existing `Overlays { speed_heatmap, fastest_lap, grid }` flags to real rendering — keep them inert / no-op. Carry the Track.jsx grid-through-asphalt clip note into the follow-up. |
 
 ## Technical constraints
@@ -102,13 +110,13 @@ smoothing geometry ships with an M6 guard and tests (see Acceptance Criteria).
 
 | # | Criterion |
 |---|-----------|
-| AC1 | Asphalt renders as the union of unit cells over exactly `TrackArtifact.corridor`; a geometry unit test asserts the rendered asphalt cell set equals `D`. |
+| AC1 | Asphalt covers exactly the cell set `D` (`TrackArtifact.corridor`) — the drivable/covered cells are unchanged — but is filled to the cosmetically-rounded (Chaikin-smoothed) boundary the walls trace, **not** to raw axis-aligned unit squares. The smoothing is sub-cell (within the half-cell gap), so which cells are covered is unchanged; a geometry unit test asserts the rendered asphalt cell set still equals `D`. |
 | AC2 | Infield (bounded ¬D hole) renders in `SURFACE_INFIELD`; outfield renders as `PAPER_1` paper background — visibly distinct from asphalt and each other. |
 | AC3 | Walls render as the half-grid fill boundary of `D` (from `TrackArtifact.walls`); a geometry unit test asserts no wall segment/vertex coincides with any integer lattice point. |
 | AC4 | S/F renders in its distinct dashed/checkered style along `TrackArtifact.sf.chord`. |
 | AC5 | Cars render as `GRAPHITE_900`-outlined colored points, each with a velocity-vector arrow whose drawn direction and length match `(vx, vy)` (length ∝ speed), plus a fading trail; a unit test asserts the rendered vector matches `(vx, vy)`. |
 | AC6 | Move animation places a car at `lerp((x,y),(x+vx,y+vy),t)` for progress `t∈[0,1]` (linear easing); a unit test asserts the interpolation at representative `t`. Reduced-motion snaps to the final position with no intermediate slide. |
-| AC7 | Cosmetic Chaikin wall smoothing is applied to the wall polylines and, per M6, smoothed vertices stay within the half-cell gap (±0.5 cell of the block boundary) and never enter a grazeable cell; a geometry unit test asserts both bounds and that the smoothing does not change `D`. |
+| AC7 | Cosmetic Chaikin smoothing produces **one** boundary shared by the wall stroke and the region fills (asphalt outer boundary + infield hole): the asphalt/infield fills are filled to the same smoothed boundary the walls trace, so fill and outline agree at every corner — the fill never extends past the wall and the wall never sits off the fill edge. Per M6, smoothed vertices stay within the half-cell gap (±0.5 cell of the block boundary), never enter a grazeable cell, and never change `D` (the covered cell set still equals `D`); a geometry unit test asserts both bounds, the shared boundary, and that smoothing does not change `D`. |
 | AC8 | A wgpu golden snapshot test (`egui_kittest`, `#[cfg_attr(miri, ignore)]`) captures the back-to-front region/layer order (outfield → asphalt → infield → walls → S/F → cars). |
 | AC9 | `render_frame` is no longer `todo!()` and draws layers 1,2,3,6 back-to-front (grid/analytics layers 4,5 deferred — the `Overlays` flags stay inert / no-op this task). `gp-render` stays draw-only; per-car render input (color/identity, trail, animation progress, you-flag) is caller-supplied. |
 | AC10 | Gates green: `cargo fmt --check`, `cargo clippy --workspace --all-targets -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc`, `cargo test`, and workspace Miri (FFI/wgpu tests gated). |
