@@ -71,7 +71,7 @@ a private `paint` layer, and a public `show(ui) -> Response` interaction shell; 
 `gp_render::widgets` adds Slider, Switch, SegmentedControl, and Stepper (their
 value logic — snap/clamp, toggle, single-selection, bound-clamp — in the pure
 `resolve`/value-logic layer and unit-tested; a second `forms_gallery` wgpu golden
-covers their state matrix), leaving **#15–#16** as the remaining component units. The
+covers their state matrix). The **game HUD widgets (#15)** are now landed on the identical three-layer pattern — `gp_render::widgets` adds Telemetry (a mono metric readout with tone/size and an `on_ink` render mode for the graphite HUD strip), LapMeter (lap/total progress cells), and CarChip (a car-ramp standings token with rank/kind/active), plus a third `game_gallery` wgpu golden matching the design-system HUD specimen — leaving **#16** as the last remaining component unit. The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
@@ -112,7 +112,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 193 workspace tests green (98 gp-core; 91 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline, core widgets + forms widgets + gallery goldens; 2 gp-gen; 2 doc-tests)
+cargo test             # 211 workspace tests green (98 gp-core; 109 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline, core widgets + forms widgets + game HUD widgets + gallery goldens; 2 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
