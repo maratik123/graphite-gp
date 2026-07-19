@@ -1,7 +1,16 @@
 //! Speed heatmap layer (design doc §4, layer 1b — analytics overlay):
 //! colors each cell in `metrics.speed_heatmap` by its per-cell max speed on
-//! the `HEAT_0` (slowest) → `HEAT_3` (fastest) ramp, drawn as a
-//! semi-transparent per-cell square over the asphalt fill.
+//! the `HEAT_0` (slowest) → `HEAT_3` (fastest) ramp.
+//!
+//! **Amendment (2026-07-20, design § Key decisions 1):** the heatmap recolors
+//! the *same* Chaikin-smoothed asphalt mesh [`super::regions::fill`] draws,
+//! per cell, via `Painter::with_clip_rect` — not independent per-cell
+//! squares — so its outer silhouette traces the smoothed boundary exactly
+//! (no more blocky staircase poking past the walls at a corner). The outer
+//! loop is triangulated *once* (`regions::triangulated_loop`) and the shared
+//! index buffer is reused for every cell's `Mesh`; the infield hole(s) are
+//! re-cut on top of the whole per-cell pass (`regions::paint_infield_holes`)
+//! so heatmap color never bleeds into the infield.
 //!
 //! Pure geometry/color core ([`speed_bounds`], [`normalize`],
 //! [`ramp_color`]) plus a thin [`paint`] that maps to screen via
@@ -9,7 +18,8 @@
 //! pattern*).
 
 use super::TrackTransform;
-use egui::{Color32, Painter, Rect};
+use super::regions::{self, LoopRoles};
+use egui::{Color32, Painter, Pos2, Rect};
 use gp_core::geom::Point;
 
 /// Heatmap fill alpha: the opaque `ASPHALT_1` mesh reads ~10% through
@@ -121,29 +131,68 @@ fn cell_rect(transform: &TrackTransform, p: Point) -> Rect {
     Rect::from_two_pos(transform.map(min), transform.map(max))
 }
 
-/// Paints the speed heatmap (design § Key decisions 1): for each `(Point,
-/// i32)` in `heatmap`, fills the cell's full rect in the `ramp_color`
+/// Paints the speed heatmap (design § Key decisions 1, amended 2026-07-20):
+/// triangulates each `roles.outer` loop **once** into a shared
+/// `(verts, indices)` pair, then for each `(Point, i32)` in `heatmap` builds a
+/// per-cell `Mesh` from that same shared pair, colored by the `ramp_color`
 /// mapping its speed's [`normalize`]d position across the observed
-/// `[min, max]`, at [`HEATMAP_ALPHA`]. An empty `heatmap` — or one whose
-/// [`speed_bounds`] is `None` — draws nothing (AC7 no-op).
-pub(crate) fn paint(painter: &Painter, transform: &TrackTransform, heatmap: &[(Point, i32)]) {
+/// `[min, max]` at [`HEATMAP_ALPHA`], clipped to the cell's rect via
+/// `Painter::with_clip_rect` — so the union over all cells is the smoothed
+/// asphalt silhouette, colored per cell, never re-triangulated per cell.
+/// After the full per-cell pass, `roles.holes` is re-cut as a
+/// `SURFACE_INFIELD` mesh (mirrors `regions::fill`'s own asphalt-then-infield
+/// structure) so heatmap color never bleeds into the infield. An empty
+/// `heatmap` — or one whose [`speed_bounds`] is `None` — returns **before**
+/// the infield re-cut, so the empty case stays a true no-op (AC7): zero
+/// shapes, not even the re-cut.
+///
+/// `loops` and `roles` must come from the same `regions::classify_loops` call
+/// `draw_frame` also passes to `regions::fill` (design § Key decisions 1).
+pub(crate) fn paint(
+    painter: &Painter,
+    transform: &TrackTransform,
+    loops: &[Vec<(f32, f32)>],
+    roles: &LoopRoles,
+    heatmap: &[(Point, i32)],
+) {
     let Some((min, max)) = speed_bounds(heatmap) else {
         return;
     };
+
+    let outer_meshes: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = roles
+        .outer
+        .iter()
+        .filter_map(|&idx| loops.get(idx))
+        .map(|loop_points| regions::triangulated_loop(transform, loop_points))
+        .collect();
+
     for &(point, speed) in heatmap {
         let t = normalize(speed, min, max);
         let color = ramp_color(t).gamma_multiply(HEATMAP_ALPHA);
-        painter.rect_filled(cell_rect(transform, point), 0, color);
+        let clip = painter.with_clip_rect(cell_rect(transform, point));
+        for (verts, indices) in &outer_meshes {
+            regions::paint_mesh(&clip, verts, indices, color);
+        }
     }
+
+    regions::paint_infield_holes(
+        painter,
+        transform,
+        loops,
+        roles,
+        crate::tokens::color::SURFACE_INFIELD,
+    );
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::regions::{self, LoopRoles};
+    use super::super::walls;
     use super::{TrackTransform, normalize, paint, ramp_color, speed_bounds};
-    use crate::tokens::color::{HEAT_0, HEAT_1, HEAT_3};
+    use crate::tokens::color::{HEAT_0, HEAT_1, HEAT_3, SURFACE_INFIELD};
     use crate::tokens::css::assert_f32;
     use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Corridor, Point};
+    use gp_core::geom::{Corridor, Point, walls_from_boundary};
 
     /// AC1 — `speed_bounds` of an empty slice is `None`.
     #[test]
@@ -218,14 +267,51 @@ mod tests {
         assert_eq!(ramp_color(2.0), HEAT_3);
     }
 
-    /// Renders `paint` alone into a fresh frame and returns the count of
-    /// emitted `Rect` fill shapes — mirrors `regions.rs`'s
-    /// `fill_emits_asphalt_mesh_then_infield_mesh` capture idiom.
-    fn painted_rect_count(heatmap: &[(Point, i32)]) -> usize {
-        let d = Corridor::new(Point::new(0, 0), 5, 5);
-        let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
-        let transform = TrackTransform::new(&d, rect);
+    /// A 3×3 ring around one hole cell, over a 5×5 bbox — mirrors
+    /// `regions.rs`'s own `ring_3x3` fixture (duplicated here since that
+    /// helper is private to `regions.rs`).
+    fn ring_3x3() -> Corridor {
+        let cells: [(i32, i32); 8] = [
+            (1, 1),
+            (2, 1),
+            (3, 1),
+            (1, 2),
+            (3, 2),
+            (1, 3),
+            (2, 3),
+            (3, 3),
+        ];
+        let mut d = Corridor::new(Point::new(0, 0), 5, 5);
+        for (x, y) in cells {
+            d.set(Point::new(x, y), true);
+        }
+        d
+    }
 
+    /// The ring fixture's chained, Chaikin-smoothed wall loops + outer/hole
+    /// role split — exactly what `draw_frame` computes (`mod.rs`) before
+    /// calling `heatmap::paint`.
+    fn ring_3x3_loops_and_roles() -> (Corridor, Vec<Vec<(f32, f32)>>, LoopRoles) {
+        let d = ring_3x3();
+        let boundary = walls_from_boundary(&d);
+        let loops: Vec<Vec<(f32, f32)>> = walls::chain_walls(&boundary)
+            .iter()
+            .map(|corners| walls::chaikin_smooth(&d, corners))
+            .collect();
+        let roles = regions::classify_loops(&loops);
+        (d, loops, roles)
+    }
+
+    /// Renders `paint` alone into a fresh frame and returns the captured
+    /// `Mesh` shapes — mirrors `regions.rs`'s
+    /// `fill_emits_asphalt_mesh_then_infield_mesh` capture idiom.
+    fn painted_meshes(
+        loops: &[Vec<(f32, f32)>],
+        roles: &LoopRoles,
+        transform: &TrackTransform,
+        rect: Rect,
+        heatmap: &[(Point, i32)],
+    ) -> Vec<std::sync::Arc<egui::Mesh>> {
         let ctx = egui::Context::default();
         let input = egui::RawInput {
             screen_rect: Some(rect),
@@ -233,29 +319,69 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
-            paint(&painter, &transform, heatmap);
+            paint(&painter, transform, loops, roles, heatmap);
         });
         output
             .shapes
             .iter()
-            .filter(|clipped| matches!(clipped.shape, egui::Shape::Rect(_)))
-            .count()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) => Some(mesh.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
-    /// AC1 — a 3-cell hand-populated heatmap emits exactly 3 filled rects.
+    /// AC1 — a `K`-cell hand-populated heatmap over the ring fixture emits
+    /// `K * roles.outer.len() + H` meshes (`K` per-cell clipped outer-asphalt
+    /// meshes + `H` infield re-cut meshes); the infield re-cut mesh is
+    /// `SURFACE_INFIELD`-colored, and the first cell's mesh first-vertex
+    /// color equals the expected ramp color (design § Key decisions 1,
+    /// amended 2026-07-20).
     #[test]
-    fn paint_emits_one_rect_per_cell() {
+    fn paint_emits_per_cell_meshes_plus_infield_recut() {
+        let (d, loops, roles) = ring_3x3_loops_and_roles();
+        assert_eq!(
+            roles.outer.len(),
+            1,
+            "ring fixture must have one outer loop"
+        );
+        assert_eq!(roles.holes.len(), 1, "ring fixture must have one hole");
+
+        let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
+        let transform = TrackTransform::new(&d, rect);
+
         let heatmap = vec![
             (Point::new(1, 1), 2),
             (Point::new(2, 1), 5),
-            (Point::new(1, 2), 8),
+            (Point::new(1, 3), 8),
         ];
-        assert_eq!(painted_rect_count(&heatmap), 3);
+        let meshes = painted_meshes(&loops, &roles, &transform, rect, &heatmap);
+        assert_eq!(
+            meshes.len(),
+            heatmap.len() * roles.outer.len() + roles.holes.len(),
+            "expected K per-cell meshes + H infield re-cut meshes"
+        );
+
+        // The infield re-cut mesh(es) are drawn after the full per-cell pass.
+        let infield_start = heatmap.len() * roles.outer.len();
+        for mesh in &meshes[infield_start..] {
+            assert_eq!(mesh.vertices[0].color, SURFACE_INFIELD);
+        }
+
+        // The first cell's mesh is colored by its own ramp position.
+        let (min, max) = speed_bounds(&heatmap).expect("non-empty heatmap has bounds");
+        let expected = ramp_color(normalize(2, min, max)).gamma_multiply(super::HEATMAP_ALPHA);
+        assert_eq!(meshes[0].vertices[0].color, expected);
     }
 
-    /// AC7 — an empty heatmap draws no shapes at all (no-op).
+    /// AC7 — an empty heatmap draws no shapes at all, not even the infield
+    /// re-cut (the `speed_bounds`-`None` early return precedes it).
     #[test]
     fn paint_is_noop_on_empty_heatmap() {
-        assert_eq!(painted_rect_count(&[]), 0);
+        let (d, loops, roles) = ring_3x3_loops_and_roles();
+        let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
+        let transform = TrackTransform::new(&d, rect);
+        let meshes = painted_meshes(&loops, &roles, &transform, rect, &[]);
+        assert!(meshes.is_empty());
     }
 }

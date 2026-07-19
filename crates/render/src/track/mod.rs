@@ -84,7 +84,13 @@ pub(crate) fn draw_frame(
     regions::fill(painter, rect, &transform, &smoothed_loops, &loop_roles);
 
     if overlays.speed_heatmap {
-        heatmap::paint(painter, &transform, &track.metrics.speed_heatmap);
+        heatmap::paint(
+            painter,
+            &transform,
+            &smoothed_loops,
+            &loop_roles,
+            &track.metrics.speed_heatmap,
+        );
     }
 
     if overlays.grid {
