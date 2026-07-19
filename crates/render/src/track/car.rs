@@ -307,12 +307,16 @@ mod tests {
         crate::tokens::css::assert_f32("arrow tip y", origin.y + vec.y, tip.y);
 
         // Doubling the speed doubles the arrow's length (length ∝ speed).
+        // `Vec2::length` goes through `sqrt`, whose last-bit f32 result differs
+        // between native and Miri (~2 ULP at magnitude ~45), so this
+        // proportionality is checked with a tolerance rather than the exact
+        // `assert_f32` the bit-stable, transform-mapped origin/tip use above.
         let s2 = car(2, 3, 2, -4);
         let (_, vec2) = arrow_vector(s2, &t).expect("moving car has an arrow");
-        crate::tokens::css::assert_f32(
-            "doubled speed doubles length",
-            vec2.length(),
-            vec.length() * 2.0,
+        let (doubled, want) = (vec2.length(), vec.length() * 2.0);
+        assert!(
+            (doubled - want).abs() <= 1e-3,
+            "doubled speed doubles length: {doubled} vs {want}",
         );
     }
 
