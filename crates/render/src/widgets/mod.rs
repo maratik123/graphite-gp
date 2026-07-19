@@ -29,6 +29,8 @@ mod game_gallery;
 pub mod icon_button;
 pub mod lap_meter;
 pub mod movepad;
+#[cfg(test)]
+mod movepad_gallery;
 pub mod segmented_control;
 pub mod slider;
 pub mod stepper;
