@@ -12,6 +12,12 @@
               its paint fn is covered by the subtask-9 golden, not a unit test"
 )]
 mod regions;
+#[allow(
+    dead_code,
+    reason = "layer wired into render_frame at subtask 8 (design decomposition); \
+              its paint fn is covered by the subtask-9 golden, not a unit test"
+)]
+mod sf;
 mod transform;
 #[allow(
     dead_code,
