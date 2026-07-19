@@ -7,6 +7,7 @@
 //! sibling widgets already follow (design § *House pattern*).
 
 mod car;
+mod fastest_lap;
 #[cfg(test)]
 mod golden;
 mod heatmap;
@@ -23,9 +24,10 @@ use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
 
 /// The documented back-to-front draw order (AC5/AC9): `outfield → asphalt →
-/// infield → heatmap → walls → S/F → cars`. [`draw_frame`] follows this
-/// order exactly; `layer_order_is_documented` pins the list itself as a
-/// tested contract.
+/// infield → heatmap → walls → fastest_lap → S/F → cars`. [`draw_frame`]
+/// follows this order exactly; `layer_order_is_documented` pins the list
+/// itself as a tested contract (subtask 3 extends this further to the final
+/// 9-entry list).
 #[cfg_attr(
     not(test),
     allow(
@@ -34,16 +36,24 @@ use gp_core::track::TrackArtifact;
                   contract (AC9) rather than a value draw_frame reads at runtime"
     )
 )]
-pub(crate) const LAYER_ORDER: [&str; 7] = [
-    "outfield", "asphalt", "infield", "heatmap", "walls", "sf", "cars",
+pub(crate) const LAYER_ORDER: [&str; 8] = [
+    "outfield",
+    "asphalt",
+    "infield",
+    "heatmap",
+    "walls",
+    "fastest_lap",
+    "sf",
+    "cars",
 ];
 
 /// Draws one frame of the track canvas (design doc §4) into `rect`, back to
 /// front per [`LAYER_ORDER`]: the three regions (`regions::fill` — outfield,
 /// asphalt, infield in that order), the `speed_heatmap` analytics overlay
 /// (layer 1b, over the asphalt, design § Key decisions 1), the
-/// Chaikin-smoothed, M6-guarded walls, the checkered S/F chord, then every
-/// car (trail, dot, velocity arrow, optional "you" ring).
+/// Chaikin-smoothed, M6-guarded walls, the `fastest_lap` analytics overlay
+/// (layer 5, over the walls, design § Key decisions 3), the checkered S/F
+/// chord, then every car (trail, dot, velocity arrow, optional "you" ring).
 ///
 /// `overlays` drives which analytics/grid layers are drawn (design § Key
 /// decisions) — each flag adds or removes exactly its own layer's shapes;
@@ -76,6 +86,10 @@ pub(crate) fn draw_frame(
 
     walls::paint(painter, &transform, &smoothed_loops);
 
+    if overlays.fastest_lap {
+        fastest_lap::paint(painter, &transform, &track.metrics.fastest_lap);
+    }
+
     let checker = sf::checker_cells(&track.sf.chord);
     sf::paint(painter, &transform, &checker, track.sf.orient);
 
@@ -94,14 +108,21 @@ mod tests {
     use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
 
     /// AC5/AC9 — the documented back-to-front layer order is exactly
-    /// `outfield → asphalt → infield → heatmap → walls → S/F → cars`
-    /// (subtasks 2/3 extend this further to the final 9-entry list).
+    /// `outfield → asphalt → infield → heatmap → walls → fastest_lap → sf →
+    /// cars` (subtask 3 extends this further to the final 9-entry list).
     #[test]
     fn layer_order_is_documented() {
         assert_eq!(
             LAYER_ORDER,
             [
-                "outfield", "asphalt", "infield", "heatmap", "walls", "sf", "cars"
+                "outfield",
+                "asphalt",
+                "infield",
+                "heatmap",
+                "walls",
+                "fastest_lap",
+                "sf",
+                "cars"
             ]
         );
     }
