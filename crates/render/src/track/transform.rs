@@ -97,8 +97,8 @@ mod tests {
     }
 
     fn assert_pos_eq(got: Pos2, want: Pos2) {
-        crate::tokens::css::assert_f32("TrackTransform x", got.x, want.x);
-        crate::tokens::css::assert_f32("TrackTransform y", got.y, want.y);
+        crate::test_util::assert_f32("TrackTransform x", got.x, want.x);
+        crate::test_util::assert_f32("TrackTransform y", got.y, want.y);
     }
 
     /// Happy path — a known lattice cell-center maps to the expected screen
@@ -109,7 +109,7 @@ mod tests {
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(20.0, 20.0));
         let t = TrackTransform::new(&d, rect);
 
-        crate::tokens::css::assert_f32("cell_size", t.cell_size(), 10.0);
+        crate::test_util::assert_f32("cell_size", t.cell_size(), 10.0);
         assert_pos_eq(t.map((0.0, 0.0)), pos2(5.0, 15.0));
         assert_pos_eq(t.map((1.0, 1.0)), pos2(15.0, 5.0));
     }
@@ -139,7 +139,7 @@ mod tests {
         let t = TrackTransform::new(&d, rect);
 
         // Limited by the wider axis: min(20/4, 20/2) = min(5, 10) = 5.
-        crate::tokens::css::assert_f32("cell_size", t.cell_size(), 5.0);
+        crate::test_util::assert_f32("cell_size", t.cell_size(), 5.0);
         // content_w = 4*5 = 20 (fills rect exactly, no x-centering offset);
         // content_h = 2*5 = 10, centered within the 20-tall rect → 5px pad
         // above and below.
@@ -158,13 +158,13 @@ mod tests {
 
         let zero_rect = Rect::from_min_max(Pos2::ZERO, Pos2::ZERO);
         let t0 = TrackTransform::new(&d, zero_rect);
-        crate::tokens::css::assert_f32("degenerate cell_size", t0.cell_size(), 0.0);
+        crate::test_util::assert_f32("degenerate cell_size", t0.cell_size(), 0.0);
         let mapped = t0.map((0.0, 0.0));
         assert!(mapped.x.is_finite() && mapped.y.is_finite());
 
         let empty_corridor = corridor((0, 0), 0, 0);
         let t1 = TrackTransform::new(&empty_corridor, rect);
-        crate::tokens::css::assert_f32("empty-corridor cell_size", t1.cell_size(), 0.0);
+        crate::test_util::assert_f32("empty-corridor cell_size", t1.cell_size(), 0.0);
         let mapped1 = t1.map((0.0, 0.0));
         assert!(mapped1.x.is_finite() && mapped1.y.is_finite());
     }

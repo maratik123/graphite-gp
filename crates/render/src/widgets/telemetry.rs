@@ -353,7 +353,7 @@ mod tests {
         ];
         for (size, want) in cases {
             let style = Telemetry::resolve(Tone::Default, size, false);
-            crate::tokens::css::assert_f32(&format!("{size:?} value_size"), style.value_size, want);
+            crate::test_util::assert_f32(&format!("{size:?} value_size"), style.value_size, want);
         }
     }
 

@@ -118,7 +118,7 @@ pub(crate) fn paint(painter: &Painter, rect: Rect, transform: &TrackTransform) {
 #[cfg(test)]
 mod tests {
     use super::{TrackTransform, line_coords, paint};
-    use crate::tokens::css::assert_f32;
+    use crate::test_util::assert_f32;
     use crate::track::test_support::transform_10x10 as transform;
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Corridor, Point};

@@ -90,7 +90,8 @@ mod tests {
         FS_SM, FS_TITLE, FS_XS, FW_BOLD, FW_MEDIUM, FW_REGULAR, FW_SEMIBOLD, LH_NORMAL, LH_SNUG,
         LH_TIGHT, LS_DISPLAY, LS_LABEL, LS_MONO, LS_NORMAL, ROLE_DISPLAY_SIZE, ROLE_VALUE_SIZE,
     };
-    use crate::tokens::css::{assert_f32, assert_token, value_of, var_target};
+    use crate::test_util::assert_f32;
+    use crate::tokens::css::{assert_token, value_of, var_target};
 
     const CSS: &str = include_str!("../../../../docs/design-system/tokens/typography.css");
 

@@ -409,7 +409,7 @@ mod tests {
         let east_corners = [(3, 1), (3, -1)]; // East wall of cell (1,1): (2*1+1, 2*1±1)
         let smoothed = super::chaikin_smooth(&d, &east_corners);
         for &(x, _) in &smoothed {
-            crate::tokens::css::assert_f32("straight run x", x, 1.5);
+            crate::test_util::assert_f32("straight run x", x, 1.5);
         }
     }
 

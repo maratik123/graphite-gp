@@ -346,12 +346,12 @@ mod tests {
         let active = CarChip::resolve(true, None);
         assert_eq!(active.bg, color::PAPER_2);
         assert_eq!(active.border, color::GRAPHITE_900);
-        crate::tokens::css::assert_f32("active border_width", active.border_width, spacing::BW_2);
+        crate::test_util::assert_f32("active border_width", active.border_width, spacing::BW_2);
 
         let resting = CarChip::resolve(false, None);
         assert_eq!(resting.bg, color::PAPER_0);
         assert_eq!(resting.border, color::BORDER_HAIRLINE);
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "resting border_width",
             resting.border_width,
             spacing::BW_HAIR,

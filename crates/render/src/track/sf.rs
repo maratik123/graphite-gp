@@ -96,7 +96,8 @@ pub(crate) fn paint(
 #[cfg(test)]
 mod tests {
     use super::{SF_BAR_THICKNESS_CELLS, bar_rect_lattice, checker_cells};
-    use crate::tokens::{css::assert_f32, spacing};
+    use crate::test_util::assert_f32;
+    use crate::tokens::spacing;
     use gp_core::geom::{Orient, Point};
 
     /// AC4 — an N-cell chord yields N cells alternating
