@@ -37,6 +37,14 @@ pub const DISABLED_OPACITY: f32 = 0.45;
 /// Grid-watermark opacity multiplier (Card's faint background grid).
 pub const GRID_WATERMARK_OPACITY: f32 = 0.5;
 
+/// Forms-widget disabled-state opacity multiplier, applied at paint time
+/// (not inside any `resolve`, for the same reason as [`DISABLED_OPACITY`]).
+/// `Slider.jsx:23`/`Switch.jsx:22`/`Stepper.jsx:30` all read `opacity:
+/// disabled ? 0.5 : 1` — a 3-site shared const, distinct from the core
+/// widgets' `DISABLED_OPACITY = 0.45` (design § Key decision 7;
+/// `SegmentedControl` has no `disabled` prop, so it is not a 4th site).
+pub const FORMS_DISABLED_OPACITY: f32 = 0.5;
+
 /// Draws a rounded-rect fill + border.
 ///
 /// Shared by Button and `IconButton`, whose `paint` layers both fill/stroke a
@@ -67,7 +75,7 @@ pub(crate) fn paint_surface(
 
 #[cfg(test)]
 mod tests {
-    use super::{GHOST_HOVER_OVERLAY, GHOST_PRESS_OVERLAY};
+    use super::{FORMS_DISABLED_OPACITY, GHOST_HOVER_OVERLAY, GHOST_PRESS_OVERLAY};
 
     /// Pins the two non-token overlay STORED alpha values (`round(0.06*255)
     /// = 15`, `round(0.12*255) = 31`) as a tested contract, not a comment
@@ -77,5 +85,12 @@ mod tests {
     fn ghost_overlay_alphas_are_15_and_31() {
         assert_eq!(GHOST_HOVER_OVERLAY.a(), 15);
         assert_eq!(GHOST_PRESS_OVERLAY.a(), 31);
+    }
+
+    /// Pins the 3-site forms-widget disabled-opacity value (design § Test
+    /// Design, `common.rs` unit test) as a tested contract, not a comment.
+    #[test]
+    fn forms_disabled_opacity_is_half() {
+        crate::tokens::css::assert_f32("FORMS_DISABLED_OPACITY", FORMS_DISABLED_OPACITY, 0.5);
     }
 }

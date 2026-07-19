@@ -67,6 +67,11 @@ IconButton, Badge, Tag, Card) to native egui widgets styled entirely from
 `crate::tokens`, each split into a Miri-clean pure `const fn resolve` style layer,
 a private `paint` layer, and a public `show(ui) -> Response` interaction shell; a
 `#[cfg(test)]` wgpu gallery golden covers the full variant/size/state matrix. The
+**forms widgets (#14)** followed on the identical three-layer pattern —
+`gp_render::widgets` adds Slider, Switch, SegmentedControl, and Stepper (their
+value logic — snap/clamp, toggle, single-selection, bound-clamp — in the pure
+`resolve`/value-logic layer and unit-tested; a second `forms_gallery` wgpu golden
+covers their state matrix), leaving **#15–#16** as the remaining component units. The
 `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
@@ -107,7 +112,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 170 workspace tests green (98 gp-core; 68 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline, core widgets + gallery golden; 2 gp-gen; 2 doc-tests)
+cargo test             # 193 workspace tests green (98 gp-core; 91 gp-render: design tokens, fonts, tessellation smoke + golden guard, icon pipeline, core widgets + forms widgets + gallery goldens; 2 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
