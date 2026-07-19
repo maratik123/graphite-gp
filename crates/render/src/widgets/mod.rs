@@ -29,6 +29,7 @@ pub mod slider;
 pub mod stepper;
 pub mod switch;
 pub mod tag;
+pub mod telemetry;
 
 pub use badge::{Badge, Tone as BadgeTone};
 pub use button::{Button, Variant as ButtonVariant};
@@ -40,3 +41,4 @@ pub use slider::{Slider, SliderResponse};
 pub use stepper::{StepDir, Stepper, StepperResponse};
 pub use switch::{Switch, SwitchResponse};
 pub use tag::{Tag, TagResponse};
+pub use telemetry::{Align as TelemetryAlign, Telemetry, Tone as TelemetryTone};
