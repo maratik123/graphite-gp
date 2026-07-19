@@ -173,25 +173,16 @@ impl<'a> Slider<'a> {
         value_text: Option<&str>,
         enabled: bool,
     ) {
-        let opacity = if enabled {
-            1.0
-        } else {
-            super::common::FORMS_DISABLED_OPACITY
-        };
-        let tint = |c: Color32| c.gamma_multiply(opacity);
+        let tint = super::common::tint_fn(enabled);
 
         let has_readout_row = label.is_some() || value_text.is_some();
         let track_y0 = if has_readout_row {
             if let Some(label) = label {
-                painter.text(
+                super::common::paint_form_label(
+                    painter,
                     Pos2::new(rect.min.x, rect.min.y),
-                    Align2::LEFT_TOP,
-                    label.to_uppercase(),
-                    FontId::new(
-                        typography::FS_XS,
-                        FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-                    ),
-                    tint(color::TEXT_MUTED),
+                    label,
+                    &tint,
                 );
             }
             if let Some(value_text) = value_text {
@@ -237,7 +228,10 @@ impl<'a> Slider<'a> {
             style.thumb_shadow
         } else {
             Shadow {
-                color: style.thumb_shadow.color.gamma_multiply(opacity),
+                color: style
+                    .thumb_shadow
+                    .color
+                    .gamma_multiply(super::common::forms_opacity(enabled)),
                 ..style.thumb_shadow
             }
         };

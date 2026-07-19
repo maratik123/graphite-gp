@@ -219,20 +219,12 @@ pub(crate) fn paint(
 #[cfg(test)]
 mod tests {
     use super::{CarRender, arrow_vector, lerp_pos};
-    use crate::track::TrackTransform;
-    use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Corridor, Point};
+    use crate::track::test_support::transform_10x10 as transform;
+    use gp_core::geom::Point;
     use gp_core::sim::CarState;
 
     fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
         CarState { x, y, vx, vy }
-    }
-
-    /// A `TrackTransform` over a 10×10 corridor filling a 100×100 rect —
-    /// `cell_size == 10.0`, no centering offset, for readable expected values.
-    fn transform() -> TrackTransform {
-        let d = Corridor::new(Point::new(0, 0), 10, 10);
-        TrackTransform::new(&d, Rect::from_min_max(Pos2::ZERO, pos2(100.0, 100.0)))
     }
 
     fn assert_pos(label: &str, got: (f32, f32), want: (f32, f32)) {

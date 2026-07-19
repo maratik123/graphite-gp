@@ -129,10 +129,11 @@ pub(crate) fn paint(painter: &Painter, transform: &TrackTransform, fastest_lap: 
 
 #[cfg(test)]
 mod tests {
-    use super::{SEGMENTS_PER_SPAN, TrackTransform, catmull_rom, paint};
+    use super::{SEGMENTS_PER_SPAN, catmull_rom, paint};
     use crate::tokens::css::assert_f32;
+    use crate::track::test_support::transform_10x10 as transform;
     use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Corridor, Point};
+    use gp_core::geom::Point;
 
     /// AC2 — uniform CR is interpolating: the sampled polyline contains
     /// every control point exactly at its knot index (`i * SEGMENTS_PER_SPAN`).
@@ -169,12 +170,6 @@ mod tests {
             assert_f32("straight segment y", y, 0.0);
             assert!((0.0..=10.0).contains(&x), "x={x} out of segment range");
         }
-    }
-
-    /// A `TrackTransform` over a 10x10 corridor filling a 100x100 rect.
-    fn transform() -> TrackTransform {
-        let d = Corridor::new(Point::new(0, 0), 10, 10);
-        TrackTransform::new(&d, Rect::from_min_max(Pos2::ZERO, pos2(100.0, 100.0)))
     }
 
     /// Renders `paint` alone and returns the emitted shape count — mirrors
