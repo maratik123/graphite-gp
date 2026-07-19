@@ -23,6 +23,11 @@ const MIN_GRID_PITCH_PX: f32 = 1.0;
 /// decisions 4).
 const GRID_ANCHOR_LATTICE: f32 = -0.5;
 
+/// The major-line interval: every Nth ruling line (counted from the anchor)
+/// is drawn heavier in `GRID_LINE_MAJOR` rather than `GRID_LINE` (design § Key
+/// decisions 4 — "a heavier major line every 5th").
+const GRID_MAJOR_EVERY: i64 = 5;
+
 /// One ruling line's screen position (`.0`) and whether it is a "major"
 /// line (`.1`, every 5th line counted from `anchor`, design § Key decisions
 /// 4). Covers every line whose position falls within `range` (inclusive).
@@ -53,7 +58,7 @@ pub(crate) fn line_coords(anchor: f32, pitch: f32, range: (f32, f32)) -> Vec<(f3
                           f32's exact-integer range; precedent: gp-core track.rs::normalize"
             )]
             let pos = pitch.mul_add(k as f32, anchor);
-            (pos, k.rem_euclid(5) == 0)
+            (pos, k.rem_euclid(GRID_MAJOR_EVERY) == 0)
         })
         .collect()
 }
