@@ -71,7 +71,59 @@ fn scene_track() -> TrackArtifact {
 /// dashed ring + velocity arrow) and a stationary rival parked on another arm
 /// (no arrow, matching `Track.jsx:95`'s guard).
 fn draw_scene(painter: &Painter, rect: Rect) {
-    let track = scene_track();
+    draw_scene_with(painter, rect, &scene_track(), Overlays::default());
+}
+
+/// AC6 — a spatially-graded `speed_heatmap` over every drivable cell of
+/// `corridor` (so the ramp spans `HEAT_0`→`HEAT_3` across the fixture, and
+/// the rounded-rect's own convex corners are covered — exercising the
+/// heatmap-corner-bleed risk, design § Risks) plus a `fastest_lap` loop of
+/// cell centers around one of the corridor's arms.
+fn scene_metrics(corridor: &Corridor) -> gp_core::track::TrackMetrics {
+    let mut speed_heatmap = Vec::new();
+    for x in 2..=13 {
+        for y in 2..=13 {
+            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
+            if in_hole {
+                continue;
+            }
+            let point = Point::new(x, y);
+            if corridor.contains(point) {
+                // A simple, deterministic per-cell gradient — no physical
+                // meaning, only spatial spread across the ramp's full range.
+                let speed = x.saturating_add(y);
+                speed_heatmap.push((point, speed));
+            }
+        }
+    }
+    let fastest_lap = vec![
+        Point::new(3, 3),
+        Point::new(12, 3),
+        Point::new(12, 12),
+        Point::new(3, 12),
+    ];
+    gp_core::track::TrackMetrics {
+        speed_heatmap,
+        fastest_lap,
+        ..gp_core::track::TrackMetrics::default()
+    }
+}
+
+/// [`scene_track`], with [`scene_metrics`] populated over its own corridor —
+/// the AC6 per-overlay golden fixture (block 1's metrics generator is not
+/// yet built, so goldens hand-populate `TrackMetrics`, per design § Technical
+/// constraints).
+fn scene_track_with_metrics() -> TrackArtifact {
+    let mut track = scene_track();
+    track.metrics = scene_metrics(&track.corridor);
+    track
+}
+
+/// Draws `track` into `rect` via the public `render_frame` entry point, with
+/// `overlays` applied — the same two-car scene [`draw_scene`] draws (a
+/// moving, trailed "you" car plus a stationary rival), factored out so the
+/// AC6 per-overlay goldens can reuse it against [`scene_track_with_metrics`].
+fn draw_scene_with(painter: &Painter, rect: Rect, track: &TrackArtifact, overlays: Overlays) {
     let you_trail = [Point::new(2, 3), Point::new(3, 3)];
     let rival_trail: [Point; 0] = [];
     let cars = [
@@ -100,13 +152,14 @@ fn draw_scene(painter: &Painter, rect: Rect) {
             0.0,
         ),
     ];
-    crate::render_frame(painter, rect, &track, &cars, false, Overlays::default());
+    crate::render_frame(painter, rect, track, &cars, false, overlays);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CANVAS_RECT, draw_scene};
-    use egui::Pos2;
+    use super::{CANVAS_RECT, draw_scene, draw_scene_with, scene_track, scene_track_with_metrics};
+    use crate::Overlays;
+    use egui::{Painter, Pos2, Rect};
 
     /// A corner probe pixel, unambiguously outside the corridor bbox's
     /// drivable/infield cells — pure outfield background (AC9's flat-region
@@ -126,16 +179,14 @@ mod tests {
         image.get_pixel(pos.x as u32, pos.y as u32).0
     }
 
-    /// AC8 — one wgpu frame of the hand-built scene (regions, walls, S/F,
-    /// cars) matches the minted golden exactly in flat regions (AA-exempt
-    /// edges per `placeholder.rs`/`game_gallery.rs` precedent). Asserts the
-    /// adapter is CPU/software (lavapipe), like every sibling golden.
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
-    )]
-    fn track_canvas_matches_golden() {
+    /// Shared golden harness (AC8/AC6): renders one wgpu frame via `draw`,
+    /// asserts the resolved adapter is CPU/software (lavapipe, matching CI),
+    /// asserts the outfield probe pixel (a flat-region guard that fails on
+    /// the drawing code rather than the golden compare if the scene did not
+    /// draw), then exact-compares against `snapshot_name`
+    /// (`threshold(0.0)` + `failed_pixel_count_threshold(0)`, AA-exempt
+    /// edges per `placeholder.rs`/`game_gallery.rs` precedent).
+    fn render_and_compare(snapshot_name: &str, draw: impl Fn(&Painter, Rect) + 'static) {
         let render_state = egui_kittest::wgpu::create_render_state(
             egui_kittest::wgpu::default_wgpu_setup(),
             egui_wgpu::RendererOptions::PREDICTABLE,
@@ -156,7 +207,7 @@ mod tests {
             .renderer(renderer)
             .build_ui(move |ui| {
                 let painter = ui.ctx().layer_painter(egui::LayerId::background());
-                draw_scene(&painter, CANVAS_RECT);
+                draw(&painter, CANVAS_RECT);
             });
 
         harness.run_steps(1);
@@ -174,8 +225,85 @@ mod tests {
         let options = egui_kittest::SnapshotOptions::new()
             .threshold(0.0)
             .failed_pixel_count_threshold(0);
-        if let Err(err) = egui_kittest::try_image_snapshot_options(&image, "track", &options) {
+        if let Err(err) = egui_kittest::try_image_snapshot_options(&image, snapshot_name, &options)
+        {
             panic!("{err}");
         }
+    }
+
+    /// AC8 — one wgpu frame of the hand-built scene (regions, walls, S/F,
+    /// cars) matches the minted golden exactly in flat regions. All-off
+    /// overlays — this is the #17 baseline, unaffected by #18.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    fn track_canvas_matches_golden() {
+        render_and_compare("track", draw_scene);
+    }
+
+    /// AC6 — the `speed_heatmap` overlay alone, on the metric-populated
+    /// fixture, matches its minted golden.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    fn heatmap_overlay_matches_golden() {
+        render_and_compare("track_heatmap", |painter, rect| {
+            draw_scene_with(
+                painter,
+                rect,
+                &scene_track_with_metrics(),
+                Overlays {
+                    speed_heatmap: true,
+                    ..Overlays::default()
+                },
+            );
+        });
+    }
+
+    /// AC6 — the `fastest_lap` overlay alone, on the metric-populated
+    /// fixture, matches its minted golden.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    fn fastest_lap_overlay_matches_golden() {
+        render_and_compare("track_fastest_lap", |painter, rect| {
+            draw_scene_with(
+                painter,
+                rect,
+                &scene_track_with_metrics(),
+                Overlays {
+                    fastest_lap: true,
+                    ..Overlays::default()
+                },
+            );
+        });
+    }
+
+    /// AC6 — the `grid` overlay alone matches its minted golden. Metrics are
+    /// irrelevant to `grid` (it draws unconditionally on the transform), so
+    /// this uses the plain (empty-metrics) `scene_track` fixture.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    fn grid_overlay_matches_golden() {
+        render_and_compare("track_grid", |painter, rect| {
+            draw_scene_with(
+                painter,
+                rect,
+                &scene_track(),
+                Overlays {
+                    grid: true,
+                    ..Overlays::default()
+                },
+            );
+        });
     }
 }
