@@ -6,6 +6,12 @@
 //! [`TrackTransform`] and strokes/fills it — the house pattern this crate's
 //! sibling widgets already follow (design § *House pattern*).
 
+#[allow(
+    dead_code,
+    reason = "layer wired into render_frame at subtask 8 (design decomposition); \
+              its paint fn is covered by the subtask-9 golden, not a unit test"
+)]
+mod regions;
 mod transform;
 
 pub use transform::TrackTransform;
