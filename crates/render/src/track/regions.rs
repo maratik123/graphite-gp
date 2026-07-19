@@ -688,16 +688,7 @@ mod tests {
         let triangles = triangulate(&loop_points);
         assert_eq!(triangles.len(), loop_points.len() - 2);
 
-        let area_sum: f32 = triangles
-            .iter()
-            .map(|&[a, b, c]| {
-                triangle_area(
-                    loop_points[a as usize],
-                    loop_points[b as usize],
-                    loop_points[c as usize],
-                )
-            })
-            .sum();
+        let area_sum = triangle_area_sum(&triangles, &loop_points);
         let expected = super::signed_area_pos2(&loop_points).abs();
         assert!(
             (area_sum - expected).abs() < 1e-4,
