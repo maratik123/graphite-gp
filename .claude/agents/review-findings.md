@@ -60,6 +60,7 @@ Every suspicion — investigate via Read/grep, don't guess. Don't invent problem
 - Any test that would pass even if the production code were deleted (cosmetic test)?
 - Integration tests for public-facing macro output?
 - **`assert_matches!` scrutinee impls `Debug`?** `assert_matches!` formats the scrutinee with `{:?}` on mismatch (`Result` needs `T`+`E`; `Box<dyn Trait>` needs a `Debug` supertrait). A production `#[derive(Debug)]` added *only* to satisfy a test-only `assert_matches!` is an out-of-scope API change — flag it; `assert!(matches!(...))` imposes no such bound. (AGENTS.md § Rust Test Conventions.)
+- **Golden-image threshold class** ([`ai-docs/code-style.md` → Golden-image thresholds](../../ai-docs/code-style.md#golden-image-thresholds))**:** any `egui_kittest` golden that renders text (glyphs, labels, numerals, icons) using exact compare (`threshold(0.0)`) instead of the measured text threshold (`threshold(1.0)`) → `major` — it schedules a near-certain red-CI round the in-tree precedent (four text goldens at `1.0`) already resolved. Flat / byte-stable goldens (`placeholder`) at `threshold(0.0)` are correct.
 
 ### 4. Performance
 - O(n²) or worse where O(n) is straightforward?

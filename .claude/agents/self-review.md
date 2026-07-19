@@ -61,6 +61,7 @@ A passing test doesn't mean it's correct. Mentally comment out the production fi
 - No `unwrap()` in tests without justification?
 - All assertions specific — no vacuous `assert!(true)`?
 - **`assert_matches!` scrutinee impls `Debug`?** `assert_matches!` formats the scrutinee with `{:?}` on mismatch (`Result` needs `T`+`E`; `Box<dyn Trait>` needs a `Debug` supertrait). A diff that adds a production `#[derive(Debug)]` *only* to satisfy a test-only `assert_matches!` is an out-of-scope API change → REJECT; the convert-to-`assert!(matches!(...))` alternative imposes no such bound. (AGENTS.md § Rust Test Conventions.)
+- **Golden-image threshold class** ([`ai-docs/code-style.md` → Golden-image thresholds](../../ai-docs/code-style.md#golden-image-thresholds))**:** any new / regenerated `egui_kittest` golden that renders text (glyphs, labels, numerals, icons) using exact compare (`threshold(0.0)`) instead of the measured text threshold (`threshold(1.0)`) → **REJECT (`major`)** — a **fix-now** item, NOT a non-blocking watch-item, because it schedules a near-certain red-CI round the in-tree precedent (four text goldens at `1.0`) already resolved. Flat / byte-stable goldens (`placeholder`) at `threshold(0.0)` are correct.
 
 ### 4. Safety and correctness
 - `unsafe` blocks: each one justified with a comment?
