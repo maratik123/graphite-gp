@@ -44,16 +44,17 @@ pub struct Overlays {
 /// lives in `gp-game` (see the ownership override in
 /// `ai-docs/key-decisions.md`). `rect` is explicit (not derived from
 /// `painter.clip_rect()`) so the drawn output is a pure function of `(rect,
-/// track, cars, reduced_motion)` — the same precedent `draw_placeholder`
-/// sets (design § *Signature*).
+/// track, cars, overlays, reduced_motion)` — the same precedent
+/// `draw_placeholder` sets (design § *Signature*).
 ///
 /// `cars` is caller-supplied per-frame render input
 /// ([`CarRender`]) — this crate is draw-only and buffers no car history or
 /// clock of its own (`ai-docs/key-decisions.md`, 2026-07-16).
 /// `reduced_motion` snaps every car's move animation straight to its final
-/// position (no slide). `overlays` is threaded but inert: layers 4 (grid)
-/// and 5 (analytics) are deferred (design § *Rejected alternatives* / Q2),
-/// so no flag in `overlays` changes anything this function draws yet.
+/// position (no slide). `overlays` drives the individually-toggleable
+/// analytics/grid layers (design doc §4 layers 4/5) — each flag adds or
+/// removes exactly its own layer's drawn shapes; the all-off frame is byte-
+/// identical to the pre-#18 baseline (design § Draw order).
 ///
 /// Cosmetic wall smoothing (Chaikin) is allowed only within the half-cell
 /// gap — it must not cross any point or change the set of drivable cells
