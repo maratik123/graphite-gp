@@ -24,6 +24,8 @@ mod common;
 mod forms_gallery;
 #[cfg(test)]
 mod gallery;
+#[cfg(test)]
+mod game_gallery;
 pub mod icon_button;
 pub mod lap_meter;
 pub mod segmented_control;
