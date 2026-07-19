@@ -18,6 +18,7 @@ pub mod fonts;
 pub mod icons;
 pub mod placeholder;
 pub mod tokens;
+pub mod track;
 pub mod widgets;
 
 /// Optional analytics overlays (design doc §4).
