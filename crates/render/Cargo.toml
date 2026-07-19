@@ -24,3 +24,4 @@ egui_kittest = { workspace = true }
 egui-wgpu = { workspace = true }
 image = { workspace = true }
 skrifa = { workspace = true }
+cssparser = { workspace = true }
