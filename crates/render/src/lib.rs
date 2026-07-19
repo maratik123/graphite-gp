@@ -63,7 +63,7 @@ pub fn render_frame(
     painter: &Painter,
     rect: Rect,
     track: &TrackArtifact,
-    cars: &[track::CarRender<'_>],
+    cars: &[CarRender<'_>],
     reduced_motion: bool,
     overlays: Overlays,
 ) {

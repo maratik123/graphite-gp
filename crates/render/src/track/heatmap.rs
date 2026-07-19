@@ -3,7 +3,7 @@
 //! the `HEAT_0` (slowest) → `HEAT_3` (fastest) ramp.
 //!
 //! **Amendment (2026-07-20, design § Key decisions 1):** the heatmap recolors
-//! the *same* Chaikin-smoothed asphalt mesh [`super::regions::fill`] draws,
+//! the *same* Chaikin-smoothed asphalt mesh [`regions::fill`] draws,
 //! per cell, via `Painter::with_clip_rect` — not independent per-cell
 //! squares — so its outer silhouette traces the smoothed boundary exactly
 //! (no more blocky staircase poking past the walls at a corner). The outer

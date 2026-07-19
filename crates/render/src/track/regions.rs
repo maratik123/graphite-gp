@@ -5,7 +5,7 @@
 //! hole. The production fill (Amendment — Rounded track, PR #100) draws each
 //! Chaikin-smoothed wall loop directly — [`classify_loops`] splits the loops
 //! into the outer asphalt boundary vs infield holes, and [`fill`] triangulates
-//! each loop into a solid-color [`egui::Mesh`], so the fill shares the exact
+//! each loop into a solid-color [`Mesh`], so the fill shares the exact
 //! boundary the wall stroke traces (no more per-cell square fill disagreeing
 //! with the smoothed stroke at corners). [`classify`]/[`RegionCells`] (the
 //! cell-based flood-fill classifier this fill used to draw from) are retained

@@ -175,7 +175,7 @@ mod tests {
         reason = "OUTFIELD_PROBE is a fixed, in-domain point inside CANVAS_RECT — \
                   precedent: placeholder.rs::pixel_at"
     )]
-    fn pixel_at(image: &image::RgbaImage, pos: egui::Pos2) -> [u8; 4] {
+    fn pixel_at(image: &image::RgbaImage, pos: Pos2) -> [u8; 4] {
         image.get_pixel(pos.x as u32, pos.y as u32).0
     }
 
