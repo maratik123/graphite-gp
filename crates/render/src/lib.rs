@@ -10,8 +10,7 @@
 //! workflow are documented there rather than here — see
 //! `ai-docs/key-decisions.md`.
 
-use egui::Painter;
-use gp_core::sim::CarState;
+use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
 
 pub mod fonts;
@@ -34,26 +33,38 @@ pub struct Overlays {
     pub grid: bool,
 }
 
-/// Render one frame (design doc §4), back to front: the three regions
-/// (outfield / infield / asphalt), walls, the S/F line, optional analytics
-/// overlays, then the cars.
+/// Renders one frame of the track canvas (design doc §4) into `rect`.
+///
+/// Draws back to front: the three regions (outfield / asphalt / infield),
+/// the walls (Chaikin-smoothed, M6-guarded), the checkered S/F chord, then
+/// every car (`track::LAYER_ORDER` pins the exact order — AC9).
 ///
 /// Takes a **borrowed** `egui::Painter` draw context — this function does
 /// not own, construct, or store one; the window/event loop that produces it
 /// lives in `gp-game` (see the ownership override in
-/// `ai-docs/key-decisions.md`). Still `todo!()`: the block-1 generator
-/// (`gp-gen`) that produces a `TrackArtifact` at runtime is itself
-/// `todo!()`, so nothing can drive this yet. `crates/render/src/placeholder.rs`
-/// ships a separate, non-`TrackArtifact` scaffold (`draw_placeholder`) that
-/// exercises the same `Painter` shape in the meantime.
+/// `ai-docs/key-decisions.md`). `rect` is explicit (not derived from
+/// `painter.clip_rect()`) so the drawn output is a pure function of `(rect,
+/// track, cars, reduced_motion)` — the same precedent `draw_placeholder`
+/// sets (design § *Signature*).
+///
+/// `cars` is caller-supplied per-frame render input
+/// ([`CarRender`]) — this crate is draw-only and buffers no car history or
+/// clock of its own (`ai-docs/key-decisions.md`, 2026-07-16).
+/// `reduced_motion` snaps every car's move animation straight to its final
+/// position (no slide). `overlays` is threaded but inert: layers 4 (grid)
+/// and 5 (analytics) are deferred (design § *Rejected alternatives* / Q2),
+/// so no flag in `overlays` changes anything this function draws yet.
 ///
 /// Cosmetic wall smoothing (Chaikin) is allowed only within the half-cell
-/// gap — it must not cross any point or change the set of drivable cells.
+/// gap — it must not cross any point or change the set of drivable cells
+/// (the M6 guard, `track::walls::chaikin_smooth`).
 pub fn render_frame(
-    _painter: &Painter,
-    _track: &TrackArtifact,
-    _cars: &[CarState],
-    _overlays: Overlays,
+    painter: &Painter,
+    rect: Rect,
+    track: &TrackArtifact,
+    cars: &[track::CarRender<'_>],
+    reduced_motion: bool,
+    overlays: Overlays,
 ) {
-    todo!("frame rendering (design doc §4)")
+    track::draw_frame(painter, rect, track, cars, reduced_motion, overlays);
 }

@@ -194,7 +194,18 @@ pub(crate) fn chain_walls(walls: &[Wall]) -> Vec<Vec<DualCorner>> {
 /// Converts a raw (unsmoothed) `DualCorner` loop to lattice-space `(f32,
 /// f32)` points — the same output shape [`chaikin_smooth`] produces, so
 /// [`paint`] draws either uniformly (design § *Raw-stroke fallback
-/// invariant*).
+/// invariant*). `draw_frame` always draws the Chaikin-smoothed stroke
+/// (`chaikin_smooth` itself guards every vertex back to raw when needed), so
+/// this converter's only production-code caller was that raw-vs-smoothed
+/// choice; it stays as the tests' shared conversion.
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "test-only: mirrors chaikin_smooth's output shape for direct \
+                  raw-vs-smoothed comparison in this file's own tests"
+    )
+)]
 pub(crate) fn dual_loop_to_lattice(loop_corners: &[DualCorner]) -> Vec<(f32, f32)> {
     loop_corners.iter().copied().map(to_lattice).collect()
 }

@@ -19,7 +19,14 @@ use std::collections::HashSet;
 pub(crate) struct RegionCells {
     /// Drivable cells (`== D`, AC1).
     pub asphalt: Vec<Point>,
-    /// `¬D` cells reachable from the bounding-box border (AC2).
+    /// `¬D` cells reachable from the bounding-box border (AC2). `paint`
+    /// fills the whole target rect as its outfield background instead of
+    /// iterating this list cell-by-cell — kept for the AC2 set-membership
+    /// tests (asphalt/infield/outfield mutual disjointness).
+    #[cfg_attr(
+        not(test),
+        allow(dead_code, reason = "AC2 test-only field — see doc above")
+    )]
     pub outfield: Vec<Point>,
     /// `¬D` cells **not** reachable from the border — the bounded hole(s)
     /// (AC2).
@@ -109,9 +116,12 @@ fn cell_rect(transform: &TrackTransform, p: Point) -> Rect {
     Rect::from_two_pos(a, b)
 }
 
-/// Paints the three regions back-to-front (design doc §4, layer 1): the
-/// whole `rect` filled `PAPER_1` (outfield background), then each infield
-/// cell (`SURFACE_INFIELD`), then each asphalt cell (`SURFACE_ASPHALT`).
+/// Paints the three regions back-to-front, `outfield → asphalt → infield`
+/// (design doc §4, layer 1; AC9's documented layer order): the whole `rect`
+/// filled `PAPER_1` (outfield background), then each asphalt cell
+/// (`SURFACE_ASPHALT`), then each infield cell (`SURFACE_INFIELD`) — asphalt
+/// and infield never overlap (disjoint cell sets), so their relative draw
+/// order is visually inert; this order is the one AC9 pins.
 pub(crate) fn paint(
     painter: &Painter,
     rect: Rect,
@@ -119,18 +129,18 @@ pub(crate) fn paint(
     cells: &RegionCells,
 ) {
     painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);
-    for &p in &cells.infield {
-        painter.rect_filled(
-            cell_rect(transform, p),
-            0,
-            crate::tokens::color::SURFACE_INFIELD,
-        );
-    }
     for &p in &cells.asphalt {
         painter.rect_filled(
             cell_rect(transform, p),
             0,
             crate::tokens::color::SURFACE_ASPHALT,
+        );
+    }
+    for &p in &cells.infield {
+        painter.rect_filled(
+            cell_rect(transform, p),
+            0,
+            crate::tokens::color::SURFACE_INFIELD,
         );
     }
 }
