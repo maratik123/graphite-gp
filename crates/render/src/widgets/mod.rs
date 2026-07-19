@@ -17,26 +17,34 @@
 
 pub mod badge;
 pub mod button;
+pub mod car_chip;
 pub mod card;
 mod common;
 #[cfg(test)]
 mod forms_gallery;
 #[cfg(test)]
 mod gallery;
+#[cfg(test)]
+mod game_gallery;
 pub mod icon_button;
+pub mod lap_meter;
 pub mod segmented_control;
 pub mod slider;
 pub mod stepper;
 pub mod switch;
 pub mod tag;
+pub mod telemetry;
 
 pub use badge::{Badge, Tone as BadgeTone};
 pub use button::{Button, Variant as ButtonVariant};
+pub use car_chip::{CarChip, CarKind};
 pub use card::{Card, Elevation};
 pub use common::Size;
 pub use icon_button::{IconButton, Variant as IconButtonVariant};
+pub use lap_meter::LapMeter;
 pub use segmented_control::{SegmentedControl, SegmentedControlResponse};
 pub use slider::{Slider, SliderResponse};
 pub use stepper::{StepDir, Stepper, StepperResponse};
 pub use switch::{Switch, SwitchResponse};
 pub use tag::{Tag, TagResponse};
+pub use telemetry::{Align as TelemetryAlign, Telemetry, Tone as TelemetryTone};
