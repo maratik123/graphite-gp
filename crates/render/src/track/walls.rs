@@ -232,34 +232,12 @@ pub(crate) fn paint(painter: &Painter, transform: &TrackTransform, loops: &[Vec<
 #[cfg(test)]
 mod tests {
     use super::{chain_walls, wall_corners};
+    use crate::track::test_support::{corridor, ring_3x3};
     use gp_core::geom::{Corridor, Point, Side, Wall, walls_from_boundary};
     use std::collections::HashSet;
 
-    fn corridor(origin: (i32, i32), w: usize, h: usize, drivable: &[(i32, i32)]) -> Corridor {
-        let mut d = Corridor::new(Point::new(origin.0, origin.1), w, h);
-        for &(x, y) in drivable {
-            d.set(Point::new(x, y), true);
-        }
-        d
-    }
-
     fn solid_2x2() -> Corridor {
         corridor((0, 0), 4, 4, &[(1, 1), (2, 1), (1, 2), (2, 2)])
-    }
-
-    fn ring_3x3() -> Corridor {
-        let cells: Vec<(i32, i32)> = [
-            (1, 1),
-            (2, 1),
-            (3, 1),
-            (1, 2),
-            (3, 2),
-            (1, 3),
-            (2, 3),
-            (3, 3),
-        ]
-        .to_vec();
-        corridor((0, 0), 5, 5, &cells)
     }
 
     /// AC3 — every segment endpoint's doubled coordinate is odd (a
@@ -413,18 +391,12 @@ mod tests {
     #[test]
     fn corridor_is_unchanged_by_smoothing() {
         let d = l_shape();
-        let before: Vec<bool> = (0..4)
-            .flat_map(|y| (0..4).map(move |x| (x, y)))
-            .map(|(x, y)| d.contains(Point::new(x, y)))
-            .collect();
+        let before = crate::track::test_support::corridor_cells(&d, 4);
         let walls = walls_from_boundary(&d);
         for loop_corners in chain_walls(&walls) {
             let _ = super::chaikin_smooth(&d, &loop_corners);
         }
-        let after: Vec<bool> = (0..4)
-            .flat_map(|y| (0..4).map(move |x| (x, y)))
-            .map(|(x, y)| d.contains(Point::new(x, y)))
-            .collect();
+        let after = crate::track::test_support::corridor_cells(&d, 4);
         assert_eq!(before, after);
     }
 
@@ -437,7 +409,7 @@ mod tests {
         let east_corners = [(3, 1), (3, -1)]; // East wall of cell (1,1): (2*1+1, 2*1±1)
         let smoothed = super::chaikin_smooth(&d, &east_corners);
         for &(x, _) in &smoothed {
-            crate::tokens::css::assert_f32("straight run x", x, 1.5);
+            crate::test_util::assert_f32("straight run x", x, 1.5);
         }
     }
 

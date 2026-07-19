@@ -297,16 +297,16 @@ mod tests {
     #[test]
     fn resolve_size_maps_to_height_and_font() {
         let sm = SegmentedControl::resolve(false, Size::Sm);
-        crate::tokens::css::assert_f32("sm height", sm.height, spacing::CONTROL_H_SM);
-        crate::tokens::css::assert_f32("sm font", sm.font_size, typography::FS_SM);
+        crate::test_util::assert_f32("sm height", sm.height, spacing::CONTROL_H_SM);
+        crate::test_util::assert_f32("sm font", sm.font_size, typography::FS_SM);
 
         let md = SegmentedControl::resolve(false, Size::Md);
-        crate::tokens::css::assert_f32("md height", md.height, spacing::CONTROL_H_MD);
-        crate::tokens::css::assert_f32("md font", md.font_size, typography::FS_BODY);
+        crate::test_util::assert_f32("md height", md.height, spacing::CONTROL_H_MD);
+        crate::test_util::assert_f32("md font", md.font_size, typography::FS_BODY);
 
         let lg = SegmentedControl::resolve(false, Size::Lg);
-        crate::tokens::css::assert_f32("lg height", lg.height, spacing::CONTROL_H_LG);
-        crate::tokens::css::assert_f32("lg font", lg.font_size, typography::FS_BODY);
+        crate::test_util::assert_f32("lg height", lg.height, spacing::CONTROL_H_LG);
+        crate::test_util::assert_f32("lg font", lg.font_size, typography::FS_BODY);
     }
 
     /// AC3 — single-selection: exactly one index matches, and it's the

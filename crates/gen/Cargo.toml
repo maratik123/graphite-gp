@@ -12,5 +12,5 @@ workspace = true
 
 [dependencies]
 gp-core = { workspace = true }
-rand = { version = "0.10", default-features = false, features = ["alloc"] }
-rand_chacha = { version = "0.10", default-features = false }
+rand = { workspace = true }
+rand_chacha = { workspace = true }

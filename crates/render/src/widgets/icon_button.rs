@@ -258,17 +258,17 @@ mod tests {
     /// AC7 — size → square dim (30/38/46).
     #[test]
     fn size_maps_to_dim() {
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "sm dim",
             IconButton::resolve(Variant::Secondary, Size::Sm, false, false, false).dim,
             spacing::CONTROL_H_SM,
         );
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "md dim",
             IconButton::resolve(Variant::Secondary, Size::Md, false, false, false).dim,
             spacing::CONTROL_H_MD,
         );
-        crate::tokens::css::assert_f32(
+        crate::test_util::assert_f32(
             "lg dim",
             IconButton::resolve(Variant::Secondary, Size::Lg, false, false, false).dim,
             spacing::CONTROL_H_LG,

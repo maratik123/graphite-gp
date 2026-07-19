@@ -6,7 +6,10 @@
 //! 2-site non-token exception (design § *Non-token source colors*), lifted
 //! here because Button and `IconButton` (2 files) both need them.
 
-use egui::{Color32, CornerRadius, Painter, Rect, Stroke, StrokeKind};
+use crate::tokens::typography;
+use egui::{
+    Align2, Color32, CornerRadius, FontFamily, FontId, Painter, Pos2, Rect, Stroke, StrokeKind,
+};
 
 /// The three control sizes shared by every core widget that has one
 /// (`Button`, `IconButton`).
@@ -73,6 +76,39 @@ pub(crate) fn paint_surface(
     }
 }
 
+/// The disabled-state opacity multiplier shared by every forms widget
+/// (`Slider`/`Stepper`) `paint` fn: full opacity when `enabled`, else
+/// [`FORMS_DISABLED_OPACITY`].
+pub(crate) const fn forms_opacity(enabled: bool) -> f32 {
+    if enabled { 1.0 } else { FORMS_DISABLED_OPACITY }
+}
+
+/// The disabled-state opacity tint closure built from [`forms_opacity`].
+pub(crate) fn tint_fn(enabled: bool) -> impl Fn(Color32) -> Color32 {
+    let opacity = forms_opacity(enabled);
+    move |c: Color32| c.gamma_multiply(opacity)
+}
+
+/// Paints a forms widget's uppercase `TEXT_MUTED` label at `pos`, left-top
+/// aligned in the `FS_XS`/regular-weight face — shared by `Slider`/`Stepper`.
+pub(crate) fn paint_form_label(
+    painter: &Painter,
+    pos: Pos2,
+    label: &str,
+    tint: impl Fn(Color32) -> Color32,
+) {
+    painter.text(
+        pos,
+        Align2::LEFT_TOP,
+        label.to_uppercase(),
+        FontId::new(
+            typography::FS_XS,
+            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+        ),
+        tint(crate::tokens::color::TEXT_MUTED),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::{FORMS_DISABLED_OPACITY, GHOST_HOVER_OVERLAY, GHOST_PRESS_OVERLAY};
@@ -91,6 +127,6 @@ mod tests {
     /// Design, `common.rs` unit test) as a tested contract, not a comment.
     #[test]
     fn forms_disabled_opacity_is_half() {
-        crate::tokens::css::assert_f32("FORMS_DISABLED_OPACITY", FORMS_DISABLED_OPACITY, 0.5);
+        crate::test_util::assert_f32("FORMS_DISABLED_OPACITY", FORMS_DISABLED_OPACITY, 0.5);
     }
 }

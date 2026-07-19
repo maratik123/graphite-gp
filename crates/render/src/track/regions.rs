@@ -5,7 +5,7 @@
 //! hole. The production fill (Amendment — Rounded track, PR #100) draws each
 //! Chaikin-smoothed wall loop directly — [`classify_loops`] splits the loops
 //! into the outer asphalt boundary vs infield holes, and [`fill`] triangulates
-//! each loop into a solid-color [`egui::Mesh`], so the fill shares the exact
+//! each loop into a solid-color [`Mesh`], so the fill shares the exact
 //! boundary the wall stroke traces (no more per-cell square fill disagreeing
 //! with the smoothed stroke at corners). [`classify`]/[`RegionCells`] (the
 //! cell-based flood-fill classifier this fill used to draw from) are retained
@@ -476,39 +476,13 @@ pub(crate) fn fill(
 #[cfg(test)]
 mod tests {
     use super::{TrackTransform, classify, classify_loops, fill, triangulate};
+    use crate::track::test_support::{corridor, ring_3x3};
     use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Corridor, Point, walls_from_boundary};
+    use gp_core::geom::{Point, walls_from_boundary};
     use std::collections::HashSet;
-
-    /// Builds a corridor over `[origin, origin + (w, h))` with the given
-    /// `(x, y)` cells drivable — mirrors `gp_core::geom::graph::tests::corridor`.
-    fn corridor(origin: (i32, i32), w: usize, h: usize, drivable: &[(i32, i32)]) -> Corridor {
-        let mut d = Corridor::new(Point::new(origin.0, origin.1), w, h);
-        for &(x, y) in drivable {
-            d.set(Point::new(x, y), true);
-        }
-        d
-    }
 
     fn set(points: &[Point]) -> HashSet<Point> {
         points.iter().copied().collect()
-    }
-
-    /// A 3×3 ring around one hole cell, over a 5×5 bbox with a 1-cell
-    /// outfield margin (mirrors `geom::graph::tests`' ring fixture).
-    fn ring_3x3() -> Corridor {
-        let cells: Vec<(i32, i32)> = [
-            (1, 1),
-            (2, 1),
-            (3, 1),
-            (1, 2),
-            (3, 2),
-            (1, 3),
-            (2, 3),
-            (3, 3),
-        ]
-        .to_vec();
-        corridor((0, 0), 5, 5, &cells)
     }
 
     /// AC1 — the classified asphalt cell set equals `{p : corridor.contains(p)}`
@@ -670,6 +644,18 @@ mod tests {
         super::cross_z(a, b, c).abs() / 2.0
     }
 
+    /// The summed area of every `[a, b, c]` vertex-index triangle, indexed
+    /// into `points` — shared by the convex/concave `triangulate` area-
+    /// coverage tests.
+    fn triangle_area_sum(triangles: &[[u32; 3]], points: &[Pos2]) -> f32 {
+        triangles
+            .iter()
+            .map(|&[a, b, c]| {
+                triangle_area(points[a as usize], points[b as usize], points[c as usize])
+            })
+            .sum()
+    }
+
     /// A2 (convex) — a square loop triangulates to `n - 2` triangles whose
     /// area sum equals the polygon's own `|area|`.
     #[test]
@@ -683,12 +669,7 @@ mod tests {
         let triangles = triangulate(&square);
         assert_eq!(triangles.len(), square.len() - 2);
 
-        let area_sum: f32 = triangles
-            .iter()
-            .map(|&[a, b, c]| {
-                triangle_area(square[a as usize], square[b as usize], square[c as usize])
-            })
-            .sum();
+        let area_sum = triangle_area_sum(&triangles, &square);
         let expected = super::signed_area_pos2(&square).abs();
         assert!(
             (area_sum - expected).abs() < 1e-4,
@@ -707,16 +688,7 @@ mod tests {
         let triangles = triangulate(&loop_points);
         assert_eq!(triangles.len(), loop_points.len() - 2);
 
-        let area_sum: f32 = triangles
-            .iter()
-            .map(|&[a, b, c]| {
-                triangle_area(
-                    loop_points[a as usize],
-                    loop_points[b as usize],
-                    loop_points[c as usize],
-                )
-            })
-            .sum();
+        let area_sum = triangle_area_sum(&triangles, &loop_points);
         let expected = super::signed_area_pos2(&loop_points).abs();
         assert!(
             (area_sum - expected).abs() < 1e-4,
@@ -757,14 +729,7 @@ mod tests {
             fill(&painter, rect, &transform, &loops, &roles);
         });
 
-        let meshes: Vec<std::sync::Arc<egui::Mesh>> = output
-            .shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Mesh(mesh) => Some(mesh.clone()),
-                _ => None,
-            })
-            .collect();
+        let meshes = crate::track::test_support::captured_meshes(&output.shapes);
         assert_eq!(
             meshes.len(),
             2,

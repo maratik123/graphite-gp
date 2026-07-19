@@ -160,23 +160,14 @@ impl<'a> Stepper<'a> {
         label: Option<&str>,
         enabled: bool,
     ) {
-        let opacity = if enabled {
-            1.0
-        } else {
-            super::common::FORMS_DISABLED_OPACITY
-        };
-        let tint = |c: Color32| c.gamma_multiply(opacity);
+        let tint = super::common::tint_fn(enabled);
 
         if let Some(label) = label {
-            painter.text(
+            super::common::paint_form_label(
+                painter,
                 Pos2::new(rect.min.x, rect.min.y),
-                Align2::LEFT_TOP,
-                label.to_uppercase(),
-                FontId::new(
-                    typography::FS_XS,
-                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-                ),
-                tint(color::TEXT_MUTED),
+                label,
+                &tint,
             );
         }
 

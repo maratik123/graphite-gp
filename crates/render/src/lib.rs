@@ -16,6 +16,8 @@ use gp_core::track::TrackArtifact;
 pub mod fonts;
 pub mod icons;
 pub mod placeholder;
+#[cfg(test)]
+mod test_util;
 pub mod tokens;
 pub mod track;
 pub mod widgets;
@@ -63,7 +65,7 @@ pub fn render_frame(
     painter: &Painter,
     rect: Rect,
     track: &TrackArtifact,
-    cars: &[track::CarRender<'_>],
+    cars: &[CarRender<'_>],
     reduced_motion: bool,
     overlays: Overlays,
 ) {

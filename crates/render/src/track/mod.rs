@@ -14,6 +14,8 @@ mod grid;
 mod heatmap;
 mod regions;
 mod sf;
+#[cfg(test)]
+mod test_support;
 mod transform;
 mod walls;
 
@@ -116,7 +118,7 @@ mod tests {
     use super::LAYER_ORDER;
     use crate::{CarRender, Overlays};
     use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+    use gp_core::geom::{Orient, Point, Side, walls_from_boundary};
     use gp_core::sim::CarState;
     use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
 
@@ -144,21 +146,7 @@ mod tests {
     /// A minimal, hand-built `TrackArtifact` (a 3×3 ring) — every field
     /// `draw_frame` does not read stays at its cheapest valid default.
     fn fixture_track() -> TrackArtifact {
-        let cells: Vec<(i32, i32)> = [
-            (1, 1),
-            (2, 1),
-            (3, 1),
-            (1, 2),
-            (3, 2),
-            (1, 3),
-            (2, 3),
-            (3, 3),
-        ]
-        .to_vec();
-        let mut corridor = Corridor::new(Point::new(0, 0), 5, 5);
-        for (x, y) in cells {
-            corridor.set(Point::new(x, y), true);
-        }
+        let corridor = super::test_support::ring_3x3();
         let walls = walls_from_boundary(&corridor);
         TrackArtifact {
             walls,
@@ -387,10 +375,7 @@ mod tests {
     #[test]
     fn fastest_lap_paint_does_not_mutate() {
         let track = fixture_track_with_metrics();
-        let cells_before: Vec<bool> = (0..5)
-            .flat_map(|y| (0..5).map(move |x| (x, y)))
-            .map(|(x, y)| track.corridor.contains(Point::new(x, y)))
-            .collect();
+        let cells_before = super::test_support::corridor_cells(&track.corridor, 5);
         let fastest_lap_before = track.metrics.fastest_lap.clone();
         let speed_heatmap_before = track.metrics.speed_heatmap.clone();
 
@@ -405,10 +390,7 @@ mod tests {
             },
         );
 
-        let cells_after: Vec<bool> = (0..5)
-            .flat_map(|y| (0..5).map(move |x| (x, y)))
-            .map(|(x, y)| track.corridor.contains(Point::new(x, y)))
-            .collect();
+        let cells_after = super::test_support::corridor_cells(&track.corridor, 5);
         assert_eq!(cells_before, cells_after);
         assert_eq!(fastest_lap_before, track.metrics.fastest_lap);
         assert_eq!(speed_heatmap_before, track.metrics.speed_heatmap);

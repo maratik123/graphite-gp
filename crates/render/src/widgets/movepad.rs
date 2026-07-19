@@ -360,10 +360,10 @@ mod tests {
     fn new_has_expected_defaults() {
         let pad = MovePad::new(BitFlags::all());
         assert!(pad.selected.is_none());
-        crate::tokens::css::assert_f32("MovePad::new size", pad.size, super::SIZE);
+        crate::test_util::assert_f32("MovePad::new size", pad.size, super::SIZE);
 
         let selected = pad.selected(Action::North).size(52.0);
         assert_eq!(selected.selected, Some(Action::North));
-        crate::tokens::css::assert_f32("MovePad::size setter", selected.size, 52.0);
+        crate::test_util::assert_f32("MovePad::size setter", selected.size, 52.0);
     }
 }

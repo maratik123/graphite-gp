@@ -3,7 +3,7 @@
 //! the `HEAT_0` (slowest) → `HEAT_3` (fastest) ramp.
 //!
 //! **Amendment (2026-07-20, design § Key decisions 1):** the heatmap recolors
-//! the *same* Chaikin-smoothed asphalt mesh [`super::regions::fill`] draws,
+//! the *same* Chaikin-smoothed asphalt mesh [`regions::fill`] draws,
 //! per cell, via `Painter::with_clip_rect` — not independent per-cell
 //! squares — so its outer silhouette traces the smoothed boundary exactly
 //! (no more blocky staircase poking past the walls at a corner). The outer
@@ -189,8 +189,8 @@ mod tests {
     use super::super::regions::{self, LoopRoles};
     use super::super::walls;
     use super::{TrackTransform, normalize, paint, ramp_color, speed_bounds};
+    use crate::test_util::assert_f32;
     use crate::tokens::color::{HEAT_0, HEAT_1, HEAT_3, SURFACE_INFIELD};
-    use crate::tokens::css::assert_f32;
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Corridor, Point, walls_from_boundary};
 
@@ -267,32 +267,11 @@ mod tests {
         assert_eq!(ramp_color(2.0), HEAT_3);
     }
 
-    /// A 3×3 ring around one hole cell, over a 5×5 bbox — mirrors
-    /// `regions.rs`'s own `ring_3x3` fixture (duplicated here since that
-    /// helper is private to `regions.rs`).
-    fn ring_3x3() -> Corridor {
-        let cells: [(i32, i32); 8] = [
-            (1, 1),
-            (2, 1),
-            (3, 1),
-            (1, 2),
-            (3, 2),
-            (1, 3),
-            (2, 3),
-            (3, 3),
-        ];
-        let mut d = Corridor::new(Point::new(0, 0), 5, 5);
-        for (x, y) in cells {
-            d.set(Point::new(x, y), true);
-        }
-        d
-    }
-
     /// The ring fixture's chained, Chaikin-smoothed wall loops + outer/hole
     /// role split — exactly what `draw_frame` computes (`mod.rs`) before
     /// calling `heatmap::paint`.
     fn ring_3x3_loops_and_roles() -> (Corridor, Vec<Vec<(f32, f32)>>, LoopRoles) {
-        let d = ring_3x3();
+        let d = crate::track::test_support::ring_3x3();
         let boundary = walls_from_boundary(&d);
         let loops: Vec<Vec<(f32, f32)>> = walls::chain_walls(&boundary)
             .iter()
@@ -321,14 +300,7 @@ mod tests {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
             paint(&painter, transform, loops, roles, heatmap);
         });
-        output
-            .shapes
-            .iter()
-            .filter_map(|clipped| match &clipped.shape {
-                egui::Shape::Mesh(mesh) => Some(mesh.clone()),
-                _ => None,
-            })
-            .collect()
+        crate::track::test_support::captured_meshes(&output.shapes)
     }
 
     /// AC1 — a `K`-cell hand-populated heatmap over the ring fixture emits

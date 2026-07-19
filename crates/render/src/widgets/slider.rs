@@ -173,25 +173,16 @@ impl<'a> Slider<'a> {
         value_text: Option<&str>,
         enabled: bool,
     ) {
-        let opacity = if enabled {
-            1.0
-        } else {
-            super::common::FORMS_DISABLED_OPACITY
-        };
-        let tint = |c: Color32| c.gamma_multiply(opacity);
+        let tint = super::common::tint_fn(enabled);
 
         let has_readout_row = label.is_some() || value_text.is_some();
         let track_y0 = if has_readout_row {
             if let Some(label) = label {
-                painter.text(
+                super::common::paint_form_label(
+                    painter,
                     Pos2::new(rect.min.x, rect.min.y),
-                    Align2::LEFT_TOP,
-                    label.to_uppercase(),
-                    FontId::new(
-                        typography::FS_XS,
-                        FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-                    ),
-                    tint(color::TEXT_MUTED),
+                    label,
+                    &tint,
                 );
             }
             if let Some(value_text) = value_text {
@@ -237,7 +228,10 @@ impl<'a> Slider<'a> {
             style.thumb_shadow
         } else {
             Shadow {
-                color: style.thumb_shadow.color.gamma_multiply(opacity),
+                color: style
+                    .thumb_shadow
+                    .color
+                    .gamma_multiply(super::common::forms_opacity(enabled)),
                 ..style.thumb_shadow
             }
         };
@@ -347,7 +341,7 @@ mod tests {
 
     /// Tolerant `f32` compare — a computed snap result is not bit-identical
     /// to a decimal literal for every input (design § Test Design), so this
-    /// is used instead of `crate::tokens::css::assert_f32`'s exact compare.
+    /// is used instead of `crate::test_util::assert_f32`'s exact compare.
     fn assert_close(label: &str, got: f32, want: f32) {
         assert!(
             (got - want).abs() < 1e-5,
@@ -364,9 +358,9 @@ mod tests {
         assert_eq!(style.thumb_fill, color::PAPER_0);
         assert_eq!(style.thumb_ring, color::GRAPHITE_900);
         assert_eq!(style.thumb_shadow, effects::SHADOW_1);
-        crate::tokens::css::assert_f32("track_h", style.track_h, 4.0);
-        crate::tokens::css::assert_f32("thumb_d", style.thumb_d, 18.0);
-        crate::tokens::css::assert_f32("radius", style.radius, spacing::RADIUS_PILL);
+        crate::test_util::assert_f32("track_h", style.track_h, 4.0);
+        crate::test_util::assert_f32("thumb_d", style.thumb_d, 18.0);
+        crate::test_util::assert_f32("radius", style.radius, spacing::RADIUS_PILL);
     }
 
     /// AC1 — fractional-step snapping, incl. the ULP case.
@@ -413,9 +407,9 @@ mod tests {
     #[test]
     fn new_has_expected_defaults() {
         let slider = Slider::new(50.0);
-        crate::tokens::css::assert_f32("min", slider.min, 0.0);
-        crate::tokens::css::assert_f32("max", slider.max, 100.0);
-        crate::tokens::css::assert_f32("step", slider.step, 1.0);
+        crate::test_util::assert_f32("min", slider.min, 0.0);
+        crate::test_util::assert_f32("max", slider.max, 100.0);
+        crate::test_util::assert_f32("step", slider.step, 1.0);
         assert!(slider.label.is_none());
         assert!(slider.show_value);
         assert!(slider.enabled);

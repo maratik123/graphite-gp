@@ -219,25 +219,17 @@ pub(crate) fn paint(
 #[cfg(test)]
 mod tests {
     use super::{CarRender, arrow_vector, lerp_pos};
-    use crate::track::TrackTransform;
-    use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Corridor, Point};
+    use crate::track::test_support::transform_10x10 as transform;
+    use gp_core::geom::Point;
     use gp_core::sim::CarState;
 
     fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
         CarState { x, y, vx, vy }
     }
 
-    /// A `TrackTransform` over a 10×10 corridor filling a 100×100 rect —
-    /// `cell_size == 10.0`, no centering offset, for readable expected values.
-    fn transform() -> TrackTransform {
-        let d = Corridor::new(Point::new(0, 0), 10, 10);
-        TrackTransform::new(&d, Rect::from_min_max(Pos2::ZERO, pos2(100.0, 100.0)))
-    }
-
     fn assert_pos(label: &str, got: (f32, f32), want: (f32, f32)) {
-        crate::tokens::css::assert_f32(&format!("{label} x"), got.0, want.0);
-        crate::tokens::css::assert_f32(&format!("{label} y"), got.1, want.1);
+        crate::test_util::assert_f32(&format!("{label} x"), got.0, want.0);
+        crate::test_util::assert_f32(&format!("{label} y"), got.1, want.1);
     }
 
     /// AC6 — `t=0` yields the start cell, `t=1` the fully-moved cell,
@@ -278,7 +270,7 @@ mod tests {
         assert_eq!(render.color_index, 2);
         assert_eq!(render.trail, &trail);
         assert!(render.you);
-        crate::tokens::css::assert_f32("progress", render.progress, 0.5);
+        crate::test_util::assert_f32("progress", render.progress, 0.5);
     }
 
     /// AC9 — an out-of-range `color_index` falls back to `CAR_COLORS[0]`,
@@ -299,12 +291,12 @@ mod tests {
         let s = car(2, 3, 1, -2);
         let (origin, vec) = arrow_vector(s, &t).expect("moving car has an arrow");
 
-        crate::tokens::css::assert_f32("arrow origin x", origin.x, t.map((2.0, 3.0)).x);
-        crate::tokens::css::assert_f32("arrow origin y", origin.y, t.map((2.0, 3.0)).y);
+        crate::test_util::assert_f32("arrow origin x", origin.x, t.map((2.0, 3.0)).x);
+        crate::test_util::assert_f32("arrow origin y", origin.y, t.map((2.0, 3.0)).y);
 
         let tip = t.map((3.0, 1.0)); // (x+vx, y+vy) = (3, 1)
-        crate::tokens::css::assert_f32("arrow tip x", origin.x + vec.x, tip.x);
-        crate::tokens::css::assert_f32("arrow tip y", origin.y + vec.y, tip.y);
+        crate::test_util::assert_f32("arrow tip x", origin.x + vec.x, tip.x);
+        crate::test_util::assert_f32("arrow tip y", origin.y + vec.y, tip.y);
 
         // Doubling the speed doubles the arrow's length (length ∝ speed).
         // `Vec2::length` goes through `sqrt`, whose last-bit f32 result differs

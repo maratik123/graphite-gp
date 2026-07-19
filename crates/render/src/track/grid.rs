@@ -118,7 +118,8 @@ pub(crate) fn paint(painter: &Painter, rect: Rect, transform: &TrackTransform) {
 #[cfg(test)]
 mod tests {
     use super::{TrackTransform, line_coords, paint};
-    use crate::tokens::css::assert_f32;
+    use crate::test_util::assert_f32;
+    use crate::track::test_support::transform_10x10 as transform;
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Corridor, Point};
 
@@ -180,13 +181,6 @@ mod tests {
         let last = coords.last().unwrap().0;
         assert!(first - 10.0 < lo, "a line before the first was skippable");
         assert!(last + 10.0 > hi, "a line after the last was skippable");
-    }
-
-    /// A `TrackTransform` over a 10x10 corridor filling a 100x100 rect —
-    /// `cell_size == 10.0`.
-    fn transform() -> TrackTransform {
-        let d = Corridor::new(Point::new(0, 0), 10, 10);
-        TrackTransform::new(&d, Rect::from_min_max(Pos2::ZERO, pos2(100.0, 100.0)))
     }
 
     /// Renders `paint` alone and returns the emitted shape count — mirrors
