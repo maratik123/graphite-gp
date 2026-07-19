@@ -116,12 +116,15 @@ mod tests {
 
         let image = harness.render().expect("offscreen wgpu render failed");
 
-        // Exact compare (spec: threshold(0.0) preferred, raised to 1.0 only
-        // if AA-text noise appears — the project's two prior text-bearing
-        // goldens both needed 1.0; MovePad also draws glyphs).
-        // failed_pixel_count_threshold stays exact (0) either way.
+        // threshold(1.0): matches the three prior text-bearing goldens
+        // (gallery/forms_gallery/game_gallery) — the measured cross-renderer
+        // noise ceiling, 1-level channel rounding on AA glyph pixels. Applied
+        // up-front (owner decision) because MovePad draws arrow + sublabel
+        // glyphs; local mint passes at 0.0, but text goldens historically red
+        // CI at 0.0 (the AA-rounding trap). failed_pixel_count_threshold stays
+        // exact (0), so any real regression (many pixels, or >1-level) fails.
         let options = egui_kittest::SnapshotOptions::new()
-            .threshold(0.0)
+            .threshold(1.0)
             .failed_pixel_count_threshold(0);
         if let Err(err) =
             egui_kittest::try_image_snapshot_options(&image, "movepad_gallery", &options)
