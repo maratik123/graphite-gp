@@ -19,7 +19,7 @@ gp-core = { workspace = true }
 gp-gen = { workspace = true }
 gp-render = { workspace = true }
 gp-ai = { workspace = true }
-eframe = { version = "0.35", default-features = false, features = ["accesskit", "wayland", "web_screen_reader", "wgpu", "x11"] }
+eframe = { workspace = true }
 # `winit` is never `use`d in this crate. It exists solely to carry Cargo
 # features to the single shared winit package via feature unification:
 # `wayland-dlopen` + `wayland-csd-adwaita`, the two members of eframe's
@@ -30,4 +30,4 @@ eframe = { version = "0.35", default-features = false, features = ["accesskit", 
 # of `dlopen`ed — nothing else in the workspace catches that regression, so
 # do not delete this as an "unused dependency" (spec `2026-07-17-render-onest-font-swap`
 # AC18 verifies it).
-winit = { version = "0.30", default-features = true }
+winit = { workspace = true }

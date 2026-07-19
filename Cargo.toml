@@ -34,6 +34,18 @@ gp-ai = { path = "crates/ai" }
 thiserror = "2"
 strum = { version = "0.28", features = ["derive"] }
 enum-map = "2"
+enumflags2 = "0.7"
+rand = { version = "0.10", default-features = false, features = ["alloc"] }
+rand_chacha = { version = "0.10", default-features = false }
+egui = { version = "0.35", default-features = false }
+resvg = { version = "0.47", default-features = false }
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+eframe = { version = "0.35", default-features = false, features = ["accesskit", "wayland", "web_screen_reader", "wgpu", "x11"] }
+winit = { version = "0.30", default-features = true }
+egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
+egui-wgpu = "0.35"
+image = "0.25"
+skrifa = "0.44"
 
 # Workspace-wide lint posture. Each crate opts in via `[lints] workspace = true`.
 # See `ai-docs/code-style.md` for the carve-out discipline behind the allows below.
