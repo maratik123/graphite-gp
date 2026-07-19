@@ -7,6 +7,8 @@
 //! sibling widgets already follow (design § *House pattern*).
 
 mod car;
+#[cfg(test)]
+mod golden;
 mod regions;
 mod sf;
 mod transform;
