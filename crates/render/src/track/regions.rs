@@ -360,32 +360,81 @@ pub(crate) fn triangulate(points: &[Pos2]) -> Vec<[u32; 3]> {
     triangles
 }
 
-/// Triangulates `loop_points` (lattice-space, mapped to screen space via
-/// `transform`) and draws it as one solid-`color` [`Mesh`] — the concave-
-/// capable replacement for `Shape::convex_polygon` (design § Decision).
-/// Loops shorter than a triangle (`< 3` points) draw nothing.
-fn paint_loop_mesh(
-    painter: &Painter,
+/// Maps `loop_points` (lattice-space) to screen space via `transform` and
+/// ear-clips them **once**, returning the shared `(verts, indices)` pair
+/// (design § Key decisions 1 — "triangulate once, reuse the shared index
+/// buffer per cell"): [`paint_mesh`] then colors/clips that same pair as many
+/// times as a caller needs (e.g. `heatmap::paint`'s per-cell recolor) without
+/// re-triangulating. Loops shorter than a triangle (`< 3` points) return no
+/// vertices and no triangles.
+pub(crate) fn triangulated_loop(
     transform: &TrackTransform,
     loop_points: &[(f32, f32)],
-    color: Color32,
-) {
+) -> (Vec<Pos2>, Vec<[u32; 3]>) {
     if loop_points.len() < 3 {
-        return;
+        return (Vec::new(), Vec::new());
     }
     let screen_points: Vec<Pos2> = loop_points
         .iter()
         .copied()
         .map(|p| transform.map(p))
         .collect();
+    let triangles = triangulate(&screen_points);
+    (screen_points, triangles)
+}
+
+/// Builds one solid-`color` [`Mesh`] from *shared* `verts`/`indices` (as
+/// produced by [`triangulated_loop`]) and adds it to `painter` — the
+/// concave-capable replacement for `Shape::convex_polygon` (design §
+/// Decision). Callers that need the same silhouette in several colors, or
+/// clipped to several sub-rects (`Painter::with_clip_rect`), call this once
+/// per coloring/clip without re-triangulating. Empty `verts`/`indices` (a
+/// sub-triangle loop) draws nothing.
+pub(crate) fn paint_mesh(painter: &Painter, verts: &[Pos2], indices: &[[u32; 3]], color: Color32) {
+    if verts.is_empty() || indices.is_empty() {
+        return;
+    }
     let mut mesh = Mesh::default();
-    for &p in &screen_points {
+    for &p in verts {
         mesh.colored_vertex(p, color);
     }
-    for triangle in triangulate(&screen_points) {
+    for triangle in indices {
         mesh.add_triangle(triangle[0], triangle[1], triangle[2]);
     }
     painter.add(Shape::mesh(mesh));
+}
+
+/// Triangulates `loop_points` and draws it as one solid-`color` [`Mesh`] —
+/// composes [`triangulated_loop`] + [`paint_mesh`] for the common one-shot
+/// case (a loop drawn in exactly one color, never reused).
+fn paint_loop_mesh(
+    painter: &Painter,
+    transform: &TrackTransform,
+    loop_points: &[(f32, f32)],
+    color: Color32,
+) {
+    let (verts, indices) = triangulated_loop(transform, loop_points);
+    paint_mesh(painter, &verts, &indices, color);
+}
+
+/// Re-cuts each `roles.holes` loop as a solid-`color` mesh on top of whatever
+/// was drawn before it (mirrors `fill`'s own asphalt-then-infield-on-top
+/// structure) — shared by both [`fill`] and `heatmap::paint`'s post-per-cell
+/// infield re-cut (design § Key decisions 1). `loops` and `roles` must come
+/// from the same `classify_loops` call; an out-of-range role index is
+/// skipped rather than panicking.
+pub(crate) fn paint_infield_holes(
+    painter: &Painter,
+    transform: &TrackTransform,
+    loops: &[Vec<(f32, f32)>],
+    roles: &LoopRoles,
+    color: Color32,
+) {
+    for &idx in &roles.holes {
+        if let Some(loop_points) = loops.get(idx) {
+            paint_loop_mesh(painter, transform, loop_points, color);
+        }
+    }
 }
 
 /// Fills the three regions back-to-front, `outfield → asphalt → infield`
@@ -415,16 +464,13 @@ pub(crate) fn fill(
             );
         }
     }
-    for &idx in &roles.holes {
-        if let Some(loop_points) = loops.get(idx) {
-            paint_loop_mesh(
-                painter,
-                transform,
-                loop_points,
-                crate::tokens::color::SURFACE_INFIELD,
-            );
-        }
-    }
+    paint_infield_holes(
+        painter,
+        transform,
+        loops,
+        roles,
+        crate::tokens::color::SURFACE_INFIELD,
+    );
 }
 
 #[cfg(test)]
