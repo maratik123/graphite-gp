@@ -14,7 +14,7 @@ pub mod setup;
 #[cfg(test)]
 mod setup_gallery;
 
-/// The pilot difficulty a player picks on the `setup::SetupScreen`
+/// The pilot difficulty a player picks on the [`setup::SetupScreen`]
 /// (`docs/design.md` §5 — the softmax skill dial).
 ///
 /// **Ace = lowest temperature** (strong, smooth pilot), **Rookie = highest**
@@ -96,7 +96,7 @@ impl Difficulty {
     }
 }
 
-/// The assembled race configuration emitted by `setup::SetupScreen`.
+/// The assembled race configuration emitted by [`setup::SetupScreen`].
 ///
 /// `cars`/`laps` match `gp_gen::GenParams`' integer domain, `v_target` is the
 /// design input `V_target` (`docs/design.md` §2 \[D3\], **not**
