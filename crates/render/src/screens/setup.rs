@@ -77,7 +77,27 @@ impl SetupScreen {
     ///
     /// Panics at layout time if the caller has not installed
     /// [`crate::fonts::definitions`] first.
+    ///
+    /// Draws into a freshly allocated `Order::Middle` layer rather than
+    /// directly on `ui`'s own layer: `Card::show`'s chrome is painted onto
+    /// `LayerId::background()` explicitly so it renders *behind* its
+    /// `add_contents` (design § `card.rs`), which only holds when the
+    /// caller's own layer outranks `Background`. The app-root `ui` handed to
+    /// `eframe::App::ui` (mirrored by `egui_kittest`'s `Harness::build_ui`,
+    /// both via `egui::Context::run_ui`) is itself on `LayerId::background()`
+    /// — without this, the card's opaque fill would paint over its own
+    /// Stepper/`SegmentedControl`/Slider contents. A screen (unlike a
+    /// sub-widget) is the outermost composition unit for a whole view, so it
+    /// owns this elevation rather than pushing it onto every caller.
     pub fn show(self, ui: &mut Ui) -> SetupResponse {
+        let layer_id = egui::LayerId::new(egui::Order::Middle, ui.id().with("setup_screen"));
+        let mut screen_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .layer_id(layer_id)
+                .max_rect(ui.max_rect()),
+        );
+        let ui = &mut screen_ui;
+
         let mut raw_cars = i32::try_from(self.config.cars).unwrap_or(MAX_CARS);
         let mut raw_laps = i32::try_from(self.config.laps).unwrap_or(MAX_LAPS);
         #[allow(
