@@ -108,83 +108,87 @@ impl SetupScreen {
         let mut raw_v_target = self.config.v_target as f32;
         let mut raw_difficulty = self.config.difficulty;
 
-        let mut generate_response = None;
-
         ui.add_space(spacing::SPACE_12);
 
         let margin = ((ui.available_width() - CONTENT_MAX_W) / 2.0).max(spacing::SPACE_6);
-        ui.horizontal(|ui| {
-            ui.add_space(margin);
-            ui.vertical(|ui| {
-                ui.set_width(CONTENT_MAX_W);
+        let response = ui
+            .horizontal(|ui| {
+                ui.add_space(margin);
+                ui.vertical(|ui| {
+                    ui.set_width(CONTENT_MAX_W);
 
-                draw_wordmark(ui);
-                ui.add_space(spacing::SPACE_8);
+                    draw_wordmark(ui);
+                    ui.add_space(spacing::SPACE_8);
 
-                let card = Card::new()
-                    .eyebrow("New race")
-                    .title("Set up the grid")
-                    .grid(true)
-                    .padding(spacing::SPACE_6);
-                card.show(ui, None::<fn(&mut Ui)>, |ui| {
-                    ui.horizontal(|ui| {
-                        let cars_resp = Stepper::new(raw_cars)
-                            .min(MIN_CARS)
-                            .max(MAX_CARS)
-                            .label("Cars (m)")
-                            .show(ui);
-                        raw_cars = cars_resp.value;
+                    let card = Card::new()
+                        .eyebrow("New race")
+                        .title("Set up the grid")
+                        .grid(true)
+                        .padding(spacing::SPACE_6);
+                    card.show(ui, None::<fn(&mut Ui)>, |ui| {
+                        ui.horizontal(|ui| {
+                            let cars_resp = Stepper::new(raw_cars)
+                                .min(MIN_CARS)
+                                .max(MAX_CARS)
+                                .label("Cars (m)")
+                                .show(ui);
+                            raw_cars = cars_resp.value;
 
-                        ui.add_space(spacing::SPACE_8);
+                            ui.add_space(spacing::SPACE_8);
 
-                        let laps_resp = Stepper::new(raw_laps)
-                            .min(MIN_LAPS)
-                            .max(MAX_LAPS)
-                            .label("Laps")
-                            .show(ui);
-                        raw_laps = laps_resp.value;
+                            let laps_resp = Stepper::new(raw_laps)
+                                .min(MIN_LAPS)
+                                .max(MAX_LAPS)
+                                .label("Laps")
+                                .show(ui);
+                            raw_laps = laps_resp.value;
+                        });
+
+                        ui.add_space(spacing::SPACE_6);
+
+                        draw_mono_label(ui, "Difficulty (pilot temperature)");
+                        ui.add_space(spacing::SPACE_2);
+
+                        let seg_resp =
+                            SegmentedControl::new(&DIFFICULTY_LABELS, raw_difficulty.label())
+                                .show(ui);
+                        if let Some(index) = seg_resp.selected
+                            && let Some(difficulty) = Difficulty::from_index(index)
+                        {
+                            raw_difficulty = difficulty;
+                        }
+
+                        ui.add_space(spacing::SPACE_6);
+
+                        let slider_resp = Slider::new(raw_v_target)
+                            .min(MIN_V_TARGET)
+                            .max(MAX_V_TARGET)
+                            .step(V_TARGET_STEP)
+                            .label("V_target (design speed)")
+                            .show(ui, format_v_target);
+                        raw_v_target = slider_resp.value;
                     });
 
                     ui.add_space(spacing::SPACE_6);
 
-                    draw_mono_label(ui, "Difficulty (pilot temperature)");
-                    ui.add_space(spacing::SPACE_2);
+                    let response = ui
+                        .vertical_centered(|ui| {
+                            Button::new("Generate track")
+                                .variant(ButtonVariant::Primary)
+                                .size(Size::Lg)
+                                .show(ui)
+                        })
+                        .inner;
 
-                    let seg_resp =
-                        SegmentedControl::new(&DIFFICULTY_LABELS, raw_difficulty.label()).show(ui);
-                    if let Some(index) = seg_resp.selected
-                        && let Some(difficulty) = Difficulty::from_index(index)
-                    {
-                        raw_difficulty = difficulty;
-                    }
+                    ui.add_space(spacing::SPACE_3);
+                    draw_footer(ui);
 
-                    ui.add_space(spacing::SPACE_6);
+                    response
+                })
+                .inner
+            })
+            .inner;
 
-                    let slider_resp = Slider::new(raw_v_target)
-                        .min(MIN_V_TARGET)
-                        .max(MAX_V_TARGET)
-                        .step(V_TARGET_STEP)
-                        .label("V_target (design speed)")
-                        .show(ui, format_v_target);
-                    raw_v_target = slider_resp.value;
-                });
-
-                ui.add_space(spacing::SPACE_6);
-
-                ui.vertical_centered(|ui| {
-                    let response = Button::new("Generate track")
-                        .variant(ButtonVariant::Primary)
-                        .size(Size::Lg)
-                        .show(ui);
-                    generate_response = Some(response);
-                });
-
-                ui.add_space(spacing::SPACE_3);
-                draw_footer(ui);
-            });
-        });
-
-        let response = generate_response.expect("the button row unconditionally runs inside show");
         let generated = response.clicked();
         let config = assemble(raw_cars, raw_laps, raw_v_target, raw_difficulty);
 

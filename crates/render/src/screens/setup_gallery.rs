@@ -11,13 +11,13 @@
 use super::setup::SetupScreen;
 use super::{Difficulty, RaceConfig};
 
-/// The golden's fixed canvas: 640×760 logical points at
+/// The golden's fixed canvas: 640×620 logical points at
 /// `pixels_per_point = 1.0` — taller than `widgets/game_gallery.rs`'s
 /// 640×420 to fit the stacked `SetupScreen` (wordmark + card + button +
 /// footer, design § *Golden test*). Confirmed at mint: the full stack fits
-/// with a small margin below the footer — a fresh 760px start clipped
-/// nothing but left ~170px of dead space, so this is trimmed down from that
-/// starting point rather than left oversized.
+/// with a small margin below the footer — the design's fresh 760px start
+/// clipped nothing but left ~170px of dead space, so this is trimmed down
+/// to 620 from that starting point rather than left oversized.
 const CANVAS_SIZE: egui::Vec2 = egui::Vec2::new(640.0, 620.0);
 
 /// The fixed config the golden renders — mid-range values so every widget
