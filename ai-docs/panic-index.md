@@ -4,5 +4,5 @@ Every intentional panicking call (`panic!`, `unwrap`, `expect`, panicking index/
 
 | File:line | Call | Why it cannot fire (or is unrecoverable) |
 |-----------|------|------------------------------------------|
-| `crates/render/src/screens/setup.rs:227` | `u32::try_from(cars).expect("cars is clamped to [2,6] — always fits u32")` | `cars` is `.clamp(MIN_CARS, MAX_CARS)` = `[2, 6]` immediately above, so the `i32 → u32` conversion always succeeds. |
-| `crates/render/src/screens/setup.rs:228` | `u32::try_from(laps).expect("laps is clamped to [1,9] — always fits u32")` | `laps` is `.clamp(MIN_LAPS, MAX_LAPS)` = `[1, 9]` immediately above, so the `i32 → u32` conversion always succeeds. |
+| `crates/render/src/screens/setup.rs:229` | `u32::try_from(cars).expect("cars is clamped to [2,6] — always fits u32")` | `cars` is `.clamp(MIN_CARS, MAX_CARS)` = `[2, 6]` immediately above, so the `i32 → u32` conversion always succeeds. |
+| `crates/render/src/screens/setup.rs:230` | `u32::try_from(laps).expect("laps is clamped to [1,9] — always fits u32")` | `laps` is `.clamp(MIN_LAPS, MAX_LAPS)` = `[1, 9]` immediately above, so the `i32 → u32` conversion always succeeds. |
