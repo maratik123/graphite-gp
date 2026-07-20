@@ -32,6 +32,8 @@ const FIXED_CONFIG: RaceConfig = RaceConfig {
 #[cfg(test)]
 mod tests {
     use super::{CANVAS_SIZE, FIXED_CONFIG, SetupScreen};
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     /// `AC8b` / AC5 / AC7 — one wgpu frame renders the whole `SetupScreen`
     /// (wordmark + card with the four inputs + primary button + footer) at
@@ -91,5 +93,104 @@ mod tests {
         {
             panic!("{err}");
         }
+    }
+
+    /// AC6 — the gap the golden cannot reach: it renders no pointer input,
+    /// so `generated`'s `.clicked()` wiring and the widget-value → `assemble`
+    /// plumbing are never exercised there. Default (non-wgpu) harness, no
+    /// `render()` — asserts on the returned `SetupResponse`, not pixels.
+    ///
+    /// Rest frame: `generated == false` ("emits nothing until pressed") and
+    /// `resp.config == FIXED_CONFIG` (the value plumbing round-trips through
+    /// the real `show`/`assemble`). Click frame: `hover_at` → `drag_at` →
+    /// `drop_at` at the captured rest-frame `resp.response.rect.center()`
+    /// (deterministic — no accessible label to query, § design *Interaction
+    /// test*) → `generated == true` on some pass, config unchanged.
+    ///
+    /// Miri-ignored: NOT for the golden's reason (no `render()` here, so no
+    /// Vulkan `dlopen`) — `Harness::builder()` itself aborts under Miri
+    /// isolation, since its default `SnapshotOptions`/`Config::global()`
+    /// calls `std::env::current_dir()` (`getcwd`) while searching for a
+    /// `kittest.toml`, which Miri's isolation blocks. Measured via
+    /// `MIRIFLAGS=-Zmiri-tree-borrows cargo +nightly miri test -p gp-render
+    /// setup_screen_generate_click`: the abort is `getcwd not available when
+    /// isolation is enabled`, with a backtrace through
+    /// `egui_kittest::config::find_kittest_toml`.
+    #[cfg_attr(
+        miri,
+        ignore = "Harness::builder() calls getcwd via egui_kittest's kittest.toml \
+                  lookup, unsupported under Miri isolation (measured — not the \
+                  golden's Vulkan-dlopen cause, since this test never calls render())"
+    )]
+    #[test]
+    fn setup_screen_generate_click_plumbs_config_and_flag() {
+        // `generated` is a one-shot, single-frame flag (true only on the
+        // exact pass the click registers, false again on the very next
+        // pass — egui's multi-pass layout can run several internal passes
+        // per `step()`/`run()` call, so a plain "latest frame" `Cell` can
+        // miss it entirely). `saw_generated` OR-accumulates across every
+        // pass instead of overwriting, so it can't miss a one-frame pulse
+        // regardless of how many internal passes occur. `latest_config`
+        // still only needs the latest value: no widget other than the
+        // button is ever interacted with, so it stays `FIXED_CONFIG` on
+        // every pass.
+        let saw_generated = Rc::new(Cell::new(false));
+        let latest_config: Rc<Cell<Option<super::RaceConfig>>> = Rc::new(Cell::new(None));
+        let latest_rect: Rc<Cell<Option<egui::Rect>>> = Rc::new(Cell::new(None));
+        let saw_generated_for_closure = Rc::clone(&saw_generated);
+        let latest_config_for_closure = Rc::clone(&latest_config);
+        let latest_rect_for_closure = Rc::clone(&latest_rect);
+
+        let mut fonts_installed = false;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(CANVAS_SIZE)
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
+                let resp = SetupScreen::new(FIXED_CONFIG).show(ui);
+                if resp.generated {
+                    saw_generated_for_closure.set(true);
+                }
+                latest_config_for_closure.set(Some(resp.config));
+                latest_rect_for_closure.set(Some(resp.response.rect));
+            });
+
+        // Frame 2 (frame 1 installed fonts inside `build_ui` itself): draws
+        // at rest, no pointer input queued yet.
+        harness.run_steps(1);
+
+        assert!(
+            !saw_generated.get(),
+            "AC6: nothing is emitted before the button is pressed"
+        );
+        assert_eq!(
+            latest_config.get(),
+            Some(FIXED_CONFIG),
+            "the rest-frame config round-trips the fixed widget values"
+        );
+
+        let center = latest_rect
+            .get()
+            .expect("rest frame captured the button rect")
+            .center();
+        harness.hover_at(center);
+        harness.step();
+        harness.drag_at(center);
+        harness.step();
+        harness.drop_at(center);
+        harness.step();
+
+        assert!(
+            saw_generated.get(),
+            "AC6: clicking Generate track sets generated == true on some pass"
+        );
+        assert_eq!(
+            latest_config.get(),
+            Some(FIXED_CONFIG),
+            "the config is unchanged by the click itself"
+        );
     }
 }
