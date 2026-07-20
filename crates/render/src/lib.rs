@@ -16,12 +16,14 @@ use gp_core::track::TrackArtifact;
 pub mod fonts;
 pub mod icons;
 pub mod placeholder;
+pub mod screens;
 #[cfg(test)]
 mod test_util;
 pub mod tokens;
 pub mod track;
 pub mod widgets;
 
+pub use screens::{Difficulty, RaceConfig};
 pub use track::CarRender;
 
 /// Optional analytics overlays (design doc §4).
