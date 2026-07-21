@@ -172,6 +172,7 @@ mod tests {
             start_grid: gp_core::track::StartGrid::default(),
             centerline: gp_core::track::Centerline::default(),
             metrics: gp_core::track::TrackMetrics::default(),
+            width_min: 1,
         }
     }
 
