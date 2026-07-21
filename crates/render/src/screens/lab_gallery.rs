@@ -2,7 +2,7 @@
 //! mirrors `setup_gallery.rs`'s frame-1-install / frame-2-draw dance and
 //! Rc<Cell> click-rect-capture idiom (design § *Test Design*).
 
-use super::lab::{LabScreen, PhaseStatus};
+use super::lab::{LabInput, LabScreen, PhaseStatus};
 use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
 use gp_core::track::{
     Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackArtifact, TrackMetrics,
@@ -100,7 +100,7 @@ fn fixture_track() -> TrackArtifact {
 
 #[cfg(test)]
 mod tests {
-    use super::{CANVAS_SIZE, FIXED_PHASES, FIXED_SEED, LabScreen, fixture_track};
+    use super::{CANVAS_SIZE, FIXED_PHASES, FIXED_SEED, LabInput, LabScreen, fixture_track};
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -141,7 +141,13 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let _ = LabScreen::new(&track, FIXED_PHASES, true, FIXED_SEED).show(ui);
+                let _ = LabScreen::new(LabInput {
+                    track: &track,
+                    phases: FIXED_PHASES,
+                    valid: true,
+                    seed: FIXED_SEED,
+                })
+                .show(ui);
             });
 
         harness.run_steps(1);
@@ -194,7 +200,13 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let resp = LabScreen::new(&track, FIXED_PHASES, true, FIXED_SEED).show(ui);
+                let resp = LabScreen::new(LabInput {
+                    track: &track,
+                    phases: FIXED_PHASES,
+                    valid: true,
+                    seed: FIXED_SEED,
+                })
+                .show(ui);
                 if resp.regenerate {
                     saw_regenerate_c.set(true);
                 }

@@ -24,7 +24,7 @@ pub mod track;
 pub mod widgets;
 
 pub use screens::{
-    Difficulty, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceResponse, RaceScreen,
+    Difficulty, LabInput, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceResponse, RaceScreen,
 };
 pub use track::CarRender;
 

@@ -143,41 +143,45 @@ pub struct LabResponse {
     pub menu_response: Response,
 }
 
+/// The required frame-immutable inputs for [`LabScreen::new`].
+///
+/// Bundles the canvas fixture (also the source of all 4 oracle tiles), the 7
+/// caller-supplied generation-phase statuses, and the header `valid`/`seed`
+/// into one cohesive value (design `2026-07-22-consolidate-render-inputs`).
+#[derive(Clone, Copy, Debug)]
+pub struct LabInput<'a> {
+    /// The track fixture — drives the canvas and all 4 oracle-report tiles.
+    pub track: &'a TrackArtifact,
+    /// The Ф1–Ф7 generation-pipeline phase statuses, in [`PHASE_IDS`] order.
+    pub phases: [PhaseStatus; 7],
+    /// The header validity flag (`VALID`/`INVALID` badge).
+    pub valid: bool,
+    /// The header `seed <N>` tag value.
+    pub seed: i32,
+}
+
 /// `LabScreen` builder.
 ///
-/// Holds the per-frame draw data by reference (the canvas fixture + all 4
-/// oracle tiles, the phase statuses, the header `valid`/`seed`, and two
+/// Holds the per-frame draw data (the required [`LabInput`] plus two
 /// optional icon handles). `Copy` (mirrors every other screen/widget
 /// builder); not `Debug` — `Option<&TextureHandle>` holds
 /// `egui::TextureHandle`, which has no `Debug` (`Button`'s reason,
 /// `button.rs`).
 #[derive(Clone, Copy)]
 pub struct LabScreen<'a> {
-    track: &'a TrackArtifact,
-    phases: [PhaseStatus; 7],
-    valid: bool,
-    seed: i32,
+    input: LabInput<'a>,
     regenerate_icon: Option<&'a TextureHandle>,
     test_lap_icon: Option<&'a TextureHandle>,
 }
 
 impl<'a> LabScreen<'a> {
-    /// Builds a `LabScreen` from `track` (canvas + oracle tiles), the 7
-    /// caller-supplied `phases`, the header `valid` flag, and `seed`. No
-    /// icons by default (text-only action buttons) — set them via
+    /// Builds a `LabScreen` from the required [`LabInput`]. No icons by
+    /// default (text-only action buttons) — set them via
     /// [`Self::regenerate_icon`] / [`Self::test_lap_icon`].
     #[must_use]
-    pub const fn new(
-        track: &'a TrackArtifact,
-        phases: [PhaseStatus; 7],
-        valid: bool,
-        seed: i32,
-    ) -> Self {
+    pub const fn new(input: LabInput<'a>) -> Self {
         Self {
-            track,
-            phases,
-            valid,
-            seed,
+            input,
             regenerate_icon: None,
             test_lap_icon: None,
         }
@@ -244,11 +248,11 @@ impl<'a> LabScreen<'a> {
             Pos2::new(col_left_rect.max.x, action_rect.min.y - COL_LEFT_GAP),
         );
 
-        let menu_response = draw_header(ui, header_rect, self.valid, self.seed);
-        draw_canvas(ui, canvas_rect, self.track);
+        let menu_response = draw_header(ui, header_rect, self.input.valid, self.input.seed);
+        draw_canvas(ui, canvas_rect, self.input.track);
         let (regenerate_response, test_lap_response) =
             draw_action_row(ui, action_rect, self.regenerate_icon, self.test_lap_icon);
-        draw_right_column(ui, col_right_rect, self.track, self.phases);
+        draw_right_column(ui, col_right_rect, self.input.track, self.input.phases);
 
         LabResponse {
             regenerate: regenerate_response.clicked(),

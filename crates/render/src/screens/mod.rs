@@ -23,7 +23,7 @@ pub mod setup;
 #[cfg(test)]
 mod setup_gallery;
 
-pub use lab::{LabResponse, LabScreen, PhaseStatus};
+pub use lab::{LabInput, LabResponse, LabScreen, PhaseStatus};
 pub use race::{RaceResponse, RaceScreen};
 pub use results::{RaceSummary, ResultsResponse, ResultsScreen, StandingEntry};
 
