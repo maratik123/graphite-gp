@@ -6,7 +6,8 @@
 
 use crate::tokens::{color, spacing, typography};
 use egui::{
-    Align2, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui,
+    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind,
+    Ui,
 };
 
 /// Gap between the header row and the cells row (`LapMeter.jsx`: `gap: 6`) —
@@ -32,6 +33,20 @@ pub struct LapMeterStyle {
     pub total: i32,
 }
 
+/// The pure on-ink color-trio resolution output of [`LapMeter::ink_colors`]
+/// (design § *The `LapMeter`-on-dark-band port gap*, mirrors
+/// [`super::telemetry::TelemetryStyle`]'s color split).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LapMeterColors {
+    /// The header label color.
+    pub label: Color32,
+    /// The laps-done readout color — the load-bearing legibility fix
+    /// (`PAPER_0` on-ink, `TEXT_INK` off-ink).
+    pub done: Color32,
+    /// The `/total` readout color (`TEXT_FAINT` in both modes).
+    pub total: Color32,
+}
+
 /// `LapMeter` props (`LapMeter.d.ts`): `lap`, `total`, `label`.
 #[derive(Clone, Copy, Debug)]
 pub struct LapMeter<'a> {
@@ -41,16 +56,21 @@ pub struct LapMeter<'a> {
     pub total: i32,
     /// The header label (`LapMeter.d.ts` `label`, default `"LAP"`).
     pub label: &'a str,
+    /// On-ink render mode (Rust-only field beyond the `.d.ts`, mirrors
+    /// `Telemetry::on_ink`): swaps the label/done/total colors for their
+    /// on-ink equivalents so the meter stays legible on a dark band.
+    pub on_ink: bool,
 }
 
 impl<'a> LapMeter<'a> {
-    /// Builds a `"LAP"`-labelled lap meter for `lap` of `total`.
+    /// Builds a `"LAP"`-labelled, off-ink lap meter for `lap` of `total`.
     #[must_use]
     pub const fn new(lap: i32, total: i32) -> Self {
         Self {
             lap,
             total,
             label: DEFAULT_LABEL,
+            on_ink: false,
         }
     }
 
@@ -58,6 +78,13 @@ impl<'a> LapMeter<'a> {
     #[must_use]
     pub const fn label(mut self, label: &'a str) -> Self {
         self.label = label;
+        self
+    }
+
+    /// Sets `on_ink`.
+    #[must_use]
+    pub const fn on_ink(mut self, on_ink: bool) -> Self {
+        self.on_ink = on_ink;
         self
     }
 
@@ -77,6 +104,31 @@ impl<'a> LapMeter<'a> {
         LapMeterStyle { done, total }
     }
 
+    /// The pure on-ink color-resolution layer (mirrors
+    /// [`super::telemetry::Telemetry::resolve`]): `on_ink` → the
+    /// `(label, done, total)` color trio. No `egui::Ui`, no allocation —
+    /// Miri-clean, const-stable.
+    ///
+    /// On-ink: `label = TEXT_FAINT`, `done = PAPER_0` (legible on the dark
+    /// `GRAPHITE_900` HUD band), `total = TEXT_FAINT`. Off-ink (current):
+    /// `label = TEXT_MUTED`, `done = TEXT_INK`, `total = TEXT_FAINT`.
+    #[must_use]
+    pub const fn ink_colors(on_ink: bool) -> LapMeterColors {
+        if on_ink {
+            LapMeterColors {
+                label: color::TEXT_FAINT,
+                done: color::PAPER_0,
+                total: color::TEXT_FAINT,
+            }
+        } else {
+            LapMeterColors {
+                label: color::TEXT_MUTED,
+                done: color::TEXT_INK,
+                total: color::TEXT_FAINT,
+            }
+        }
+    }
+
     /// Draws the resolved `style` into `rect`: a header row (uppercase
     /// `label` + `done/total` readout) above a row of `style.total`
     /// equal-width cells, the first `style.done` filled `ACCENT`.
@@ -86,13 +138,19 @@ impl<'a> LapMeter<'a> {
     /// Panics at layout time if the caller has not installed
     /// [`crate::fonts::definitions`] first — draws through
     /// `FontFamily::Name(fonts::JETBRAINS_MONO_BOLD/_REGULAR)`.
-    pub(crate) fn paint(painter: &Painter, rect: Rect, style: LapMeterStyle, label: &str) {
+    pub(crate) fn paint(
+        painter: &Painter,
+        rect: Rect,
+        style: LapMeterStyle,
+        label: &str,
+        colors: LapMeterColors,
+    ) {
         let label_font = FontId::new(
             typography::FS_XS,
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
         );
         let label_width = painter
-            .layout_no_wrap(label.to_uppercase(), label_font.clone(), color::TEXT_MUTED)
+            .layout_no_wrap(label.to_uppercase(), label_font.clone(), colors.label)
             .rect
             .width();
 
@@ -103,11 +161,11 @@ impl<'a> LapMeter<'a> {
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_BOLD.into()),
         );
         let done_width = painter
-            .layout_no_wrap(done_text.clone(), done_font.clone(), color::TEXT_INK)
+            .layout_no_wrap(done_text.clone(), done_font.clone(), colors.done)
             .rect
             .width();
         let total_width = painter
-            .layout_no_wrap(total_text.clone(), done_font.clone(), color::TEXT_FAINT)
+            .layout_no_wrap(total_text.clone(), done_font.clone(), colors.total)
             .rect
             .width();
         let readout_width = done_width + total_width;
@@ -122,21 +180,21 @@ impl<'a> LapMeter<'a> {
             Align2::LEFT_TOP,
             label.to_uppercase(),
             label_font,
-            color::TEXT_MUTED,
+            colors.label,
         );
         painter.text(
             Pos2::new(readout_left, rect.min.y),
             Align2::LEFT_TOP,
             done_text,
             done_font.clone(),
-            color::TEXT_INK,
+            colors.done,
         );
         painter.text(
             Pos2::new(readout_left + done_width, rect.min.y),
             Align2::LEFT_TOP,
             total_text,
             done_font,
-            color::TEXT_FAINT,
+            colors.total,
         );
 
         let header_height = typography::FS_TITLE;
@@ -190,12 +248,13 @@ impl<'a> LapMeter<'a> {
     /// `paint` layer this delegates to).
     pub fn show(self, ui: &mut Ui) -> Response {
         let style = Self::resolve(self.lap, self.total);
+        let colors = Self::ink_colors(self.on_ink);
         let width = ui.available_width();
         let height = typography::FS_TITLE + ROW_GAP + CELL_HEIGHT;
         let desired = egui::vec2(width, height);
         let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
         if ui.is_rect_visible(rect) {
-            Self::paint(ui.painter(), rect, style, self.label);
+            Self::paint(ui.painter(), rect, style, self.label, colors);
         }
         response
     }
@@ -204,6 +263,7 @@ impl<'a> LapMeter<'a> {
 #[cfg(test)]
 mod tests {
     use super::{DEFAULT_LABEL, LapMeter};
+    use crate::tokens::color;
 
     /// AC4 — `lap <= 0` clamps `done` to `0`.
     #[test]
@@ -254,5 +314,34 @@ mod tests {
 
         let renamed = meter.label("TOUR");
         assert_eq!(renamed.label, "TOUR");
+        assert!(!meter.on_ink);
+    }
+
+    /// AC1 — `on_ink` builder sets the field.
+    #[test]
+    fn on_ink_builder_sets_field() {
+        let meter = LapMeter::new(2, 5).on_ink(true);
+        assert!(meter.on_ink);
+    }
+
+    /// AC1 — off-ink `ink_colors` returns the current trio unchanged:
+    /// `label = TEXT_MUTED`, `done = TEXT_INK`, `total = TEXT_FAINT`.
+    #[test]
+    fn ink_colors_off_ink_is_current_trio() {
+        let colors = LapMeter::ink_colors(false);
+        assert_eq!(colors.label, color::TEXT_MUTED);
+        assert_eq!(colors.done, color::TEXT_INK);
+        assert_eq!(colors.total, color::TEXT_FAINT);
+    }
+
+    /// AC1 — on-ink `ink_colors` promotes `done` to `PAPER_0` (legible on
+    /// the dark `GRAPHITE_900` HUD band), mirroring
+    /// `Telemetry::resolve_on_ink_overrides_default_and_muted`.
+    #[test]
+    fn ink_colors_on_ink_promotes_done_to_paper_0() {
+        let colors = LapMeter::ink_colors(true);
+        assert_eq!(colors.label, color::TEXT_FAINT);
+        assert_eq!(colors.done, color::PAPER_0);
+        assert_eq!(colors.total, color::TEXT_FAINT);
     }
 }
