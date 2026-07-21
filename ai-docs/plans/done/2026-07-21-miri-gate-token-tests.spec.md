@@ -89,8 +89,8 @@
 
 - **B.2 CI wall-clock budget guard** | a concrete threshold can only be derived
   from post-B.1 measured numbers, and it is a distinct `ci.yml` change with its
-  own `actionlint` gate | separate issue: keep **#107 open** after this partial
-  resolve (this task is **Refs #107**, NOT Closes).
+  own `actionlint` gate | its OWN issue via the deferred-inbox → `/triage` flow
+  (NOT held under #107 — this task **Closes #107**, B.1 being its last lever).
 
 ## Key decisions
 
@@ -141,7 +141,7 @@
 | AC7 | The Propagation Rule grep sweep is run for the AGENTS.md edit and every match updated in the same PR (re-verify whether the sweep is negative, as with #106/#108, rather than assuming). |
 | AC8 | AGENTS.md stays under the 40,000-char hard cap after the edit (`wc -c AGENTS.md`). |
 | AC9 | `cargo build`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --check`, and `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` all pass. |
-| AC10 | The PR references the issue as **Refs #107** (partial resolve — B.2 keeps #107 open), NOT Closes. |
+| AC10 | The PR **Closes #107** on merge (B.1 fully resolves it); the deferred B.2 CI wall-clock budget guard is tracked separately via inbox→`/triage`→its own issue, NOT under #107. |
 
 ## Open questions
 
