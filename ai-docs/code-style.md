@@ -40,6 +40,12 @@ Golden snapshot tests (`egui_kittest`) pick their compare tolerance by **content
 
 `failed_pixel_count_threshold(0)` stays exact in both classes — the colour `threshold` is the sole absorbing lever. Do **not** adopt a "mint at 0.0, bump to 1.0 only if CI reds" strategy for a text golden: it knowingly schedules a wasted red-CI round on a question the precedent has already answered. `image-check` cannot catch a wrong threshold — it owns presence / shape / colour / position and explicitly disclaims AA / rounding, which the golden's exact compare owns.
 
+## Shared-boundary fill/stroke consistency
+When a render layers a **fill** and a **stroke** for the *same* boundary, both MUST be built from the **same boundary geometry**. A smoothed outline (e.g. Chaikin) stroked over square per-cell fills — or the reverse — disagrees at every corner *by construction*, producing staircase notches / colour bleed that every automated gate misses: it passes `image-check`, exact compare, `self-review`, and CI; the product owner caught it twice (`track.png` per-cell `rect_filled` under a Chaikin-smoothed `closed_line` wall stroke; the speed-heatmap staircase past the same smoothed boundary).
+
+- **Rule:** fill the region by recolouring the **shared** smoothed mesh — triangulate the boundary once, then tint / clip per-cell against that mesh — never draw independent unit-square `rect_filled` cells beneath a smoothed stroke of the same boundary.
+- A design's § Risks flagging "convex-corner bleed" is **not** a substitute: the second occurrence shipped *with* that note. The geometry must be shared in the code, not merely risk-annotated.
+
 ## Error types
 `thiserror` for new error enum/struct; hand-rolled `Display`/`Error` only where the derive cannot express it.
 

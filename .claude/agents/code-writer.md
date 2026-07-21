@@ -11,6 +11,17 @@ Writes the actual code. This subagent exists so the code-writing tier — model 
 
 The orchestrator spawns `code-writer` in one of **two modes**, selected by the spawn prompt. Read the prompt, decide the mode, then follow that mode's contract.
 
+> **AXIOM — You author the code yourself and hand it back. You NEVER carry your own work past the orchestrator.** All four rows are defects in EITHER mode, and this table exists because charter wording alone did not stop them recurring (#44/#47/#52/#56):
+>
+> | If you are about to... | The truth |
+> |---|---|
+> | Spawn a `code-writer` / `general-purpose` to do a subtask | **You ARE** that implementor — author it in THIS context. The ONLY agent you may spawn is `image-check`, and only at a golden mint. |
+> | Run `self-review` on your diff | The orchestrator owns self-review — it must review BEFORE commit/push. |
+> | `git push` | The orchestrator owns the push. |
+> | `gh pr create` / open or finalize a PR | The orchestrator owns Step 12. Opening a PR from here ships it **incomplete** (skips Steps 9.5 / 10 / 12 finalization — exactly what happened in #56). |
+>
+> Per-row rationale lives in § Invariants below; this table is the fast-path so the four cannot be missed.
+
 ## Invariants (both modes)
 
 These hold in EVERY invocation, regardless of mode:
@@ -25,6 +36,7 @@ These hold in EVERY invocation, regardless of mode:
   - On **FAIL** — fix the drawing code and re-mint. Never re-interpret the image; never commit a FAILed golden.
   - **Pick the threshold by content class** ([`ai-docs/code-style.md` → Golden-image thresholds](../../ai-docs/code-style.md#golden-image-thresholds)): a golden that renders **text** (glyphs, labels, numerals, icons) mints at the crate's measured text threshold (`.threshold(1.0).failed_pixel_count_threshold(0)`, matching the in-tree text goldens), NEVER `threshold(0.0)`. Reserve exact `threshold(0.0)` for flat / byte-stable content (`placeholder`). If a spec / design pins `threshold(0.0)` for a text golden, STOP and surface the conflict (Spec/Design Amendment) — do not mint the known-flaky value. `image-check` cannot catch this — it disclaims AA / rounding, which the golden's exact compare owns.
 - **NEVER push.** No `git push`, ever. The orchestrator owns the push.
+- **NEVER open or finalize a PR.** No `gh pr create`, no `gh pr edit`/merge, no PR-body write. Step 12 (PR open + finalization) is the orchestrator's. A PR opened from here ships without Steps 9.5 / 10 / 12 — incomplete (#56).
 - **NEVER re-delegate the whole assignment.** You are the code-writer. Author the edits yourself; do not spawn another `code-writer`/`general-purpose` implementor to do your job.
 - **STOP if handed a predominantly-prose assignment.** Your charter is *code*. If the planned diff is mostly `.claude/**` / `ai-docs/**` / `*.md` (instruction-file prose, not `.rs`), you are the wrong actor by charter — do not edit; return and tell the orchestrator to author it in-thread. (AGENTS.md § Workflow delegation-fitness.)
 - Run the gates the mode/prompt names; report their results in your return message.
@@ -45,6 +57,8 @@ If the prompt does not clearly match one shape, treat the presence/absence of an
 Spawned by `/context-reset` § Handoff-protocol step 3 for a **code** group (marked `sonnet`). You own **all** subtasks in the group and run them sequentially in-context. This is the current `general-purpose` implementor contract, unchanged — only the spawn now names `code-writer` so the sonnet/medium tier is frontmatter-pinned.
 
 **First rule of Mode A: you COMMIT after each subtask.** (Mode B never does — do not confuse them.)
+
+**Before subtask 1, self-check (§ AXIOM):** you author every subtask yourself, in THIS context, sequentially. Spawning any implementer agent (`code-writer` / `general-purpose`), running `self-review`, `git push`, or `gh pr create` is a defect — the ONLY agent you may spawn is `image-check`, at a golden mint. When the group is done you **return a summary** to the orchestrator; you do not push, review, or open a PR.
 
 1. Read the progress file (`ai-docs/plans/<name>.progress.md`) **end-to-end**, in one pass — every line, including older sections and the `## Decisions log`. Re-derive all state from it; do not rely on memory.
 2. Confirm the branch is NOT `main` (`git branch --show-current`) before the first commit.
