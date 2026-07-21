@@ -14,6 +14,8 @@ pub mod lab;
 #[cfg(test)]
 mod lab_gallery;
 pub mod race;
+#[cfg(test)]
+mod race_gallery;
 pub mod setup;
 #[cfg(test)]
 mod setup_gallery;
