@@ -10,6 +10,13 @@
 //! with the smoothed stroke at corners). [`classify`]/[`RegionCells`] (the
 //! cell-based flood-fill classifier this fill used to draw from) are retained
 //! as the test-only AC1/AC2 oracle — see their doc comments.
+//!
+//! **Miri:** `tests::fill_emits_asphalt_mesh_then_infield_mesh` stands up an
+//! `egui::Context` and runs `fill` through a `run_ui` pass, so it carries
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-render-tests`) — wall-clock cost, not an abort. The
+//! remaining `classify_loops_*`/`triangulate_*`/pure-set-theory tests build
+//! no `Context` and stay un-gated.
 
 use super::TrackTransform;
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape};
@@ -712,6 +719,12 @@ mod tests {
     /// A2 (fill order) — `fill` emits the outer loop as an `ASPHALT` mesh
     /// then the hole loop as a `SURFACE_INFIELD` mesh, in that order.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "this test drives a Context::run_ui + layer_painter pass \
+                  through regions::fill, capturing the asphalt/infield \
+                  meshes — interpreted-pass wall-clock cost, not an abort"
+    )]
     fn fill_emits_asphalt_mesh_then_infield_mesh() {
         let loops = ring_3x3_smoothed_loops();
         let roles = classify_loops(&loops);
