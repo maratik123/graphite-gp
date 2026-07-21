@@ -2,7 +2,7 @@
 //! mirrors `race_gallery.rs`'s frame-1-install / frame-2-draw dance and
 //! `Rc<Cell<..>>` click-rect-capture idiom (design § *Test Design*).
 
-use super::results::{RaceSummary, ResultsScreen, StandingEntry};
+use super::results::{RaceSummary, ResultsInput, ResultsScreen, StandingEntry};
 use crate::widgets::CarKind;
 
 /// The golden's fixed canvas: wide enough for the 560 column + side margins
@@ -57,7 +57,7 @@ const FIXED_SUMMARY: RaceSummary = RaceSummary {
 
 #[cfg(test)]
 mod tests {
-    use super::{CANVAS_SIZE, FIXED_SUMMARY, ResultsScreen, fixture_standings};
+    use super::{CANVAS_SIZE, FIXED_SUMMARY, ResultsInput, ResultsScreen, fixture_standings};
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -99,7 +99,11 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let _ = ResultsScreen::new(&standings, FIXED_SUMMARY).show(ui);
+                let _ = ResultsScreen::new(ResultsInput {
+                    standings: &standings,
+                    summary: FIXED_SUMMARY,
+                })
+                .show(ui);
             });
 
         harness.run_steps(1);
@@ -151,7 +155,11 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let resp = ResultsScreen::new(&standings, FIXED_SUMMARY).show(ui);
+                let resp = ResultsScreen::new(ResultsInput {
+                    standings: &standings,
+                    summary: FIXED_SUMMARY,
+                })
+                .show(ui);
                 if resp.again {
                     saw_again_c.set(true);
                 }

@@ -2,8 +2,8 @@
 //! mirrors `lab_gallery.rs`'s frame-1-install / frame-2-draw dance and
 //! Rc<Cell> click-rect-capture idiom (design § *Test Design*).
 
-use super::race::{CAR_NAMES, RaceScreen};
-use crate::{CarRender, Overlays};
+use super::race::{CAR_NAMES, RaceInput, RaceScreen};
+use crate::{CarRender, Overlays, Scene};
 use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
 use gp_core::sim::CarState;
 use gp_core::track::{
@@ -123,7 +123,7 @@ fn fixture_cars(trails: &[[Point; 2]; 3]) -> [CarRender<'_>; 3] {
 mod tests {
     use super::{
         CANVAS_SIZE, CAR_NAMES, FIXED_ACTIVE, FIXED_LAPS_DONE, FIXED_OVERLAYS, FIXED_TOTAL_LAPS,
-        RaceScreen, fixture_cars, fixture_track,
+        RaceInput, RaceScreen, Scene, fixture_cars, fixture_track,
     };
     use gp_core::geom::Point;
     use std::cell::Cell;
@@ -175,14 +175,17 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let _ = RaceScreen::new(
-                    &track,
-                    &cars,
-                    FIXED_ACTIVE,
-                    FIXED_OVERLAYS,
-                    FIXED_LAPS_DONE,
-                    FIXED_TOTAL_LAPS,
-                )
+                let _ = RaceScreen::new(RaceInput {
+                    scene: Scene {
+                        track: &track,
+                        cars: &cars,
+                        reduced_motion: false,
+                        overlays: FIXED_OVERLAYS,
+                    },
+                    active: FIXED_ACTIVE,
+                    laps_done: FIXED_LAPS_DONE,
+                    total_laps: FIXED_TOTAL_LAPS,
+                })
                 .show(ui);
             });
 
@@ -242,14 +245,17 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let resp = RaceScreen::new(
-                    &track,
-                    &cars,
-                    FIXED_ACTIVE,
-                    FIXED_OVERLAYS,
-                    FIXED_LAPS_DONE,
-                    FIXED_TOTAL_LAPS,
-                )
+                let resp = RaceScreen::new(RaceInput {
+                    scene: Scene {
+                        track: &track,
+                        cars: &cars,
+                        reduced_motion: false,
+                        overlays: FIXED_OVERLAYS,
+                    },
+                    active: FIXED_ACTIVE,
+                    laps_done: FIXED_LAPS_DONE,
+                    total_laps: FIXED_TOTAL_LAPS,
+                })
                 .show(ui);
                 if let Some(action) = resp.action {
                     saw_action_c.set(Some(action));
