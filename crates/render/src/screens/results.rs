@@ -6,13 +6,39 @@
 //! caller-supplied `&[StandingEntry]` slice (already rank-ordered), a
 //! [`RaceSummary`], and an optional "Race again" icon handle — and emits the
 //! player's chosen navigation intent ("Race again" / "Menu") via
-//! `ResultsResponse`. It performs **no** ranking, timing, or counting — the
+//! [`ResultsResponse`]. It performs **no** ranking, timing, or counting — the
 //! caller supplies already-finished outcome data (spec § Scope).
 
 use crate::screens::race::CAR_NAMES;
 use crate::tokens::color::{CAR_COLORS, car_color};
-use crate::widgets::CarKind;
-use egui::Color32;
+use crate::tokens::{color, spacing, typography};
+use crate::widgets::{
+    Button, ButtonVariant, CarChip, CarKind, Card, Size, Telemetry, TelemetryTone,
+};
+use egui::{Align2, Color32, FontFamily, FontId, Layout, Pos2, Response, Sense, TextureHandle, Ui};
+
+/// The centered content column's fixed width (`Screens.jsx:207` `maxWidth:
+/// 560`), equal to `setup.rs::CONTENT_MAX_W`.
+const CONTENT_MAX_W: f32 = 560.0;
+/// Gap below the header block (`Screens.jsx:207` `marginBottom: 28`).
+const HEADER_GAP: f32 = 28.0;
+/// Gap between the eyebrow and the title (`Screens.jsx:213` `marginTop: 6`).
+const EYEBROW_TITLE_GAP: f32 = 6.0;
+/// The title's display-face font size (`Screens.jsx:213` `fontSize: 34`) —
+/// not an existing `typography` token (nearest are `FS_H1 = 40`/`FS_H2 = 30`).
+const TITLE_FS: f32 = 34.0;
+/// Gap between standings rows (`Screens.jsx:216` `gap: 10`).
+const STANDINGS_ROW_GAP: f32 = 10.0;
+/// Gap between the action row's two buttons (`Screens.jsx:229` `gap: 12`),
+/// equals `spacing::SPACE_3`.
+const ACTION_ROW_GAP: f32 = spacing::SPACE_3;
+/// The header eyebrow text (`Screens.jsx:210`, uppercased at draw time,
+/// mirroring `Card::paint`'s eyebrow).
+const EYEBROW_TEXT: &str = "Race complete";
+/// The Final-standings `Card`'s title (`Screens.jsx:214`).
+const STANDINGS_TITLE: &str = "Final standings";
+/// The title's ink-colored prefix (`Screens.jsx:213`).
+const TITLE_PREFIX: &str = "You finished ";
 
 /// One car's finished-race outcome, in caller-supplied rank order.
 ///
@@ -122,6 +148,282 @@ pub fn summary_tiles(summary: RaceSummary) -> [String; 3] {
         format!("{:.2}", summary.tempo),
         summary.crashes.to_string(),
     ]
+}
+
+/// The response of [`ResultsScreen::show`].
+///
+/// Carries the "Race again"/"Menu" click flags plus each button's row
+/// `Response` (needed by an interaction test that has no AccessKit label to
+/// query — mirrors [`crate::screens::lab::LabResponse`]). Not `Copy`/`Debug`
+/// — carries `egui::Response`, which is neither.
+pub struct ResultsResponse {
+    /// `true` iff "Race again" was clicked this frame.
+    pub again: bool,
+    /// `true` iff "Menu" was clicked this frame.
+    pub menu: bool,
+    /// The "Race again" button's row `Response`.
+    pub again_response: Response,
+    /// The "Menu" button's row `Response`.
+    pub menu_response: Response,
+}
+
+/// `ResultsScreen` builder.
+///
+/// Holds the per-frame draw data by reference (the rank-ordered standings
+/// slice + summary), and an optional "Race again" icon handle. `Copy`
+/// (mirrors every other screen/widget builder); not `Debug` —
+/// `Option<&TextureHandle>` holds `egui::TextureHandle`, which has no
+/// `Debug` (`Button`'s reason, `button.rs`).
+#[derive(Clone, Copy)]
+pub struct ResultsScreen<'a> {
+    standings: &'a [StandingEntry],
+    summary: RaceSummary,
+    again_icon: Option<&'a TextureHandle>,
+}
+
+impl<'a> ResultsScreen<'a> {
+    /// Builds a `ResultsScreen` from the rank-ordered `standings` slice and
+    /// the race `summary`. No icon by default (text-only "Race again"
+    /// button, `rotate-ccw` is unvendored — design § *Icon handling*); set it
+    /// via [`Self::again_icon`].
+    #[must_use]
+    pub const fn new(standings: &'a [StandingEntry], summary: RaceSummary) -> Self {
+        Self {
+            standings,
+            summary,
+            again_icon: None,
+        }
+    }
+
+    /// Sets the "Race again" button's leading icon (`rotate-ccw` glyph
+    /// absent from the vendored set — `None` renders text-only, design §
+    /// *Icon handling*).
+    #[must_use]
+    pub const fn again_icon(mut self, icon: &'a TextureHandle) -> Self {
+        self.again_icon = Some(icon);
+        self
+    }
+
+    /// Draws the centered results column (header / Final-standings `Card` /
+    /// action row) and returns the player's chosen navigation intent this
+    /// frame via [`ResultsResponse`].
+    ///
+    /// # Panics
+    ///
+    /// Panics at layout time if the caller has not installed
+    /// [`crate::fonts::definitions`] first (same precondition as every
+    /// other screen/widget's `paint`/`show`).
+    ///
+    /// Installs its own `Order::Middle` layer before drawing any `Card`
+    /// chrome, mirroring [`crate::screens::lab::LabScreen::show`]'s
+    /// documented reason: `Card::show` paints its fill on
+    /// `LayerId::background()`, which must render *behind* the caller's own
+    /// layer.
+    pub fn show(self, ui: &mut Ui) -> ResultsResponse {
+        let layer_id = egui::LayerId::new(egui::Order::Middle, ui.id().with("results_screen"));
+        let mut screen_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .layer_id(layer_id)
+                .max_rect(ui.max_rect()),
+        );
+        let ui = &mut screen_ui;
+
+        ui.add_space(spacing::SPACE_12);
+        let margin = ((ui.available_width() - CONTENT_MAX_W) / 2.0).max(spacing::SPACE_6);
+
+        let (again_response, menu_response) = ui
+            .horizontal(|ui| {
+                ui.add_space(margin);
+                ui.vertical(|ui| {
+                    ui.set_width(CONTENT_MAX_W);
+
+                    let position = player_position(self.standings);
+                    draw_header(ui, position);
+                    ui.add_space(HEADER_GAP);
+
+                    let rows = standings_rows(self.standings);
+                    let tiles = summary_tiles(self.summary);
+                    draw_standings_card(ui, &rows, &tiles);
+
+                    ui.add_space(spacing::SPACE_6);
+                    draw_action_row(ui, self.again_icon)
+                })
+                .inner
+            })
+            .inner;
+
+        ResultsResponse {
+            again: again_response.clicked(),
+            menu: menu_response.clicked(),
+            again_response,
+            menu_response,
+        }
+    }
+}
+
+/// Draws the centered header block: a mono uppercase "RACE COMPLETE"
+/// eyebrow, then the "You finished P&lt;n&gt;" display-face title (`"You
+/// finished "` in `TEXT_INK`, `"P<n>"` in `ACCENT`) — `<n>` from
+/// `position` (`None` renders the `"P—"` placeholder, never a panic).
+///
+/// Uses the two-sequential-`text()`-call two-tone idiom
+/// ([`crate::screens::setup::draw_wordmark`]'s precedent), not
+/// `egui::text::LayoutJob` — both render pixel-identical output for this
+/// case, and the sequential-text idiom is already established in this crate.
+///
+/// # Panics
+///
+/// Panics at layout time if the caller has not installed
+/// [`crate::fonts::definitions`] first.
+fn draw_header(ui: &mut Ui, position: Option<u32>) {
+    ui.vertical_centered(|ui| {
+        let eyebrow_font = FontId::new(
+            typography::FS_XS,
+            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+        );
+        let eyebrow = EYEBROW_TEXT.to_uppercase();
+        let eyebrow_w = ui
+            .painter()
+            .layout_no_wrap(eyebrow.clone(), eyebrow_font.clone(), color::TEXT_MUTED)
+            .rect
+            .width();
+        let (eyebrow_rect, _response) = ui.allocate_exact_size(
+            egui::vec2(eyebrow_w, typography::FS_XS * typography::LH_SNUG),
+            Sense::hover(),
+        );
+        ui.painter().text(
+            eyebrow_rect.left_top(),
+            Align2::LEFT_TOP,
+            eyebrow,
+            eyebrow_font,
+            color::TEXT_MUTED,
+        );
+
+        ui.add_space(EYEBROW_TITLE_GAP);
+
+        let suffix = position.map_or_else(|| "P—".to_owned(), |rank| format!("P{rank}"));
+        let title_font = FontId::new(TITLE_FS, FontFamily::Name(crate::fonts::ONEST_BOLD.into()));
+        let prefix_w = ui
+            .painter()
+            .layout_no_wrap(TITLE_PREFIX.to_owned(), title_font.clone(), color::TEXT_INK)
+            .rect
+            .width();
+        let suffix_w = ui
+            .painter()
+            .layout_no_wrap(suffix.clone(), title_font.clone(), color::ACCENT)
+            .rect
+            .width();
+        let (title_rect, _response) =
+            ui.allocate_exact_size(egui::vec2(prefix_w + suffix_w, TITLE_FS), Sense::hover());
+        let prefix_rect = ui.painter().text(
+            title_rect.left_top(),
+            Align2::LEFT_TOP,
+            TITLE_PREFIX,
+            title_font.clone(),
+            color::TEXT_INK,
+        );
+        ui.painter().text(
+            Pos2::new(prefix_rect.max.x, title_rect.min.y),
+            Align2::LEFT_TOP,
+            suffix,
+            title_font,
+            color::ACCENT,
+        );
+    });
+}
+
+/// Draws the Final-standings `Card`: one row per `StandingRow` (a `CarChip`
+/// left, mono right-aligned finish time), a hairline divider, then the
+/// summary `Telemetry` row (`Fastest lap` accent+`s`, `Tempo` default,
+/// `Crashes` danger).
+fn draw_standings_card(ui: &mut Ui, rows: &[StandingRow], tiles: &[String; 3]) {
+    Card::new()
+        .title(STANDINGS_TITLE)
+        .grid(true)
+        .padding(spacing::SPACE_6)
+        .show(ui, None::<fn(&mut Ui)>, |ui| {
+            for (index, row) in rows.iter().enumerate() {
+                if index > 0 {
+                    ui.add_space(STANDINGS_ROW_GAP);
+                }
+                ui.horizontal(|ui| {
+                    CarChip::new(row.name)
+                        .color(row.color)
+                        .rank(row.rank)
+                        .kind(row.kind)
+                        .show(ui);
+                    ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(&row.finish_time)
+                                .font(FontId::new(
+                                    typography::FS_SM,
+                                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+                                ))
+                                .color(color::TEXT_MUTED),
+                        );
+                    });
+                });
+            }
+
+            ui.add_space(spacing::SPACE_5);
+            draw_divider(ui);
+            ui.add_space(spacing::SPACE_4);
+
+            ui.horizontal(|ui| {
+                Telemetry::new(SUMMARY_LABELS[0], &tiles[0])
+                    .tone(TelemetryTone::Accent)
+                    .unit("s")
+                    .show(ui);
+                ui.add_space(spacing::SPACE_6);
+                Telemetry::new(SUMMARY_LABELS[1], &tiles[1]).show(ui);
+                ui.add_space(spacing::SPACE_6);
+                Telemetry::new(SUMMARY_LABELS[2], &tiles[2])
+                    .tone(TelemetryTone::Danger)
+                    .show(ui);
+            });
+        });
+}
+
+/// Draws a `BW_HAIR`/`BORDER_HAIRLINE` horizontal rule spanning the
+/// available width (`Screens.jsx:223` `borderTop: '1px solid
+/// var(--border-hairline)'`).
+fn draw_divider(ui: &mut Ui) {
+    let width = ui.available_width();
+    let (rect, _response) =
+        ui.allocate_exact_size(egui::vec2(width, spacing::BW_HAIR), Sense::hover());
+    ui.painter().hline(
+        egui::Rangef::new(rect.min.x, rect.max.x),
+        rect.center().y,
+        egui::Stroke::new(spacing::BW_HAIR, color::BORDER_HAIRLINE),
+    );
+}
+
+/// Draws the centered action row: primary "Race again" (conditional
+/// `again_icon`) + secondary "Menu" — returns their `Response`s in that
+/// order.
+fn draw_action_row(ui: &mut Ui, again_icon: Option<&TextureHandle>) -> (Response, Response) {
+    ui.vertical_centered(|ui| {
+        ui.horizontal(|ui| {
+            let mut again_btn = Button::new("Race again")
+                .variant(ButtonVariant::Primary)
+                .size(Size::Lg);
+            if let Some(icon) = again_icon {
+                again_btn = again_btn.icon_left(icon);
+            }
+            let again_response = again_btn.show(ui);
+
+            ui.add_space(ACTION_ROW_GAP);
+
+            let menu_response = Button::new("Menu")
+                .variant(ButtonVariant::Secondary)
+                .size(Size::Lg)
+                .show(ui);
+
+            (again_response, menu_response)
+        })
+        .inner
+    })
+    .inner
 }
 
 #[cfg(test)]
