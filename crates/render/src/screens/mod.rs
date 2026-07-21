@@ -13,11 +13,13 @@
 pub mod lab;
 #[cfg(test)]
 mod lab_gallery;
+pub mod race;
 pub mod setup;
 #[cfg(test)]
 mod setup_gallery;
 
 pub use lab::{LabResponse, LabScreen, PhaseStatus};
+pub use race::{RaceResponse, RaceScreen};
 
 /// The pilot difficulty a player picks on the [`setup::SetupScreen`]
 /// (`docs/design.md` §5 — the softmax skill dial).
