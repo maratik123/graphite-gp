@@ -39,6 +39,30 @@ pub struct Overlays {
     pub grid: bool,
 }
 
+/// The frame-immutable canvas inputs consumed by [`render_frame`].
+///
+/// Bundles track, cars, reduced-motion, and overlays into one cohesive value
+/// (design `2026-07-22-consolidate-render-inputs` § *The central decision*).
+/// Embedded in [`screens::RaceInput`], the only screen whose canvas
+/// re-renders `Scene` on interactive toggles.
+#[derive(Clone, Copy, Debug)]
+pub struct Scene<'a> {
+    /// The track fixture drawn this frame.
+    pub track: &'a TrackArtifact,
+    /// Caller-supplied per-frame render input ([`CarRender`]) — this crate
+    /// is draw-only and buffers no car history or clock of its own
+    /// (`ai-docs/key-decisions.md`, 2026-07-16).
+    pub cars: &'a [CarRender<'a>],
+    /// Snaps every car's move animation straight to its final position (no
+    /// slide) when `true`.
+    pub reduced_motion: bool,
+    /// Drives the individually-toggleable analytics/grid layers (design doc
+    /// §4 layers 4/5) — each flag adds or removes exactly its own layer's
+    /// drawn shapes; the all-off frame is byte-identical to the pre-#18
+    /// baseline (design § Draw order).
+    pub overlays: Overlays,
+}
+
 /// Renders one frame of the track canvas (design doc §4) into `rect`.
 ///
 /// Draws back to front: the three regions (outfield / asphalt / infield),
@@ -50,28 +74,22 @@ pub struct Overlays {
 /// lives in `gp-game` (see the ownership override in
 /// `ai-docs/key-decisions.md`). `rect` is explicit (not derived from
 /// `painter.clip_rect()`) so the drawn output is a pure function of `(rect,
-/// track, cars, overlays, reduced_motion)` — the same precedent
-/// `draw_placeholder` sets (design § *Signature*).
+/// scene)` — the same precedent `draw_placeholder` sets (design §
+/// *Signature*).
 ///
-/// `cars` is caller-supplied per-frame render input
-/// ([`CarRender`]) — this crate is draw-only and buffers no car history or
-/// clock of its own (`ai-docs/key-decisions.md`, 2026-07-16).
-/// `reduced_motion` snaps every car's move animation straight to its final
-/// position (no slide). `overlays` drives the individually-toggleable
-/// analytics/grid layers (design doc §4 layers 4/5) — each flag adds or
-/// removes exactly its own layer's drawn shapes; the all-off frame is byte-
-/// identical to the pre-#18 baseline (design § Draw order).
+/// `scene` bundles the caller-supplied, frame-immutable canvas inputs —
+/// `track`, `cars`, `reduced_motion`, `overlays` — into one [`Scene`] value
+/// (design `2026-07-22-consolidate-render-inputs`).
 ///
 /// Cosmetic wall smoothing (Chaikin) is allowed only within the half-cell
 /// gap — it must not cross any point or change the set of drivable cells
 /// (the M6 guard, `track::walls::chaikin_smooth`).
-pub fn render_frame(
-    painter: &Painter,
-    rect: Rect,
-    track: &TrackArtifact,
-    cars: &[CarRender<'_>],
-    reduced_motion: bool,
-    overlays: Overlays,
-) {
+pub fn render_frame(painter: &Painter, rect: Rect, scene: Scene<'_>) {
+    let Scene {
+        track,
+        cars,
+        reduced_motion,
+        overlays,
+    } = scene;
     track::draw_frame(painter, rect, track, cars, reduced_motion, overlays);
 }

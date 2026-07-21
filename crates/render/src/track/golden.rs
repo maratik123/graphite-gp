@@ -153,7 +153,16 @@ fn draw_scene_with(painter: &Painter, rect: Rect, track: &TrackArtifact, overlay
             0.0,
         ),
     ];
-    crate::render_frame(painter, rect, track, &cars, false, overlays);
+    crate::render_frame(
+        painter,
+        rect,
+        crate::Scene {
+            track,
+            cars: &cars,
+            reduced_motion: false,
+            overlays,
+        },
+    );
 }
 
 #[cfg(test)]

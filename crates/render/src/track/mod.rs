@@ -193,7 +193,16 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
-            crate::render_frame(&painter, rect, track, cars, reduced_motion, overlays);
+            crate::render_frame(
+                &painter,
+                rect,
+                crate::Scene {
+                    track,
+                    cars,
+                    reduced_motion,
+                    overlays,
+                },
+            );
         });
         format!("{:?}", output.shapes)
     }

@@ -326,7 +326,16 @@ fn draw_canvas(ui: &mut Ui, rect: Rect, track: &TrackArtifact) {
         egui::StrokeKind::Inside,
     );
     let inner = rect.shrink(CANVAS_BORDER_W);
-    crate::render_frame(painter, inner, track, &[], false, LAB_OVERLAYS);
+    crate::render_frame(
+        painter,
+        inner,
+        crate::Scene {
+            track,
+            cars: &[],
+            reduced_motion: false,
+            overlays: LAB_OVERLAYS,
+        },
+    );
     ui.allocate_rect(rect, egui::Sense::hover());
 }
 
