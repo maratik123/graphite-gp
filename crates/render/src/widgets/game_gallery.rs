@@ -126,7 +126,8 @@ fn draw_lap_meter(painter: &Painter, x0: f32, y0: f32) -> f32 {
     let height = 40.0;
     let rect = Rect::from_min_size(Pos2::new(x0, y0), egui::vec2(width, height));
     let style = LapMeter::resolve(2, 5);
-    LapMeter::paint(painter, rect, style, "LAP");
+    let colors = LapMeter::ink_colors(false);
+    LapMeter::paint(painter, rect, style, "LAP", colors);
     y0 + height + 22.0
 }
 

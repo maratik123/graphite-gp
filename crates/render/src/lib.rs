@@ -23,7 +23,9 @@ pub mod tokens;
 pub mod track;
 pub mod widgets;
 
-pub use screens::{Difficulty, LabResponse, LabScreen, PhaseStatus, RaceConfig};
+pub use screens::{
+    Difficulty, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceResponse, RaceScreen,
+};
 pub use track::CarRender;
 
 /// Optional analytics overlays (design doc §4).
