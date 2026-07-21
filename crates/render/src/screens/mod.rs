@@ -10,9 +10,14 @@
 //! in a shared crate — a single definition, single consumer today (design §
 //! *Config type*).
 
+pub mod lab;
+#[cfg(test)]
+mod lab_gallery;
 pub mod setup;
 #[cfg(test)]
 mod setup_gallery;
+
+pub use lab::{LabResponse, LabScreen, PhaseStatus};
 
 /// The pilot difficulty a player picks on the [`setup::SetupScreen`]
 /// (`docs/design.md` §5 — the softmax skill dial).
