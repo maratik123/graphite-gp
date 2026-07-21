@@ -167,30 +167,39 @@ pub struct ResultsResponse {
     pub menu_response: Response,
 }
 
+/// The required frame-immutable inputs for [`ResultsScreen::new`].
+///
+/// Bundles the rank-ordered standings slice and the race summary into one
+/// cohesive value (design `2026-07-22-consolidate-render-inputs`).
+#[derive(Clone, Copy, Debug)]
+pub struct ResultsInput<'a> {
+    /// The rank-ordered standings slice.
+    pub standings: &'a [StandingEntry],
+    /// The race's summary metrics (fastest lap / tempo / crashes).
+    pub summary: RaceSummary,
+}
+
 /// `ResultsScreen` builder.
 ///
-/// Holds the per-frame draw data by reference (the rank-ordered standings
-/// slice + summary), and an optional "Race again" icon handle. `Copy`
-/// (mirrors every other screen/widget builder); not `Debug` —
-/// `Option<&TextureHandle>` holds `egui::TextureHandle`, which has no
-/// `Debug` (`Button`'s reason, `button.rs`).
+/// Holds the per-frame draw data (the required [`ResultsInput`]), and an
+/// optional "Race again" icon handle. `Copy` (mirrors every other
+/// screen/widget builder); not `Debug` — `Option<&TextureHandle>` holds
+/// `egui::TextureHandle`, which has no `Debug` (`Button`'s reason,
+/// `button.rs`).
 #[derive(Clone, Copy)]
 pub struct ResultsScreen<'a> {
-    standings: &'a [StandingEntry],
-    summary: RaceSummary,
+    input: ResultsInput<'a>,
     again_icon: Option<&'a TextureHandle>,
 }
 
 impl<'a> ResultsScreen<'a> {
-    /// Builds a `ResultsScreen` from the rank-ordered `standings` slice and
-    /// the race `summary`. No icon by default (text-only "Race again"
-    /// button, `rotate-ccw` is unvendored — design § *Icon handling*); set it
-    /// via [`Self::again_icon`].
+    /// Builds a `ResultsScreen` from the required [`ResultsInput`]. No icon
+    /// by default (text-only "Race again" button, `rotate-ccw` is unvendored
+    /// — design § *Icon handling*); set it via [`Self::again_icon`].
     #[must_use]
-    pub const fn new(standings: &'a [StandingEntry], summary: RaceSummary) -> Self {
+    pub const fn new(input: ResultsInput<'a>) -> Self {
         Self {
-            standings,
-            summary,
+            input,
             again_icon: None,
         }
     }
@@ -237,12 +246,12 @@ impl<'a> ResultsScreen<'a> {
                 ui.vertical(|ui| {
                     ui.set_width(CONTENT_MAX_W);
 
-                    let position = player_position(self.standings);
+                    let position = player_position(self.input.standings);
                     draw_header(ui, position);
                     ui.add_space(HEADER_GAP);
 
-                    let rows = standings_rows(self.standings);
-                    let tiles = summary_tiles(self.summary);
+                    let rows = standings_rows(self.input.standings);
+                    let tiles = summary_tiles(self.input.summary);
                     draw_standings_card(ui, &rows, &tiles);
 
                     ui.add_space(spacing::SPACE_6);
