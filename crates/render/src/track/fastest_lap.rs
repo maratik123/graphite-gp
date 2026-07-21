@@ -6,6 +6,12 @@
 //! screen via [`TrackTransform`] — the crate's house pattern (design §
 //! *House pattern*). Purely visual: never touches the corridor `D`, the
 //! walls, or any metric (design § Key decisions 3, AC2).
+//!
+//! **Miri:** the 2 `tests::painted_shape_count`-driven tests below stand up
+//! an `egui::Context` and run `paint` through a `run_ui` pass, so they carry
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-render-tests`) — wall-clock cost, not an abort. The
+//! `catmull_rom_*` pure-geometry tests build no `Context` and stay un-gated.
 
 use super::TrackTransform;
 use egui::{Painter, Pos2, Shape, Stroke};
@@ -191,12 +197,26 @@ mod tests {
 
     /// AC7 — empty `fastest_lap` draws no shapes (no-op).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_shape_count drives a Context::run_ui + \
+                  layer_painter pass through fastest_lap::paint, counting \
+                  emitted shapes — interpreted-pass wall-clock cost, not an \
+                  abort"
+    )]
     fn paint_is_noop_on_empty_path() {
         assert_eq!(painted_shape_count(&[]), 0);
     }
 
     /// AC2 — a populated path draws at least one dashed shape.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_shape_count drives a Context::run_ui + \
+                  layer_painter pass through fastest_lap::paint, counting \
+                  emitted shapes — interpreted-pass wall-clock cost, not an \
+                  abort"
+    )]
     fn paint_draws_populated_path() {
         let path = vec![Point::new(1, 1), Point::new(3, 1), Point::new(3, 3)];
         assert!(painted_shape_count(&path) >= 1);

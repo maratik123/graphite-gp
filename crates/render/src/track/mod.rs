@@ -5,6 +5,14 @@
 //! thin `pub(crate) paint` fn that maps that geometry to screen space via
 //! [`TrackTransform`] and strokes/fills it — the house pattern this crate's
 //! sibling widgets already follow (design § *House pattern*).
+//!
+//! **Miri:** every `tests::render_shapes`-driven test below stands up an
+//! `egui::Context` and runs a full-frame `run_ui` pass, so it carries
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-render-tests`) — wall-clock cost under the
+//! interpreter, not an abort (the helper only captures `output.shapes`,
+//! never calls `tessellate`/`set_fonts`). `layer_order_is_documented` builds
+//! no `Context` and stays un-gated.
 
 mod car;
 mod fastest_lap;
@@ -193,6 +201,13 @@ mod tests {
     /// non-trivial track + a moving, trailed "you" car produces at least one
     /// shape and does not panic.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call)"
+    )]
     fn render_frame_draws_without_panicking() {
         let track = fixture_track();
         let trail = [Point::new(1, 1), Point::new(2, 1)];
@@ -249,6 +264,13 @@ mod tests {
     /// flags, turned on alone, changes the drawn output relative to
     /// all-off.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call)"
+    )]
     fn each_overlay_changes_output_when_on() {
         let track = fixture_track_with_metrics();
         let cars: [CarRender<'_>; 0] = [];
@@ -294,6 +316,15 @@ mod tests {
     /// AC4 — every one of the 8 `Overlays` flag combinations renders at
     /// least one shape without panicking, on the metric-populated fixture.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call); \
+                  this test additionally loops all 8 overlay combinations, \
+                  multiplying the per-pass cost"
+    )]
     fn all_overlay_combinations_render_without_panic() {
         let track = fixture_track_with_metrics();
         let cars: [CarRender<'_>; 0] = [];
@@ -316,6 +347,13 @@ mod tests {
     /// baseline: rendering the populated fixture with every flag off equals
     /// rendering the empty-metrics fixture with every flag off.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call)"
+    )]
     fn all_off_equals_metrics_independent_baseline() {
         let cars: [CarRender<'_>; 0] = [];
         let populated = render_shapes(
@@ -331,6 +369,13 @@ mod tests {
     /// AC7 — on the empty-metrics fixture, turning `speed_heatmap` on alone
     /// is a no-op: identical output to all-off.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call)"
+    )]
     fn heatmap_is_noop_on_empty_metrics() {
         let track = fixture_track();
         let cars: [CarRender<'_>; 0] = [];
@@ -350,6 +395,13 @@ mod tests {
     /// AC7 — on the empty-metrics fixture, turning `fastest_lap` on alone
     /// is a no-op: identical output to all-off.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call)"
+    )]
     fn fastest_lap_is_noop_on_empty_metrics() {
         let track = fixture_track();
         let cars: [CarRender<'_>; 0] = [];
@@ -373,6 +425,13 @@ mod tests {
     /// system too — the test pins it as a documented, re-checkable AC2
     /// contract rather than relying on that alone.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "render_shapes drives a fontless Context::run_ui full-frame \
+                  pass over the TrackArtifact fixture, capturing the \
+                  tessellation-independent Shape list — interpreted-pass \
+                  wall-clock cost, not an abort (no tessellate/set_fonts call)"
+    )]
     fn fastest_lap_paint_does_not_mutate() {
         let track = fixture_track_with_metrics();
         let cells_before = super::test_support::corridor_cells(&track.corridor, 5);

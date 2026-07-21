@@ -7,6 +7,12 @@
 //! pattern (design § *House pattern*). Whole-canvas (not corridor-clipped),
 //! drawn over the filled regions, under the walls (design § Key decisions
 //! 4).
+//!
+//! **Miri:** the 2 `tests::painted_shape_count`-driven tests below stand up
+//! an `egui::Context` and run `paint` through a `run_ui` pass, so they carry
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-render-tests`) — wall-clock cost, not an abort. The
+//! `line_coords_*` pure-geometry tests build no `Context` and stay un-gated.
 
 use super::TrackTransform;
 use egui::{Painter, Pos2, Rect, Stroke};
@@ -201,6 +207,12 @@ mod tests {
     /// AC3 — over a known (`cell_size == 10`) transform, `paint` emits at
     /// least one ruling line plus one dot, and does not panic.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_shape_count drives a Context::run_ui + \
+                  layer_painter pass through grid::paint, counting emitted \
+                  shapes — interpreted-pass wall-clock cost, not an abort"
+    )]
     fn paint_emits_ruling_and_dots() {
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(100.0, 100.0));
         assert!(painted_shape_count(rect, &transform()) >= 1);
@@ -209,6 +221,12 @@ mod tests {
     /// Edge — a degenerate (`cell_size == 0`) transform draws nothing, no
     /// panic.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_shape_count drives a Context::run_ui + \
+                  layer_painter pass through grid::paint, counting emitted \
+                  shapes — interpreted-pass wall-clock cost, not an abort"
+    )]
     fn paint_is_noop_on_degenerate_transform() {
         let rect = Rect::from_min_max(Pos2::ZERO, Pos2::ZERO);
         let d = Corridor::new(Point::new(0, 0), 10, 10);
