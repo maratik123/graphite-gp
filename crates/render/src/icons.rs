@@ -369,9 +369,22 @@ mod tests {
 
     /// Builds a real [`TextureHandle`] from a hand-built 1x1
     /// [`ColorImage::filled`] — bypassing resvg/tiny-skia entirely, so
-    /// Miri-clean — then inspects `run_ui`'s output shapes (no
-    /// tessellation) for the mesh `draw_icon` emits (AC3).
+    /// Miri-**clean** (no abort) — then inspects `run_ui`'s output shapes
+    /// (no tessellation) for the mesh `draw_icon` emits (AC3). Gated under
+    /// Miri anyway (design `2026-07-21-miri-gate-render-tests`): it still
+    /// constructs a `Context` and runs a `run_ui` pass, so the crate-wide
+    /// mechanical trigger ("constructs an `egui::Context`/painter") and the
+    /// AC1 grep audit apply uniformly, independent of this test's own
+    /// clean/abort status — gated for wall-clock + audit uniformity, not
+    /// because it aborts.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "constructs a Context + load_texture + run_ui pass driving \
+                  draw_icon; no abort (texture-only, bypasses resvg/tiny-skia \
+                  and tessellation) — gated for wall-clock + AC1 audit \
+                  uniformity with the crate's other Context-driving tests"
+    )]
     fn draw_icon_emits_tinted_textured_mesh() {
         let ctx = egui::Context::default();
         let handle = ctx.load_texture(
