@@ -152,7 +152,7 @@ pub struct LabResponse {
 pub struct LabInput<'a> {
     /// The track fixture — drives the canvas and all 4 oracle-report tiles.
     pub track: &'a TrackArtifact,
-    /// The Ф1–Ф7 generation-pipeline phase statuses, in [`PHASE_IDS`] order.
+    /// The Ф1–Ф7 generation-pipeline phase statuses, in `PHASE_IDS` order.
     pub phases: [PhaseStatus; 7],
     /// The header validity flag (`VALID`/`INVALID` badge).
     pub valid: bool,
