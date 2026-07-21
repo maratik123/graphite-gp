@@ -24,7 +24,7 @@ pub mod setup;
 mod setup_gallery;
 
 pub use lab::{LabInput, LabResponse, LabScreen, PhaseStatus};
-pub use race::{RaceResponse, RaceScreen};
+pub use race::{RaceInput, RaceResponse, RaceScreen};
 pub use results::{RaceSummary, ResultsResponse, ResultsScreen, StandingEntry};
 
 /// The pilot difficulty a player picks on the [`setup::SetupScreen`]

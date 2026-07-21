@@ -16,7 +16,7 @@ use crate::widgets::{
     Button, ButtonVariant, CarChip, CarKind, Card, LapMeter, MovePad, MovePadResponse, Size,
     Switch, Telemetry, TelemetryTone,
 };
-use crate::{CarRender, Overlays};
+use crate::{CarRender, Overlays, Scene};
 use egui::{Layout, Pos2, Rect, Response, Ui};
 use gp_core::sim::{Action, BitFlags, CarState, legal_mask};
 use gp_core::track::TrackArtifact;
@@ -125,53 +125,38 @@ pub struct RaceResponse {
     pub finish_response: Response,
 }
 
+/// The required frame-immutable inputs for [`RaceScreen::new`].
+///
+/// Bundles the canvas [`Scene`] (track, cars, reduced-motion, overlays) with
+/// the active-car index and the caller-tracked lap counters into one
+/// cohesive value (design `2026-07-22-consolidate-render-inputs`).
+#[derive(Clone, Copy, Debug)]
+pub struct RaceInput<'a> {
+    /// The canvas scene — track, cars, reduced-motion, and the current
+    /// overlays.
+    pub scene: Scene<'a>,
+    /// The active (player-controlled) car's index into `scene.cars`.
+    pub active: usize,
+    /// The caller-tracked completed-lap count.
+    pub laps_done: i32,
+    /// The caller-tracked total lap count.
+    pub total_laps: i32,
+}
+
 /// `RaceScreen` builder.
 ///
-/// Holds the per-frame draw data by reference (the track + car-render
-/// slice), the active-car index, the current overlays, and the
-/// caller-tracked lap counters. `Copy` (mirrors every other screen/widget
-/// builder).
+/// Holds the per-frame draw data (the required [`RaceInput`]). `Copy`
+/// (mirrors every other screen/widget builder).
 #[derive(Clone, Copy)]
 pub struct RaceScreen<'a> {
-    track: &'a TrackArtifact,
-    cars: &'a [CarRender<'a>],
-    active: usize,
-    overlays: Overlays,
-    laps_done: i32,
-    total_laps: i32,
-    reduced_motion: bool,
+    input: RaceInput<'a>,
 }
 
 impl<'a> RaceScreen<'a> {
-    /// Builds a `RaceScreen` from `track`, the per-frame `cars` slice, the
-    /// `active` car's index, the current `overlays`, and the caller-tracked
-    /// `laps_done`/`total_laps`. `reduced_motion` defaults to `false` — set
-    /// it via [`Self::reduced_motion`].
+    /// Builds a `RaceScreen` from the required [`RaceInput`].
     #[must_use]
-    pub const fn new(
-        track: &'a TrackArtifact,
-        cars: &'a [CarRender<'a>],
-        active: usize,
-        overlays: Overlays,
-        laps_done: i32,
-        total_laps: i32,
-    ) -> Self {
-        Self {
-            track,
-            cars,
-            active,
-            overlays,
-            laps_done,
-            total_laps,
-            reduced_motion: false,
-        }
-    }
-
-    /// Sets `reduced_motion`.
-    #[must_use]
-    pub const fn reduced_motion(mut self, reduced_motion: bool) -> Self {
-        self.reduced_motion = reduced_motion;
-        self
+    pub const fn new(input: RaceInput<'a>) -> Self {
+        Self { input }
     }
 
     /// Draws the two-column race layout (HUD strip / overlay toolbar /
@@ -224,27 +209,31 @@ impl<'a> RaceScreen<'a> {
             col_left_rect.max,
         );
 
-        let active_car_state = active_state(self.cars, self.active);
+        let active_car_state = active_state(self.input.scene.cars, self.input.active);
         draw_hud(
             ui,
             hud_rect,
             active_car_state,
-            self.laps_done,
-            self.total_laps,
+            self.input.laps_done,
+            self.input.total_laps,
         );
 
-        let (overlays, finish_response) = draw_toolbar(ui, toolbar_rect, self.overlays);
+        let (overlays, finish_response) = draw_toolbar(ui, toolbar_rect, self.input.scene.overlays);
 
         draw_canvas(
             ui,
             canvas_rect,
-            self.track,
-            self.cars,
-            self.reduced_motion,
-            overlays,
+            Scene {
+                overlays,
+                ..self.input.scene
+            },
         );
 
-        let legal = active_legal_mask(self.track, self.cars, self.active);
+        let legal = active_legal_mask(
+            self.input.scene.track,
+            self.input.scene.cars,
+            self.input.active,
+        );
         let (movepad_response, coast_response) = ui
             .scope_builder(
                 egui::UiBuilder::new()
@@ -254,7 +243,7 @@ impl<'a> RaceScreen<'a> {
                     ui.set_width(COL_RIGHT_W);
                     let (movepad_response, coast_response) = draw_your_move(ui, legal);
                     ui.add_space(RIGHT_STACK_GAP);
-                    draw_standings(ui, self.cars);
+                    draw_standings(ui, self.input.scene.cars);
                     (movepad_response, coast_response)
                 },
             )
@@ -357,16 +346,13 @@ fn draw_toolbar(ui: &mut Ui, rect: Rect, overlays: Overlays) -> (Overlays, Respo
 }
 
 /// Draws the canvas border (`1.5px` `GRAPHITE_900` stroke, `radius-2`) then
-/// renders `track` + `cars` via [`crate::render_frame`] with the live
-/// `overlays`.
-fn draw_canvas(
-    ui: &mut Ui,
-    rect: Rect,
-    track: &TrackArtifact,
-    cars: &[CarRender<'_>],
-    reduced_motion: bool,
-    overlays: Overlays,
-) {
+/// renders `scene` via [`crate::render_frame`].
+///
+/// `scene.overlays` is the **live** overlays for this frame — the caller
+/// reconstructs `scene` from the toolbar's return value (not
+/// `self.input.scene` wholesale) so a same-frame toolbar toggle is reflected
+/// on the canvas (design § Risks — interactive-toggle threading).
+fn draw_canvas(ui: &mut Ui, rect: Rect, scene: Scene<'_>) {
     let painter = ui.painter();
     painter.rect_stroke(
         rect,
@@ -375,16 +361,7 @@ fn draw_canvas(
         egui::StrokeKind::Inside,
     );
     let inner = rect.shrink(CANVAS_BORDER_W);
-    crate::render_frame(
-        painter,
-        inner,
-        crate::Scene {
-            track,
-            cars,
-            reduced_motion,
-            overlays,
-        },
-    );
+    crate::render_frame(painter, inner, scene);
     ui.allocate_rect(rect, egui::Sense::hover());
 }
 
