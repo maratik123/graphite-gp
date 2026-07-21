@@ -2,6 +2,13 @@
 //!
 //! 56 total: 38 base colors + 18 semantic aliases (each a const *reference*
 //! to a base color, per the CSS's own `var(--x)` convention).
+//!
+//! **Miri:** all 5 `tests` below assert constant/data parity against the
+//! `include_str!`'d CSS (or a sibling const), or `car_color`'s totality as a
+//! safe accessor over a static const table — safe-Rust comparisons only, so
+//! they carry `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-token-tests`): interpreted wall-clock cost, no
+//! production Miri UB signal — not an abort.
 
 use egui::Color32;
 
@@ -284,6 +291,14 @@ mod tests {
     /// parser cuts at `;`, never at end-of-line: 28 of these 56 color
     /// declarations carry a trailing `/* ... */` comment (design finding 6).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn base_colors_match_css() {
         for (name, want) in BASE {
             let parsed = parse_hex_color(value_of(CSS, name));
@@ -294,6 +309,14 @@ mod tests {
     /// AC5 — every alias equals its base const, and the CSS's own `var(--x)`
     /// still points at that same base token.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn aliases_match_their_base() {
         for (name, alias, base, target) in ALIASES {
             assert_eq!(alias, base, "{name}: alias const != base const");
@@ -307,6 +330,14 @@ mod tests {
 
     /// AC3 — the car ramp: length, first entry, and `car_color`'s totality.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn car_colors_and_accessor() {
         assert_eq!(CAR_COLORS.len(), 6);
         assert_eq!(CAR_COLORS[0], ACCENT);
@@ -318,6 +349,14 @@ mod tests {
 
     /// AC4 — the heat ramp, ordered slow → fast.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn heat_ramp_is_ordered_slow_to_fast() {
         assert_eq!(HEAT_RAMP.len(), 4);
         assert_eq!(HEAT_RAMP, [HEAT_0, HEAT_1, HEAT_2, HEAT_3]);
@@ -328,6 +367,14 @@ mod tests {
     /// AC6 — cross-file identity: car 1 is the accent, and the accent is the
     /// ramp's fastest color; a spot-check alias identity too.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn cross_identities_hold() {
         assert_eq!(CAR_COLORS[0], ACCENT);
         assert_eq!(ACCENT, HEAT_RAMP[3]);

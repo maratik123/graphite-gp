@@ -6,6 +6,12 @@
 //! `f32` too (not `u8`): `--radius-pill: 999px` ports exactly as
 //! `RADIUS_PILL: f32 = 999.0`, and `From<f32> for CornerRadius` saturates to
 //! `255` at the use site — see the design's finding 2 (ratified).
+//!
+//! **Miri:** both `tests` below assert constant/data parity against the
+//! `include_str!`'d CSS (or a hand-computed saturation), so they carry
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-token-tests`): interpreted wall-clock cost, no
+//! production Miri UB signal — not an abort.
 
 // ---- Spacing scale (4px lattice) ----
 
@@ -143,6 +149,14 @@ mod tests {
     /// tokens) and the two AC6 exemplars against their longer-named,
     /// short-first-in-source siblings (`--cell` vs `--cell-sm`).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn tokens_match_css() {
         for (name, want) in TOKENS {
             assert_token(CSS, name, want);
@@ -155,6 +169,14 @@ mod tests {
     /// comparison (`CornerRadius`'s fields are `u8`) — needs no `float_cmp`
     /// allow.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn radius_pill_saturates_to_255() {
         assert_eq!(CornerRadius::from(RADIUS_PILL), CornerRadius::same(255));
     }

@@ -5,6 +5,12 @@
 //! Hoisted here so there is exactly one copy and exactly one
 //! `#[allow(clippy::float_cmp)]` site (`assert_f32`) for the whole crate —
 //! see design `2026-07-17-render-design-tokens` § *Remedy*.
+//!
+//! **Miri:** the 2 `tests` below exercise the `#[cfg(test)]`-only
+//! `assert_f32`/`assert_f32_slice` helpers themselves, never linked into the
+//! game binary, so they carry `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-token-tests`): interpreted wall-clock cost, no
+//! production Miri UB signal — not an abort.
 
 /// The ONLY float-comparison site in the crate.
 ///
@@ -41,12 +47,24 @@ mod tests {
     use super::{assert_f32, assert_f32_slice};
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: exercises the #[cfg(test)]-only assert_f32/ \
+                  assert_f32_slice helpers themselves — not an abort"
+    )]
     fn assert_f32_accepts_an_equal_value() {
         let got: f32 = "1.05".parse().expect("valid float literal");
         assert_f32("probe", got, 1.05);
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: exercises the #[cfg(test)]-only assert_f32/ \
+                  assert_f32_slice helpers themselves — not an abort"
+    )]
     fn assert_f32_slice_accepts_equal_arrays() {
         assert_f32_slice("probe", &[0.2, 0.0, 0.1, 1.0], &[0.2, 0.0, 0.1, 1.0]);
     }
