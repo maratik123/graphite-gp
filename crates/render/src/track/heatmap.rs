@@ -16,6 +16,13 @@
 //! [`ramp_color`]) plus a thin [`paint`] that maps to screen via
 //! [`TrackTransform`] — the crate's house pattern (design § *House
 //! pattern*).
+//!
+//! **Miri:** the 2 `tests::painted_meshes`-driven tests below stand up an
+//! `egui::Context` and run `paint` through a `run_ui` pass, so they carry
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-render-tests`) — wall-clock cost, not an abort. The
+//! `speed_bounds_*`/`normalize_*`/`ramp_color_*` pure-logic tests build no
+//! `Context` and stay un-gated.
 
 use super::TrackTransform;
 use super::regions::{self, LoopRoles};
@@ -310,6 +317,12 @@ mod tests {
     /// color equals the expected ramp color (design § Key decisions 1,
     /// amended 2026-07-20).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_meshes drives a Context::run_ui + layer_painter \
+                  pass through heatmap::paint, capturing per-cell meshes — \
+                  interpreted-pass wall-clock cost, not an abort"
+    )]
     fn paint_emits_per_cell_meshes_plus_infield_recut() {
         let (d, loops, roles) = ring_3x3_loops_and_roles();
         assert_eq!(
@@ -349,6 +362,12 @@ mod tests {
     /// AC7 — an empty heatmap draws no shapes at all, not even the infield
     /// re-cut (the `speed_bounds`-`None` early return precedes it).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_meshes drives a Context::run_ui + layer_painter \
+                  pass through heatmap::paint, capturing per-cell meshes — \
+                  interpreted-pass wall-clock cost, not an abort"
+    )]
     fn paint_is_noop_on_empty_heatmap() {
         let (d, loops, roles) = ring_3x3_loops_and_roles();
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
