@@ -87,6 +87,15 @@ pub struct StartFinish {
     pub gate: TimingGate,
 }
 
+impl StartFinish {
+    /// Start/finish width in lattice points — the chord length across the
+    /// corridor.
+    #[inline]
+    pub const fn width(&self) -> usize {
+        self.chord.len()
+    }
+}
+
 /// An ordered list of distinct start positions in the corridor `D`, each
 /// implicitly at rest (`v = (0, 0)`).
 ///
@@ -335,6 +344,8 @@ pub struct TrackArtifact {
     pub centerline: Centerline,
     /// Oracle-derived speed metrics.
     pub metrics: TrackMetrics,
+    /// Minimum cross-section width in lattice points (Ф4 static validation).
+    pub width_min: u32,
 }
 
 #[cfg(test)]
@@ -602,7 +613,7 @@ mod tests {
     // ---- TrackArtifact (subtask 5) --------------------------------------
 
     #[test]
-    fn track_artifact_carries_all_eight_members() {
+    fn track_artifact_carries_all_nine_members() {
         let rect = Rect {
             origin: Point::new(0, 0),
             size: Size::new(1, 1),
@@ -623,8 +634,38 @@ mod tests {
             start_grid: StartGrid::default(),
             centerline: Centerline::default(),
             metrics: TrackMetrics::default(),
+            width_min: 1,
         };
         assert!(artifact.start_grid.positions.is_empty());
         assert!(artifact.s_field.dist.iter().all(Option::is_none));
+    }
+
+    // ---- StartFinish::width (AC7) ----------------------------------------
+
+    #[test]
+    fn start_finish_width_returns_chord_len() {
+        let sf = StartFinish {
+            chord: vec![Point::new(0, 0), Point::new(0, 1), Point::new(0, 2)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![],
+                forward: Side::East,
+            },
+        };
+        assert_eq!(sf.width(), 3);
+        assert_eq!(sf.width(), sf.chord.len());
+    }
+
+    #[test]
+    fn start_finish_width_empty_chord_is_zero() {
+        let sf = StartFinish {
+            chord: vec![],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![],
+                forward: Side::East,
+            },
+        };
+        assert_eq!(sf.width(), 0);
     }
 }

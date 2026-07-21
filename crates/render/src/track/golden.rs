@@ -62,6 +62,7 @@ fn scene_track() -> TrackArtifact {
         start_grid: gp_core::track::StartGrid::default(),
         centerline: gp_core::track::Centerline::default(),
         metrics: gp_core::track::TrackMetrics::default(),
+        width_min: 3,
     }
 }
 
