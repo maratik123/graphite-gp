@@ -19,6 +19,12 @@
 //! renders — the faithful thing to assert — even though a *round-trip* back
 //! through `to_srgba_unmultiplied()` is lossy for every shadow color here
 //! except `--focus-shadow`, which happens to round-trip exactly.
+//!
+//! **Miri:** all 7 `tests` below assert constant/data parity against the
+//! `include_str!`'d CSS (or a sibling const), so they carry
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-token-tests`): interpreted wall-clock cost, no
+//! production Miri UB signal — not an abort.
 
 use crate::tokens::color::{GRID_DOT, GRID_LINE};
 use egui::{Color32, Shadow};
@@ -148,6 +154,14 @@ mod tests {
 
     /// `--shadow-0`.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn shadow_0_is_none() {
         assert_eq!(SHADOW_0, Shadow::NONE);
     }
@@ -155,6 +169,14 @@ mod tests {
     /// AC1/AC6 — the four elevation shadows' geometry and stored (premultiplied)
     /// color bytes, matching the CSS numbers exactly.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn elevation_shadows_match_css() {
         assert_eq!(SHADOW_1.offset, [0, 1]);
         assert_eq!(SHADOW_1.blur, 2);
@@ -180,6 +202,14 @@ mod tests {
     /// `--shadow-inset` — same stored color as `--shadow-3` (identical CSS
     /// alpha), distinct offset/blur/spread, and a distinct Rust type.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn shadow_inset_matches_css() {
         assert_eq!(SHADOW_INSET.offset, [0, 1]);
         assert_eq!(SHADOW_INSET.blur, 2);
@@ -190,6 +220,14 @@ mod tests {
     /// `--focus-shadow` — the one shadow color that round-trips exactly
     /// (AC6 carve-out).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn focus_shadow_matches_css_and_round_trips() {
         assert_eq!(FOCUS_SHADOW.spread, 3);
         assert_eq!(FOCUS_SHADOW.offset, [0, 0]);
@@ -203,6 +241,14 @@ mod tests {
     /// AC1/AC6/AC8 — durations, both against `Duration` (integer-typed, no
     /// `float_cmp`) and against the raw CSS text.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn durations_match_css() {
         assert_eq!(DUR_FAST, Duration::from_millis(120));
         assert_eq!(DUR_MED, Duration::from_millis(200));
@@ -215,6 +261,14 @@ mod tests {
     /// AC1/AC6/AC8 — the three ease curves, value-checked from the CSS
     /// (round 3's upgrade over a hand-written expectation).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn eases_match_css() {
         assert_cubic_bezier(CSS, "--ease-standard", EASE_STANDARD);
         assert_cubic_bezier(CSS, "--ease-out", EASE_OUT);
@@ -226,6 +280,14 @@ mod tests {
     /// `name: value;` declaration), routed through the shared comparator and
     /// additionally pinned against the raw CSS text.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn bg_decomposition_matches_css() {
         assert_f32("BG_GRID_RULING_WIDTH", BG_GRID_RULING_WIDTH, 1.0);
         assert_f32("BG_DOTS_RADIUS", BG_DOTS_RADIUS, 1.2);

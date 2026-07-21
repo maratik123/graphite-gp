@@ -45,6 +45,13 @@
 //! (`--shadow-*`'s alpha) conversion at their *use site*; the const's stored
 //! value is still the CSS's own number, unaltered (design finding 2 and § *Alpha
 //! round-trip*).
+//!
+//! **Miri:** the `mod inventory` tests below assert constant/data parity
+//! against the `include_str!`'d CSS files; the `css` submodule's `mod tests`
+//! exercise the `#[cfg(test)]`-only CSS parser itself, never linked into the
+//! game binary. Both carry `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-token-tests`): interpreted wall-clock cost, no
+//! production Miri UB signal — not an abort.
 
 pub mod color;
 pub mod effects;
@@ -165,6 +172,13 @@ pub(crate) mod css {
         use super::{assert_cubic_bezier, assert_token, value_of, var_target};
 
         #[test]
+        #[cfg_attr(
+            miri,
+            ignore = "interpreted wall-clock cost, no production Miri UB \
+                      signal: exercises the #[cfg(test)]-only CSS parser \
+                      helpers, never linked into the game binary — not an \
+                      abort"
+        )]
         fn assert_token_parses_px_em_and_bare_numbers() {
             const CSS: &str = "  --a: 24px;\n  --b: -0.02em;\n  --c: 700;\n";
             assert_token(CSS, "--a", 24.0);
@@ -175,6 +189,13 @@ pub(crate) mod css {
         /// `--cell` must not match the `--cell-sm` declaration (or vice
         /// versa) — the tokenizer's ident boundary must separate them.
         #[test]
+        #[cfg_attr(
+            miri,
+            ignore = "interpreted wall-clock cost, no production Miri UB \
+                      signal: exercises the #[cfg(test)]-only CSS parser \
+                      helpers, never linked into the game binary — not an \
+                      abort"
+        )]
         fn value_of_does_not_match_a_prefix() {
             const CSS: &str = "  --cell: 24px;\n  --cell-sm: 16px;\n";
             assert_eq!(value_of(CSS, "--cell"), "24px");
@@ -185,18 +206,39 @@ pub(crate) mod css {
         /// declaration, must not be picked up as a false match — mirrors
         /// `effects.css`'s `--bg-grid` usage note preceding its declaration.
         #[test]
+        #[cfg_attr(
+            miri,
+            ignore = "interpreted wall-clock cost, no production Miri UB \
+                      signal: exercises the #[cfg(test)]-only CSS parser \
+                      helpers, never linked into the game binary — not an \
+                      abort"
+        )]
         fn value_of_ignores_comment_mentions() {
             const CSS: &str = "  /* see --token below */\n  --token: 1px;\n";
             assert_eq!(value_of(CSS, "--token"), "1px");
         }
 
         #[test]
+        #[cfg_attr(
+            miri,
+            ignore = "interpreted wall-clock cost, no production Miri UB \
+                      signal: exercises the #[cfg(test)]-only CSS parser \
+                      helpers, never linked into the game binary — not an \
+                      abort"
+        )]
         fn assert_cubic_bezier_parses_control_points() {
             const CSS: &str = "  --ease: cubic-bezier(0.2, 0, 0.1, 1);\n";
             assert_cubic_bezier(CSS, "--ease", [0.2, 0.0, 0.1, 1.0]);
         }
 
         #[test]
+        #[cfg_attr(
+            miri,
+            ignore = "interpreted wall-clock cost, no production Miri UB \
+                      signal: exercises the #[cfg(test)]-only CSS parser \
+                      helpers, never linked into the game binary — not an \
+                      abort"
+        )]
         fn var_target_extracts_the_referenced_name() {
             const CSS: &str = "  --alias: var(--base);\n";
             assert_eq!(var_target(CSS, "--alias"), "--base");
@@ -378,6 +420,14 @@ mod inventory {
     /// AC1/AC8 — per-file counts: 56/30/26/15, total 127. Re-derives the
     /// exact denominator the design's `grep -cE` counts settled on.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn per_file_counts_match_ac1() {
         assert_eq!(token_names(COLORS_CSS).len(), 56);
         assert_eq!(token_names(SPACING_CSS).len(), 30);
@@ -391,6 +441,14 @@ mod inventory {
     /// disposition fails here, and a stale entry in either list with no
     /// matching CSS token fails here too.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn ported_and_deviations_partition_the_parsed_names() {
         let mut parsed: Vec<&str> = Vec::with_capacity(127);
         parsed.extend(token_names(COLORS_CSS));

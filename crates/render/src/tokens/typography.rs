@@ -12,6 +12,12 @@
 //! `--text-eyebrow-transform` is **excluded** (AC1 branch (b), disposition
 //! 10): it is a text-transform behavior, not a value token, and belongs to
 //! whichever component draws an eyebrow (`gp-render` #13–#16).
+//!
+//! **Miri:** all 3 `tests` below assert constant/data parity against the
+//! `include_str!`'d CSS (or a sibling const), so they carry
+//! `#[cfg_attr(miri, ignore = "…")]` (design
+//! `2026-07-21-miri-gate-token-tests`): interpreted wall-clock cost, no
+//! production Miri UB signal — not an abort.
 
 /// `--font-display`. Primary family name only.
 ///
@@ -126,6 +132,14 @@ mod tests {
     /// AC1/AC6/AC8 — every numeric token's parsed CSS value matches its
     /// const.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn numeric_tokens_match_css() {
         for (name, want) in TOKENS {
             assert_token(CSS, name, want);
@@ -150,6 +164,14 @@ mod tests {
 
     /// AC1/AC6/AC8 — the three family tokens' primary names.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn family_names_match_css() {
         assert_eq!(primary_family(CSS, "--font-display"), FONT_DISPLAY);
         assert_eq!(primary_family(CSS, "--font-ui"), FONT_UI);
@@ -163,6 +185,14 @@ mod tests {
     /// this assertion catches it (proven: `ROLE_DISPLAY_SIZE` mis-pointed at
     /// `FS_H2` passes the CSS-side check and fails this one, 30 vs 56).
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "interpreted wall-clock cost, no production Miri UB \
+                  signal: asserts constant/data parity against the \
+                  include_str!'d design-system CSS (or a sibling const), \
+                  or a total safe accessor over a static const table — \
+                  safe-Rust comparisons, not an abort"
+    )]
     fn role_aliases_match_their_target() {
         assert_eq!(var_target(CSS, "--role-display-size"), "--fs-display");
         assert_eq!(var_target(CSS, "--role-value-size"), "--fs-h2");
