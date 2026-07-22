@@ -291,20 +291,19 @@ fn draw_header(ui: &mut Ui, position: Option<u32>) {
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
         );
         let eyebrow = EYEBROW_TEXT.to_uppercase();
-        let eyebrow_w = ui
+        let eyebrow_galley = ui
             .painter()
-            .layout_no_wrap(eyebrow.clone(), eyebrow_font.clone(), color::TEXT_MUTED)
-            .rect
-            .width();
+            .layout_no_wrap(eyebrow, eyebrow_font, color::TEXT_MUTED);
+        let eyebrow_w = eyebrow_galley.size().x;
         let (eyebrow_rect, _response) = ui.allocate_exact_size(
             egui::vec2(eyebrow_w, typography::FS_XS * typography::LH_SNUG),
             Sense::hover(),
         );
-        ui.painter().text(
+        crate::text::paint_galley(
+            ui.painter(),
             eyebrow_rect.left_top(),
             Align2::LEFT_TOP,
-            eyebrow,
-            eyebrow_font,
+            eyebrow_galley,
             color::TEXT_MUTED,
         );
 
@@ -312,30 +311,30 @@ fn draw_header(ui: &mut Ui, position: Option<u32>) {
 
         let suffix = position.map_or_else(|| "P—".to_owned(), |rank| format!("P{rank}"));
         let title_font = FontId::new(TITLE_FS, FontFamily::Name(crate::fonts::ONEST_BOLD.into()));
-        let prefix_w = ui
-            .painter()
-            .layout_no_wrap(TITLE_PREFIX.to_owned(), title_font.clone(), color::TEXT_INK)
-            .rect
-            .width();
-        let suffix_w = ui
-            .painter()
-            .layout_no_wrap(suffix.clone(), title_font.clone(), color::ACCENT)
-            .rect
-            .width();
-        let (title_rect, _response) =
-            ui.allocate_exact_size(egui::vec2(prefix_w + suffix_w, TITLE_FS), Sense::hover());
-        let prefix_rect = ui.painter().text(
-            title_rect.left_top(),
-            Align2::LEFT_TOP,
-            TITLE_PREFIX,
+        let prefix_galley = ui.painter().layout_no_wrap(
+            TITLE_PREFIX.to_owned(),
             title_font.clone(),
             color::TEXT_INK,
         );
-        ui.painter().text(
+        let suffix_galley = ui
+            .painter()
+            .layout_no_wrap(suffix, title_font, color::ACCENT);
+        let prefix_w = prefix_galley.size().x;
+        let suffix_w = suffix_galley.size().x;
+        let (title_rect, _response) =
+            ui.allocate_exact_size(egui::vec2(prefix_w + suffix_w, TITLE_FS), Sense::hover());
+        let prefix_rect = crate::text::paint_galley(
+            ui.painter(),
+            title_rect.left_top(),
+            Align2::LEFT_TOP,
+            prefix_galley,
+            color::TEXT_INK,
+        );
+        crate::text::paint_galley(
+            ui.painter(),
             Pos2::new(prefix_rect.max.x, title_rect.min.y),
             Align2::LEFT_TOP,
-            suffix,
-            title_font,
+            suffix_galley,
             color::ACCENT,
         );
     });
