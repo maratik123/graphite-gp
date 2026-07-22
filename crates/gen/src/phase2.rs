@@ -356,6 +356,116 @@ mod tests {
         let _ = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
     }
 
+    // ---- Subtask 2: Stage-2 outer-wall taper -------------------------------
+
+    /// The documented "several columns" floor for a taper run (design doc Key
+    /// Decisions) — test-only threshold.
+    const MIN_TAPER_RUN: i32 = 3;
+
+    /// The nominal (unwidened) East-wall fine `x` for [`fixture_jog`]: the
+    /// ring's unwidened East coarse column is `3`, so the fine block edge is
+    /// `(3 + 1) * k - 1`.
+    const FIXTURE_NOMINAL_EAST_X: i32 = 4 * FIXTURE_K - 1;
+
+    #[test]
+    fn ac4_tapered_east_wall_advances_at_most_one_point_per_row() {
+        let skel = fixture_jog();
+        let d = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        let profile = east_wall_profile(&d);
+        assert!(
+            profile.len() >= 2,
+            "expected a multi-row east wall profile, got {profile:?}"
+        );
+        for w in profile.windows(2) {
+            let (y0, x0) = w[0];
+            let (y1, x1) = w[1];
+            assert_eq!(
+                y1,
+                y0.saturating_add(1),
+                "profile must be over contiguous rows"
+            );
+            let step = x1.abs_diff(x0);
+            assert!(
+                step <= 1,
+                "east wall advanced by {step} between rows {y0} and {y1} (x {x0} -> {x1})"
+            );
+        }
+    }
+
+    #[test]
+    fn ac4_widen_jog_delta_spans_at_least_min_taper_run_rows() {
+        let skel = fixture_jog();
+        let d = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        let profile = east_wall_profile(&d);
+        let min_x = profile.iter().map(|&(_, x)| x).min().unwrap_or(0);
+        let max_x = profile.iter().map(|&(_, x)| x).max().unwrap_or(0);
+        // The widen jog is a real Δ=k step (not erased/flattened): the
+        // 1-Lipschitz property (previous test) already forces the walk from
+        // min_x to max_x to span >= delta row-steps.
+        let delta = max_x.abs_diff(min_x);
+        let fixture_k = u32::try_from(FIXTURE_K).unwrap_or(0);
+        let min_taper_run = u32::try_from(MIN_TAPER_RUN).unwrap_or(0);
+        assert!(delta >= fixture_k, "expected a >= k jog, got delta {delta}");
+        assert!(
+            delta >= min_taper_run,
+            "jog delta {delta} smaller than the MIN_TAPER_RUN floor"
+        );
+    }
+
+    #[test]
+    fn ac4_nominal_rows_far_from_the_jog_keep_width_k() {
+        let skel = fixture_jog();
+        let d = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        // The extreme south content row (first fine row of coarse ring row
+        // -1) and the extreme north content row (last fine row of coarse
+        // ring row 3) sit at the corridor's box edges — no taper pass can
+        // reach past D0's own bounding box (design doc Note 4) — so both
+        // stay at the unwidened nominal East wall position.
+        let south_y = (-1i32).saturating_mul(FIXTURE_K);
+        let north_y = 4i32.saturating_mul(FIXTURE_K).saturating_sub(1);
+        assert_eq!(row_extent(&d, south_y, 1), Some(FIXTURE_NOMINAL_EAST_X));
+        assert_eq!(row_extent(&d, north_y, 1), Some(FIXTURE_NOMINAL_EAST_X));
+    }
+
+    #[test]
+    fn taper_is_additive_d0_subset_of_final_d() {
+        let skel = fixture_jog();
+        let (d0, _h) = stage1_baseline(&skel.ring, &skel.hole, FIXTURE_K);
+        let d_final = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        for p in drivable_points(&d0) {
+            assert!(d_final.contains(p), "D0 point {p:?} missing from final D");
+        }
+    }
+
+    #[test]
+    fn taper_never_makes_a_hole_cell_drivable() {
+        let skel = fixture_jog();
+        let (_d0, h) = stage1_baseline(&skel.ring, &skel.hole, FIXTURE_K);
+        let d_final = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        for &p in &h {
+            assert!(!d_final.contains(p), "hole cell {p:?} became drivable");
+        }
+    }
+
+    #[test]
+    fn taper_is_deterministic_across_repeated_calls() {
+        let skel = fixture_jog();
+        let a = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        let b = phase2_rasterize(&skel, FIXTURE_K, FIXTURE_N);
+        assert_eq!(drivable_points(&a), drivable_points(&b));
+    }
+
+    /// `(y, x_max)` for every row of `d`'s bounding box with at least one
+    /// drivable cell, in increasing-`y` order — the East-wall profile AC4
+    /// walks.
+    fn east_wall_profile(d: &Corridor) -> Vec<(i32, i32)> {
+        let origin = d.origin();
+        let hgt = i32::try_from(d.height()).unwrap_or(0);
+        (origin.y..origin.y.saturating_add(hgt))
+            .filter_map(|y| row_extent(d, y, 1).map(|x| (y, x)))
+            .collect()
+    }
+
     /// Every drivable point of `d`, as a sorted `Vec` for equality comparison.
     fn drivable_points(d: &Corridor) -> Vec<Point> {
         let mut pts = Vec::new();
