@@ -5,8 +5,9 @@
 //! separate manual-layout `paint` path to keep in sync.
 
 use crate::widgets::CarKind;
-use crate::{Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
+use crate::{CarRender, Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
 use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+use gp_core::sim::CarState;
 use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
 
 /// The golden/click-through's fixed canvas. Height fits `setup_gallery.rs`'s
@@ -106,13 +107,76 @@ const FIXED_SUMMARY: RaceSummary = RaceSummary {
     crashes: 1,
 };
 
+/// A 4-car render fixture (player index 0 + 3 rivals, matching
+/// [`fixture_standings`]'s 4 entries) placed on [`fixture_track`]'s open
+/// ring cells, each with a non-zero velocity so the HUD/velocity-arrow
+/// layers are non-degenerate — reviewer follow-up (PR #118 round 1):
+/// `app_shell_race_matches_golden` previously rendered with an empty `cars`
+/// slice, an unrepresentative fixture that showed a degenerate HUD
+/// (`0.00`/`(0,0)`) and clipped the Standings card's title. Mirrors
+/// `screens::race_gallery::fixture_cars`'s shape.
+fn fixture_race_cars(trails: &[[Point; 2]; 4]) -> [CarRender<'_>; 4] {
+    [
+        CarRender::new(
+            CarState {
+                x: 2,
+                y: 1,
+                vx: 0,
+                vy: 1,
+            },
+            0,
+            &trails[0],
+            true,
+            0.0,
+        ),
+        CarRender::new(
+            CarState {
+                x: 1,
+                y: 2,
+                vx: 1,
+                vy: 0,
+            },
+            1,
+            &trails[1],
+            false,
+            0.0,
+        ),
+        CarRender::new(
+            CarState {
+                x: 3,
+                y: 2,
+                vx: -1,
+                vy: 0,
+            },
+            2,
+            &trails[2],
+            false,
+            0.0,
+        ),
+        CarRender::new(
+            CarState {
+                x: 2,
+                y: 3,
+                vx: 0,
+                vy: -1,
+            },
+            3,
+            &trails[3],
+            false,
+            0.0,
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, PhaseStatus, fixture_standings, fixture_track,
+        CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, PhaseStatus, fixture_race_cars,
+        fixture_standings, fixture_track,
     };
-    use crate::app::{AppShell, Screen, ShellSession};
+    use crate::app::{AppShell, Nav, Screen, ShellSession};
     use egui::epaint::Primitive;
+    use gp_core::geom::Point;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -255,6 +319,160 @@ mod tests {
             .threshold(1.0)
             .failed_pixel_count_threshold(0);
         if let Err(err) = egui_kittest::try_image_snapshot_options(&image, "app_shell", &options) {
+            panic!("{err}");
+        }
+    }
+
+    /// Reviewer follow-up (PR #118 round 1) — same harness/fixtures/options
+    /// as [`app_shell_matches_golden`], but the shell is driven to
+    /// [`Screen::Lab`] (`Nav::Generate`) before the render so the top bar's
+    /// active-pill treatment on the "Track lab" nav item is covered (the
+    /// base golden only shows "New race" active on `Setup`).
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    #[test]
+    fn app_shell_lab_matches_golden() {
+        let render_state = egui_kittest::wgpu::create_render_state(
+            egui_kittest::wgpu::default_wgpu_setup(),
+            egui_wgpu::RendererOptions::PREDICTABLE,
+        );
+        assert_eq!(
+            render_state.adapter.get_info().device_type,
+            egui_wgpu::wgpu::DeviceType::Cpu,
+            "resolved wgpu adapter is not a CPU/software device — install a \
+             Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
+        );
+
+        let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
+        let track = fixture_track();
+        let standings = fixture_standings();
+        let mut shell = AppShell::new(FIXED_CONFIG);
+        shell.apply(Nav::Generate);
+        assert_eq!(shell.screen(), Screen::Lab, "Generate -> Lab");
+
+        let mut fonts_installed = false;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(CANVAS_SIZE)
+            .with_pixels_per_point(1.0)
+            .with_theme(egui::Theme::Light)
+            .renderer(renderer)
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
+                let session = ShellSession {
+                    track: &track,
+                    cars: &[],
+                    reduced_motion: false,
+                    active: 0,
+                    laps_done: 0,
+                    total_laps: 1,
+                    phases: [PhaseStatus::Ok; 7],
+                    valid: true,
+                    seed: 7,
+                    standings: &standings,
+                    summary: FIXED_SUMMARY,
+                };
+                let _ = shell.show(ui, session);
+            });
+
+        harness.run_steps(1);
+
+        let image = harness.render().expect("offscreen wgpu render failed");
+
+        let options = egui_kittest::SnapshotOptions::new()
+            .threshold(1.0)
+            .failed_pixel_count_threshold(0);
+        if let Err(err) =
+            egui_kittest::try_image_snapshot_options(&image, "app_shell_lab", &options)
+        {
+            panic!("{err}");
+        }
+    }
+
+    /// Reviewer follow-up (PR #118 round 1) — same harness/fixtures/options
+    /// as [`app_shell_matches_golden`], but the shell is driven to
+    /// [`Screen::Race`] (`Nav::Generate` then `Nav::TestLap`) before the
+    /// render so the top bar's active-pill treatment on the "Race" nav item
+    /// is covered.
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    #[test]
+    fn app_shell_race_matches_golden() {
+        let render_state = egui_kittest::wgpu::create_render_state(
+            egui_kittest::wgpu::default_wgpu_setup(),
+            egui_wgpu::RendererOptions::PREDICTABLE,
+        );
+        assert_eq!(
+            render_state.adapter.get_info().device_type,
+            egui_wgpu::wgpu::DeviceType::Cpu,
+            "resolved wgpu adapter is not a CPU/software device — install a \
+             Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
+        );
+
+        let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
+        let track = fixture_track();
+        let standings = fixture_standings();
+        let trails: [[Point; 2]; 4] = [
+            [Point::new(1, 1), Point::new(2, 1)],
+            [Point::new(1, 1), Point::new(1, 2)],
+            [Point::new(3, 1), Point::new(3, 2)],
+            [Point::new(2, 1), Point::new(2, 3)],
+        ];
+        let cars = fixture_race_cars(&trails);
+        let mut shell = AppShell::new(FIXED_CONFIG);
+        shell.apply(Nav::Generate);
+        shell.apply(Nav::TestLap);
+        assert_eq!(
+            shell.screen(),
+            Screen::Race,
+            "Generate -> Lab -> TestLap -> Race"
+        );
+
+        let mut fonts_installed = false;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(CANVAS_SIZE)
+            .with_pixels_per_point(1.0)
+            .with_theme(egui::Theme::Light)
+            .renderer(renderer)
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
+                let session = ShellSession {
+                    track: &track,
+                    cars: &cars,
+                    reduced_motion: false,
+                    active: 0,
+                    laps_done: 0,
+                    total_laps: 1,
+                    phases: [PhaseStatus::Ok; 7],
+                    valid: true,
+                    seed: 7,
+                    standings: &standings,
+                    summary: FIXED_SUMMARY,
+                };
+                let _ = shell.show(ui, session);
+            });
+
+        harness.run_steps(1);
+
+        let image = harness.render().expect("offscreen wgpu render failed");
+
+        let options = egui_kittest::SnapshotOptions::new()
+            .threshold(1.0)
+            .failed_pixel_count_threshold(0);
+        if let Err(err) =
+            egui_kittest::try_image_snapshot_options(&image, "app_shell_race", &options)
+        {
             panic!("{err}");
         }
     }
