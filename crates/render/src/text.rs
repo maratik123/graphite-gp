@@ -79,7 +79,7 @@ mod tests {
         ctx.set_fonts(crate::fonts::definitions());
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
+                Pos2::ZERO,
                 egui::vec2(200.0, 200.0),
             )),
             ..Default::default()
@@ -130,7 +130,7 @@ mod tests {
         ctx.set_fonts(crate::fonts::definitions());
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
+                Pos2::ZERO,
                 egui::vec2(200.0, 200.0),
             )),
             ..Default::default()

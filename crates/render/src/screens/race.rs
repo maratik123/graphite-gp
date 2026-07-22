@@ -4,9 +4,9 @@
 //! Draw-only, caller-supplies-data (mirrors [`crate::screens::lab::LabScreen`]
 //! / [`crate::screens::setup::SetupScreen`]): the screen holds a
 //! caller-supplied [`TrackArtifact`], a caller-supplied `&[CarRender<'a>]`
-//! slice + active-car index, the current [`crate::Overlays`], and the
+//! slice + active-car index, the current [`Overlays`], and the
 //! caller-tracked lap counters — and emits the player's selected [`Action`]
-//! (if any), the toggled [`crate::Overlays`], and a `finish` click signal via
+//! (if any), the toggled [`Overlays`], and a `finish` click signal via
 //! [`RaceResponse`]. It never calls `gp_core::sim::step`/`resolve_crash`/
 //! `resolve_collisions`/`LapCounter` — those are `gp-game` orchestration
 //! (spec § Scope).
@@ -88,7 +88,7 @@ const MOVE_CAPTION: &str = "±1 per axis · no diagonal accel\nsupercover ⊆ D"
 ///
 /// Access is total via `CAR_NAMES.get(i).copied().unwrap_or("Car")` — a
 /// slice longer than 6 cars never panics, consistent with
-/// [`CarRender::color`](crate::track::CarRender::color)'s no-panic-on-bad-index
+/// [`CarRender::color`](CarRender::color)'s no-panic-on-bad-index
 /// posture.
 pub const CAR_NAMES: [&str; 6] = [
     "You",

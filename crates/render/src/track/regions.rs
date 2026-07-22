@@ -347,7 +347,7 @@ pub(crate) fn triangulate_calls() -> usize {
 /// Test-only: zero the current thread's [`triangulate`] call counter.
 #[cfg(test)]
 pub(crate) fn reset_triangulate_calls() {
-    TRIANGULATE_CALLS.with(|c| c.set(0));
+    TRIANGULATE_CALLS.set(0);
 }
 
 /// Ear-clipping triangulation of a simple polygon (design § Decision —
