@@ -11,8 +11,8 @@
 //! `#[cfg_attr(miri, ignore = "…")]` (design
 //! `2026-07-21-miri-gate-render-tests`) — wall-clock cost under the
 //! interpreter, not an abort (the helper only captures `output.shapes`,
-//! never calls `tessellate`/`set_fonts`). `layer_order_is_documented` builds
-//! no `Context` and stays un-gated.
+//! never calls `tessellate`/`set_fonts`). `layer_order_matches_documented_names`
+//! builds no `Context` and stays un-gated.
 
 mod car;
 mod fastest_lap;
@@ -35,34 +35,45 @@ pub use transform::TrackTransform;
 use crate::Overlays;
 use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
+use strum::IntoEnumIterator;
 
-/// The documented back-to-front draw order (AC5/AC9, final): `outfield →
-/// asphalt → infield → heatmap → grid → walls → fastest_lap → S/F → cars`.
-/// [`draw_frame`] follows this order exactly; `layer_order_is_documented`
-/// pins the list itself as a tested contract.
-#[cfg_attr(
-    not(test),
-    allow(
-        dead_code,
-        reason = "documents draw_frame's own order as a standalone, tested \
-                  contract (AC9) rather than a value draw_frame reads at runtime"
-    )
-)]
-pub(crate) const LAYER_ORDER: [&str; 9] = [
-    "outfield",
-    "asphalt",
-    "infield",
-    "heatmap",
-    "grid",
-    "walls",
-    "fastest_lap",
-    "sf",
-    "cars",
-];
+/// The layers [`draw_frame`] draws, back-to-front (AC5/AC9, final documented
+/// order): `regions` (which expands to [`regions::RegionLayer`]'s own
+/// `outfield → asphalt → infield`) `→ heatmap → grid → walls → fastest-lap →
+/// sf → cars`. [`draw_frame`] iterates
+/// [`Layer::iter`](strum::IntoEnumIterator::iter) and dispatches each variant
+/// to its draw action, so this order **is** the draw order (no second,
+/// separately-maintained sequence to drift from it) —
+/// `layer_order_matches_documented_names` pins the flattened, 9-name list as
+/// a tested contract.
+#[derive(Clone, Copy, Debug, strum::EnumIter, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
+pub(crate) enum Layer {
+    /// The three regions (`outfield`, `asphalt`, `infield`) — see
+    /// [`regions::RegionLayer`] for their own sub-order.
+    Regions,
+    /// The `speed_heatmap` analytics overlay (layer 1b, over the asphalt,
+    /// design § Key decisions 1) — gated on `overlays.speed_heatmap`.
+    Heatmap,
+    /// The notebook-sheet grid overlay (layer 4, over the regions, design §
+    /// Key decisions 4) — gated on `overlays.grid`.
+    Grid,
+    /// The Chaikin-smoothed, M6-guarded walls.
+    Walls,
+    /// The `fastest_lap` analytics overlay (layer 5, over the walls, design
+    /// § Key decisions 3) — gated on `overlays.fastest_lap`. Documented name
+    /// `fastest-lap` (kebab-case).
+    FastestLap,
+    /// The checkered S/F chord.
+    Sf,
+    /// Every car (trail, dot, velocity arrow, optional "you" ring).
+    Cars,
+}
 
 /// Draws one frame of the track canvas (design doc §4) into `rect`, back to
-/// front per [`LAYER_ORDER`]: the three regions (`regions::fill` — outfield,
-/// asphalt, infield in that order), the `speed_heatmap` analytics overlay
+/// front per [`Layer`]: the three regions (`regions::fill` — see
+/// [`regions::RegionLayer`] for `outfield → asphalt → infield`), the
+/// `speed_heatmap` analytics overlay
 /// (layer 1b, over the asphalt, design § Key decisions 1), the notebook-
 /// sheet `grid` overlay (layer 4, over the regions, design § Key decisions
 /// 4), the Chaikin-smoothed, M6-guarded walls, the `fastest_lap` analytics
@@ -101,59 +112,83 @@ pub(crate) fn draw_frame(
         .iter()
         .map(|loop_points| loop_points.iter().map(|&p| transform.map(p)).collect())
         .collect();
-    regions::fill(
-        painter,
-        rect,
-        &mapped,
-        &geometry.triangulated_indices,
-        &geometry.loop_roles,
-    );
 
-    if overlays.speed_heatmap {
-        heatmap::paint(
-            painter,
-            &transform,
-            &mapped,
-            &geometry.triangulated_indices,
-            &geometry.loop_roles,
-            &track.metrics.speed_heatmap,
-        );
-    }
-
-    if overlays.grid {
-        grid::paint(painter, rect, &transform);
-    }
-
-    walls::paint(painter, &transform, &geometry.smoothed_loops);
-
-    if overlays.fastest_lap {
-        fastest_lap::paint(painter, &transform, &track.metrics.fastest_lap);
-    }
-
-    let checker = sf::checker_cells(&track.sf.chord);
-    sf::paint(painter, &transform, &checker, track.sf.orient);
-
-    for render in cars {
-        car::paint(painter, &transform, render, render.progress, reduced_motion);
+    for layer in Layer::iter() {
+        match layer {
+            Layer::Regions => {
+                regions::fill(
+                    painter,
+                    rect,
+                    &mapped,
+                    &geometry.triangulated_indices,
+                    &geometry.loop_roles,
+                );
+            }
+            Layer::Heatmap => {
+                if overlays.speed_heatmap {
+                    heatmap::paint(
+                        painter,
+                        &transform,
+                        &mapped,
+                        &geometry.triangulated_indices,
+                        &geometry.loop_roles,
+                        &track.metrics.speed_heatmap,
+                    );
+                }
+            }
+            Layer::Grid => {
+                if overlays.grid {
+                    grid::paint(painter, rect, &transform);
+                }
+            }
+            Layer::Walls => {
+                walls::paint(painter, &transform, &geometry.smoothed_loops);
+            }
+            Layer::FastestLap => {
+                if overlays.fastest_lap {
+                    fastest_lap::paint(painter, &transform, &track.metrics.fastest_lap);
+                }
+            }
+            Layer::Sf => {
+                let checker = sf::checker_cells(&track.sf.chord);
+                sf::paint(painter, &transform, &checker, track.sf.orient);
+            }
+            Layer::Cars => {
+                for render in cars {
+                    car::paint(painter, &transform, render, render.progress, reduced_motion);
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BakedTrackGeometry, LAYER_ORDER};
+    use super::{BakedTrackGeometry, Layer};
     use crate::{CarRender, Overlays};
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Orient, Point, Side, walls_from_boundary};
     use gp_core::sim::CarState;
     use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
+    use strum::IntoEnumIterator;
 
     /// AC5/AC9 — the documented back-to-front layer order is exactly (final,
-    /// 9-entry list) `outfield → asphalt → infield → heatmap → grid → walls
-    /// → fastest_lap → sf → cars`.
+    /// flattened, 9-entry list) `outfield → asphalt → infield → heatmap →
+    /// grid → walls → fastest-lap → sf → cars`: [`Layer::iter`] with
+    /// `Layer::Regions` expanded to [`super::regions::RegionLayer::iter`]'s
+    /// own three names.
     #[test]
-    fn layer_order_is_documented() {
+    fn layer_order_matches_documented_names() {
+        let flat: Vec<&'static str> = Layer::iter()
+            .flat_map(|layer| match layer {
+                Layer::Regions => super::regions::RegionLayer::iter()
+                    .map(<&'static str>::from)
+                    .collect::<Vec<_>>(),
+                other => vec![<&'static str>::from(other)],
+            })
+            .collect();
         assert_eq!(
-            LAYER_ORDER,
+            flat,
             [
                 "outfield",
                 "asphalt",
@@ -161,9 +196,9 @@ mod tests {
                 "heatmap",
                 "grid",
                 "walls",
-                "fastest_lap",
+                "fastest-lap",
                 "sf",
-                "cars"
+                "cars",
             ]
         );
     }
