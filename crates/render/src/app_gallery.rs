@@ -5,11 +5,9 @@
 //! separate manual-layout `paint` path to keep in sync.
 
 use crate::app::{AppShell, ShellSession};
+use crate::gallery_support::{FIXED_SUMMARY, fixture_standings};
 use crate::track::test_support::scene_track_with_metrics;
-use crate::widgets::CarKind;
-use crate::{
-    BakedTrackGeometry, CarRender, Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry,
-};
+use crate::{BakedTrackGeometry, CarRender, Difficulty, PhaseStatus, RaceConfig, StandingEntry};
 use gp_core::geom::Point;
 use gp_core::sim::CarState;
 use gp_core::track::TrackArtifact;
@@ -47,45 +45,6 @@ const FIXED_CONFIG: RaceConfig = RaceConfig {
 fn fixture_track() -> TrackArtifact {
     scene_track_with_metrics()
 }
-
-/// The fixed 4-car standings fixture (mirrors
-/// `screens::results_gallery::fixture_standings`).
-fn fixture_standings() -> [StandingEntry; 4] {
-    [
-        StandingEntry {
-            car_index: 0,
-            kind: CarKind::You,
-            rank: 1,
-            finish_time: 38.0,
-        },
-        StandingEntry {
-            car_index: 1,
-            kind: CarKind::Ai,
-            rank: 2,
-            finish_time: 39.6,
-        },
-        StandingEntry {
-            car_index: 2,
-            kind: CarKind::Ai,
-            rank: 3,
-            finish_time: 41.2,
-        },
-        StandingEntry {
-            car_index: 3,
-            kind: CarKind::Ai,
-            rank: 4,
-            finish_time: 42.8,
-        },
-    ]
-}
-
-/// The fixed race summary (mirrors
-/// `screens::results_gallery::FIXED_SUMMARY`).
-const FIXED_SUMMARY: RaceSummary = RaceSummary {
-    fastest_lap: 12.4,
-    tempo: 0.87,
-    crashes: 1,
-};
 
 /// A 4-car render fixture (player index 0 + 3 rivals, matching
 /// [`fixture_standings`]'s 4 entries), each with a non-zero velocity so the

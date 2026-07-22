@@ -46,6 +46,7 @@ fn fixture_track() -> TrackArtifact {
 mod tests {
     use super::{CANVAS_SIZE, FIXED_PHASES, FIXED_SEED, LabInput, LabScreen, fixture_track};
     use crate::BakedTrackGeometry;
+    use crate::gallery_support::click;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -175,20 +176,6 @@ mod tests {
         assert!(!saw_regenerate.get(), "AC4: rest frame — no click yet");
         assert!(!saw_test_lap.get(), "AC4: rest frame — no click yet");
         assert!(!saw_menu.get(), "AC4: rest frame — no click yet");
-
-        let click = |harness: &mut egui_kittest::Harness<'_, _>,
-                     rect: &Cell<Option<egui::Rect>>| {
-            let center = rect
-                .get()
-                .expect("rest frame captured the button rect")
-                .center();
-            harness.hover_at(center);
-            harness.step();
-            harness.drag_at(center);
-            harness.step();
-            harness.drop_at(center);
-            harness.step();
-        };
 
         click(&mut harness, &regenerate_rect);
         assert!(
