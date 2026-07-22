@@ -1014,6 +1014,35 @@ mod tests {
     }
 
     #[test]
+    fn seed_48_lmin3_widen_pinch_stays_one_hole() {
+        // Pins the d0f665e regression witness: outward widening of a concave
+        // ring at seed 48 / l_min = 3 used to pinch off a second bounded
+        // complement component (2 holes), violating AC2. This case is
+        // otherwise only covered implicitly as one member of the
+        // 0..PROPERTY_SEED_COUNT sweep above — revert d0f665e and this test
+        // fails at seed 48 with "must enclose exactly one hole".
+        let l_min = 3;
+        let seed = 48;
+        let (skeleton, _used_fallback) =
+            phase1_coarse_ring_attempts(l_min, &mut rng(seed), MAX_ATTEMPTS);
+        let d = corridor_from_cells(&skeleton.ring, 1);
+        assert_eq!(
+            component_count(&d),
+            1,
+            "seed {seed}: ring must be one connected component"
+        );
+        assert_eq!(
+            bounded_complement_components(&d),
+            1,
+            "seed {seed}: ring must enclose exactly one hole"
+        );
+        assert!(
+            !skeleton.hole.is_empty(),
+            "seed {seed}: hole must have >= 1 cell"
+        );
+    }
+
+    #[test]
     fn fallback_rate_stays_under_the_ceiling() {
         // Recommendation: a healthy construction falls back rarely — assert
         // the rate, not merely "not all seeds fall back".
