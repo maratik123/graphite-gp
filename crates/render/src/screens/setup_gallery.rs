@@ -3,7 +3,7 @@
 //! test*, subtask 4).
 //!
 //! Unlike the widget galleries (`widgets/game_gallery.rs`), this drives the
-//! **real** [`super::setup::SetupScreen::show`] inside an
+//! **real** [`SetupScreen::show`] inside an
 //! `egui_kittest::Harness` — no separate manual-layout `paint` path to keep
 //! in sync. `#[cfg_attr(miri, ignore)]` on the golden: it drives wgpu, which
 //! `dlopen`s the Vulkan ICD (no FFI under Miri).

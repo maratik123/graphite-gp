@@ -55,11 +55,7 @@ fn draw_hud_strip(painter: &Painter, x0: f32, y0: f32) -> f32 {
         Pos2::new(x0, y0),
         egui::vec2(HUD_PANEL_WIDTH, HUD_PANEL_HEIGHT),
     );
-    painter.rect_filled(
-        panel_rect,
-        HUD_PANEL_RADIUS,
-        crate::tokens::color::GRAPHITE_900,
-    );
+    painter.rect_filled(panel_rect, HUD_PANEL_RADIUS, color::GRAPHITE_900);
 
     let cell_y = panel_rect.min.y + HUD_PAD_Y;
     let cells_x0 = panel_rect.min.x + HUD_PAD_X;
@@ -128,21 +124,9 @@ fn draw_lap_meter(painter: &Painter, x0: f32, y0: f32) -> f32 {
 /// `.stack` (`You`/rank 1/active, `Rival Blue`/rank 2, `Rival Green`/rank 3).
 fn draw_car_chips(painter: &Painter, x0: f32, y0: f32) -> f32 {
     let rows: [(egui::Color32, &str, u32, bool, CarKind); 3] = [
-        (crate::tokens::color::CAR_1, "You", 1, true, CarKind::You),
-        (
-            crate::tokens::color::CAR_2,
-            "Rival Blue",
-            2,
-            false,
-            CarKind::Ai,
-        ),
-        (
-            crate::tokens::color::CAR_3,
-            "Rival Green",
-            3,
-            false,
-            CarKind::Ai,
-        ),
+        (color::CAR_1, "You", 1, true, CarKind::You),
+        (color::CAR_2, "Rival Blue", 2, false, CarKind::Ai),
+        (color::CAR_3, "Rival Green", 3, false, CarKind::Ai),
     ];
     let mut y = y0;
     for (color, name, rank, active, kind) in rows {
@@ -192,7 +176,7 @@ fn draw_car_chips(painter: &Painter, x0: f32, y0: f32) -> f32 {
 /// [`crate::fonts::definitions`] first (every widget's text draw resolves a
 /// `FontFamily::Name(..)`).
 fn draw_game_gallery(painter: &Painter, rect: Rect) {
-    painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);
+    painter.rect_filled(rect, 0, color::SURFACE_PAGE);
 
     let x0 = rect.min.x + 24.0;
     let mut y = rect.min.y + 24.0;

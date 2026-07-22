@@ -48,7 +48,7 @@ pub struct Overlays {
 ///
 /// Bundles track, cars, reduced-motion, and overlays into one cohesive value
 /// (design `2026-07-22-consolidate-render-inputs` § *The central decision*).
-/// Embedded in [`screens::RaceInput`], the only screen whose canvas
+/// Embedded in [`RaceInput`], the only screen whose canvas
 /// re-renders `Scene` on interactive toggles.
 #[derive(Clone, Copy, Debug)]
 pub struct Scene<'a> {
