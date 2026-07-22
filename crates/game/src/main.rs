@@ -51,8 +51,8 @@ const FIXTURE_CAR_COUNT: usize = 4;
 struct GraphiteGpApp {
     /// The router owning `Screen`/`RaceConfig`/`Overlays`/`has_generated`.
     shell: AppShell,
-    /// The hand-built fixture track (a 3×3 ring), shared by the Lab canvas
-    /// and the Race canvas.
+    /// The hand-built fixture track (a wide chunky rounded-rect loop),
+    /// shared by the Lab canvas and the Race canvas.
     track: TrackArtifact,
     /// Each fixture car's current state, in `CAR_NAMES` order.
     car_states: Vec<CarState>,
@@ -119,39 +119,64 @@ impl eframe::App for GraphiteGpApp {
     }
 }
 
-/// A minimal, hand-built `TrackArtifact` (a 3×3 ring) with hand-populated
-/// `speed_heatmap`/`fastest_lap` metrics — mirrors `gp-render`'s own
-/// `track/mod.rs::fixture_track_with_metrics` test fixture (design §
-/// *The binary hand-builds the fixture track*), proven to render under all
-/// overlay combinations without panicking.
+/// A hand-built `TrackArtifact` — a wide chunky rounded-rect loop (the
+/// outer block `x∈[2,13] × y∈[2,13]` minus a centered `x∈[6,9] × y∈[6,9]`
+/// hole, ~4-cell-wide arms) with hand-populated `speed_heatmap`/
+/// `fastest_lap` metrics — mirrors `gp-render`'s own
+/// `track::test_support::scene_track`/`scene_metrics` test fixtures (design
+/// § *The binary hand-builds the fixture track*), proven to render under
+/// all overlay combinations without panicking.
+///
+/// Replicated inline rather than shared: `main.rs` is production code and
+/// cannot reference `gp-render`'s `#[cfg(test)]`-only `test_support`
+/// fixtures. Reviewer follow-up (PR #118 round 2) — the previous 3×3-ring
+/// corridor was too thin for the S/F chord to cross the straightaway (the
+/// same pre-#100 defect the `gp-render` app-shell goldens had).
 fn fixture_track() -> TrackArtifact {
-    let ring_cells: [(i32, i32); 8] = [
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 2),
-        (3, 2),
-        (1, 3),
-        (2, 3),
-        (3, 3),
-    ];
-    let mut corridor = Corridor::new(Point::new(0, 0), 5, 5);
-    for &(x, y) in &ring_cells {
-        corridor.set(Point::new(x, y), true);
+    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
+    for x in 2..=13 {
+        for y in 2..=13 {
+            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
+            if !in_hole {
+                corridor.set(Point::new(x, y), true);
+            }
+        }
     }
     let walls = walls_from_boundary(&corridor);
 
-    let speed_heatmap = ring_cells
-        .iter()
-        .map(|&(x, y)| (Point::new(x, y), x.saturating_add(y)))
-        .collect();
-    let fastest_lap = ring_cells.iter().map(|&(x, y)| Point::new(x, y)).collect();
+    let mut speed_heatmap = Vec::new();
+    for x in 2..=13 {
+        for y in 2..=13 {
+            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
+            if in_hole {
+                continue;
+            }
+            let point = Point::new(x, y);
+            if corridor.contains(point) {
+                // A simple, deterministic per-cell gradient — no physical
+                // meaning, only spatial spread across the ramp's full range.
+                let speed = x.saturating_add(y);
+                speed_heatmap.push((point, speed));
+            }
+        }
+    }
+    let fastest_lap = vec![
+        Point::new(3, 3),
+        Point::new(12, 3),
+        Point::new(12, 12),
+        Point::new(3, 12),
+    ];
 
     TrackArtifact {
         walls,
         sf: StartFinish {
-            chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
-            orient: Orient::Horizontal,
+            chord: vec![
+                Point::new(7, 2),
+                Point::new(7, 3),
+                Point::new(7, 4),
+                Point::new(7, 5),
+            ],
+            orient: Orient::Vertical,
             gate: TimingGate {
                 behind: vec![],
                 forward: Side::East,
@@ -168,19 +193,25 @@ fn fixture_track() -> TrackArtifact {
             fastest_lap,
             speed_heatmap,
         },
-        width_min: 1,
+        width_min: 3,
     }
 }
 
 /// [`FIXTURE_CAR_COUNT`] fixture cars, each with a distinct at-rest state
 /// and a short trail (mirrors `gp-render`'s own gallery fixtures — the
 /// physics/AI-faked posture the spec endorses for this binary's wiring).
+///
+/// Repositioned (PR #118 round 2, alongside [`fixture_track`]'s widening)
+/// onto the new wide track's top straightaway — drivable cells with `x` in
+/// `2..=13` and `y` in `2..=5` sit outside the corridor's centered hole
+/// (`x∈[6,9] × y∈[6,9]`) regardless of `x`, so every cell below is inside
+/// `8..=12 × 2..=5`, near the S/F chord at `x = 7`.
 fn fixture_cars() -> (Vec<CarState>, Vec<Vec<Point>>) {
     // One resting cell per car, in `CAR_NAMES` order — literal, not
     // index-computed (mirrors `results_gallery.rs::fixture_standings`'s
     // literal-fixture idiom; avoids `clippy::arithmetic_side_effects` on
     // index math for a fixed, tiny fixture).
-    const FIXTURE_CELLS: [(i32, i32); FIXTURE_CAR_COUNT] = [(1, 1), (2, 1), (3, 1), (1, 2)];
+    const FIXTURE_CELLS: [(i32, i32); FIXTURE_CAR_COUNT] = [(10, 3), (8, 2), (12, 4), (9, 5)];
 
     let states: Vec<CarState> = FIXTURE_CELLS
         .iter()

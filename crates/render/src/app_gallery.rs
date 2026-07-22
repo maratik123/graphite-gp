@@ -4,11 +4,12 @@
 //! idiom. Drives the real [`AppShell::show`] inside a `Harness` — no
 //! separate manual-layout `paint` path to keep in sync.
 
+use crate::track::test_support::scene_track_with_metrics;
 use crate::widgets::CarKind;
 use crate::{CarRender, Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
-use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+use gp_core::geom::Point;
 use gp_core::sim::CarState;
-use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
+use gp_core::track::TrackArtifact;
 
 /// The golden/click-through's fixed canvas. Height fits `setup_gallery.rs`'s
 /// `SetupScreen` body (640×620) plus [`crate::app::TOP_BAR_H`] of top-bar
@@ -30,42 +31,18 @@ const FIXED_CONFIG: RaceConfig = RaceConfig {
     difficulty: Difficulty::Pro,
 };
 
-/// A minimal, hand-built `TrackArtifact` (a 3×3 ring) — mirrors
-/// `track::mod::tests::fixture_track` (private to that module tree, so
-/// redeclared here for this sibling top-level test suite).
+/// The app-shell golden/click-through's fixture track — reviewer follow-up
+/// (PR #118 round 2): this fn previously hand-rolled a thin 3×3-ring
+/// corridor whose 1-cell-wide arm made the S/F chord read as a stripe along
+/// the straightaway rather than crossing it (the exact pre-#100 look PR #100
+/// already fixed once, in `track::golden`'s fixture, for the track-canvas
+/// goldens). Reuses `track::test_support::scene_track_with_metrics` — the
+/// same wide "chunky rounded-rect" corridor `track::golden` draws — so the
+/// Lab oracle report/heatmap render representatively and the S/F crosses the
+/// top arm, instead of duplicating the geometry a second time. Keeps the
+/// `fixture_track` name; only its body changed, so callers are unaffected.
 fn fixture_track() -> TrackArtifact {
-    let mut corridor = Corridor::new(Point::new(0, 0), 5, 5);
-    for &(x, y) in &[
-        (1, 1),
-        (2, 1),
-        (3, 1),
-        (1, 2),
-        (3, 2),
-        (1, 3),
-        (2, 3),
-        (3, 3),
-    ] {
-        corridor.set(Point::new(x, y), true);
-    }
-    let walls = walls_from_boundary(&corridor);
-    TrackArtifact {
-        walls,
-        sf: StartFinish {
-            chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
-            orient: Orient::Horizontal,
-            gate: TimingGate {
-                behind: vec![],
-                forward: Side::East,
-            },
-        },
-        corridor,
-        race_dir: RaceDir::Cw,
-        s_field: gp_core::track::SField::default(),
-        start_grid: gp_core::track::StartGrid::default(),
-        centerline: gp_core::track::Centerline::default(),
-        metrics: gp_core::track::TrackMetrics::default(),
-        width_min: 1,
-    }
+    scene_track_with_metrics()
 }
 
 /// The fixed 4-car standings fixture (mirrors
@@ -108,21 +85,26 @@ const FIXED_SUMMARY: RaceSummary = RaceSummary {
 };
 
 /// A 4-car render fixture (player index 0 + 3 rivals, matching
-/// [`fixture_standings`]'s 4 entries) placed on [`fixture_track`]'s open
-/// ring cells, each with a non-zero velocity so the HUD/velocity-arrow
-/// layers are non-degenerate — reviewer follow-up (PR #118 round 1):
-/// `app_shell_race_matches_golden` previously rendered with an empty `cars`
-/// slice, an unrepresentative fixture that showed a degenerate HUD
-/// (`0.00`/`(0,0)`) and clipped the Standings card's title. Mirrors
-/// `screens::race_gallery::fixture_cars`'s shape.
+/// [`fixture_standings`]'s 4 entries), each with a non-zero velocity so the
+/// HUD/velocity-arrow layers are non-degenerate — reviewer follow-up (PR
+/// #118 round 1): `app_shell_race_matches_golden` previously rendered with
+/// an empty `cars` slice, an unrepresentative fixture that showed a
+/// degenerate HUD (`0.00`/`(0,0)`) and clipped the Standings card's title.
+/// Mirrors `screens::race_gallery::fixture_cars`'s shape.
+///
+/// Repositioned (PR #118 round 2, alongside [`fixture_track`]'s widening)
+/// onto [`fixture_track`]'s top straightaway — drivable cells with `x` in
+/// `2..=13` and `y` in `2..=5` are outside the corridor's centered hole
+/// (`x∈[6,9] × y∈[6,9]`) regardless of `x`, so every car and trail point
+/// below sits inside `2..=13 × 2..=5`, near the S/F chord at `x = 7`.
 fn fixture_race_cars(trails: &[[Point; 2]; 4]) -> [CarRender<'_>; 4] {
     [
         CarRender::new(
             CarState {
-                x: 2,
-                y: 1,
-                vx: 0,
-                vy: 1,
+                x: 10,
+                y: 3,
+                vx: 1,
+                vy: 0,
             },
             0,
             &trails[0],
@@ -131,10 +113,10 @@ fn fixture_race_cars(trails: &[[Point; 2]; 4]) -> [CarRender<'_>; 4] {
         ),
         CarRender::new(
             CarState {
-                x: 1,
+                x: 8,
                 y: 2,
-                vx: 1,
-                vy: 0,
+                vx: 0,
+                vy: 1,
             },
             1,
             &trails[1],
@@ -143,8 +125,8 @@ fn fixture_race_cars(trails: &[[Point; 2]; 4]) -> [CarRender<'_>; 4] {
         ),
         CarRender::new(
             CarState {
-                x: 3,
-                y: 2,
+                x: 12,
+                y: 4,
                 vx: -1,
                 vy: 0,
             },
@@ -155,8 +137,8 @@ fn fixture_race_cars(trails: &[[Point; 2]; 4]) -> [CarRender<'_>; 4] {
         ),
         CarRender::new(
             CarState {
-                x: 2,
-                y: 3,
+                x: 9,
+                y: 5,
                 vx: 0,
                 vy: -1,
             },
@@ -420,10 +402,10 @@ mod tests {
         let track = fixture_track();
         let standings = fixture_standings();
         let trails: [[Point; 2]; 4] = [
-            [Point::new(1, 1), Point::new(2, 1)],
-            [Point::new(1, 1), Point::new(1, 2)],
-            [Point::new(3, 1), Point::new(3, 2)],
-            [Point::new(2, 1), Point::new(2, 3)],
+            [Point::new(8, 3), Point::new(9, 3)],
+            [Point::new(8, 3), Point::new(8, 4)],
+            [Point::new(13, 4), Point::new(13, 3)],
+            [Point::new(10, 5), Point::new(11, 5)],
         ];
         let cars = fixture_race_cars(&trails);
         let mut shell = AppShell::new(FIXED_CONFIG);
