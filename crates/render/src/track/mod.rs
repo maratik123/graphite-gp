@@ -41,7 +41,7 @@ use strum::IntoEnumIterator;
 /// order): `regions` (which expands to [`regions::RegionLayer`]'s own
 /// `outfield → asphalt → infield`) `→ heatmap → grid → walls → fastest-lap →
 /// sf → cars`. [`draw_frame`] iterates
-/// [`Layer::iter`](strum::IntoEnumIterator::iter) and dispatches each variant
+/// [`Layer::iter`](IntoEnumIterator::iter) and dispatches each variant
 /// to its draw action, so this order **is** the draw order (no second,
 /// separately-maintained sequence to drift from it) —
 /// `layer_order_matches_documented_names` pins the flattened, 9-name list as

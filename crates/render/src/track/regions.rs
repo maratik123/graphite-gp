@@ -26,7 +26,7 @@ use strum::IntoEnumIterator;
 /// The three regions [`fill`] draws, back-to-front (design doc §4, layer 1;
 /// AC9's documented layer order; Amendment — Rounded track, PR #100):
 /// `Outfield → Asphalt → Infield`. [`fill`] iterates
-/// [`RegionLayer::iter`](strum::IntoEnumIterator::iter) and dispatches each
+/// [`RegionLayer::iter`](IntoEnumIterator::iter) and dispatches each
 /// variant to its draw action, so this order **is** the draw order (no
 /// second, separately-maintained sequence to drift from it).
 #[derive(Clone, Copy, Debug, strum::EnumIter, strum::IntoStaticStr)]
