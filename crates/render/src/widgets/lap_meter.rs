@@ -149,10 +149,8 @@ impl<'a> LapMeter<'a> {
             typography::FS_XS,
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
         );
-        let label_width = painter
-            .layout_no_wrap(label.to_uppercase(), label_font.clone(), colors.label)
-            .rect
-            .width();
+        let label_galley = painter.layout_no_wrap(label.to_uppercase(), label_font, colors.label);
+        let label_width = label_galley.size().x;
 
         let done_text = style.done.to_string();
         let total_text = format!("/{}", style.total);
@@ -160,40 +158,35 @@ impl<'a> LapMeter<'a> {
             typography::FS_TITLE,
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_BOLD.into()),
         );
-        let done_width = painter
-            .layout_no_wrap(done_text.clone(), done_font.clone(), colors.done)
-            .rect
-            .width();
-        let total_width = painter
-            .layout_no_wrap(total_text.clone(), done_font.clone(), colors.total)
-            .rect
-            .width();
-        let readout_width = done_width + total_width;
+        let done_galley = painter.layout_no_wrap(done_text, done_font.clone(), colors.done);
+        let total_galley = painter.layout_no_wrap(total_text, done_font, colors.total);
+        let done_width = done_galley.size().x;
+        let readout_width = done_width + total_galley.size().x;
 
         // Header row is `space-between` in `LapMeter.jsx`, with `HEADER_GAP`
         // as the minimum label↔readout gap when content would otherwise
         // overlap (design § Non-token dimensions).
         let readout_left = (rect.max.x - readout_width).max(rect.min.x + label_width + HEADER_GAP);
 
-        painter.text(
+        crate::text::paint_galley(
+            painter,
             rect.min,
             Align2::LEFT_TOP,
-            label.to_uppercase(),
-            label_font,
+            label_galley,
             colors.label,
         );
-        painter.text(
+        crate::text::paint_galley(
+            painter,
             Pos2::new(readout_left, rect.min.y),
             Align2::LEFT_TOP,
-            done_text,
-            done_font.clone(),
+            done_galley,
             colors.done,
         );
-        painter.text(
+        crate::text::paint_galley(
+            painter,
             Pos2::new(readout_left + done_width, rect.min.y),
             Align2::LEFT_TOP,
-            total_text,
-            done_font,
+            total_galley,
             colors.total,
         );
 
