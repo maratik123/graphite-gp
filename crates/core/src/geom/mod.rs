@@ -251,6 +251,22 @@ impl Corridor {
         }
     }
 
+    /// A new corridor over `[origin, origin + (width, height))` with **every**
+    /// cell drivable — a fully-drivable rectangle (the dual of [`new`]'s empty
+    /// box).
+    ///
+    /// [`new`]: Self::new
+    pub fn filled(origin: Point, width: usize, height: usize) -> Self {
+        let rect = Rect {
+            origin,
+            size: Size::new(width, height),
+        };
+        Self {
+            cells: vec![true; rect.size.area()],
+            rect,
+        }
+    }
+
     /// The bounding-box origin — its minimum-coordinate corner.
     #[inline]
     pub const fn origin(&self) -> Point {
@@ -391,6 +407,26 @@ mod tests {
     /// order (spec §4: the result is defined up to set equality).
     fn cover_set(a: Point, b: Point) -> HashSet<Point> {
         supercover(a, b).collect()
+    }
+
+    #[test]
+    fn corridor_filled_marks_every_cell_drivable() {
+        let d = Corridor::filled(Point::new(0, 0), 3, 2);
+        assert_eq!(d.len(), 6, "every cell of the 3×2 box is drivable");
+        for y in 0..2 {
+            for x in 0..3 {
+                assert!(d.contains(Point::new(x, y)), "({x}, {y}) not drivable");
+            }
+        }
+        assert!(
+            !d.contains(Point::new(3, 0)),
+            "outside the box is not drivable"
+        );
+
+        // The origin is respected — cells are offset, not always at (0, 0).
+        let off = Corridor::filled(Point::new(5, 5), 2, 2);
+        assert!(off.contains(Point::new(6, 6)));
+        assert!(!off.contains(Point::new(0, 0)));
     }
 
     #[test]
