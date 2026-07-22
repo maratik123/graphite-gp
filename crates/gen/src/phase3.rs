@@ -380,6 +380,21 @@ fn thicken(d: Corridor, axis: Orient, outward: Side, m: u32) -> Corridor {
     d
 }
 
+/// The front-row tangent coordinate within the flat run `[lo, hi]`: the end
+/// of the run **against** `forward` (design doc "Chord, gate, and grid
+/// construction") — placing the front row toward the back of the run
+/// maximizes the forward accel-zone headroom to the first corner. `forward`
+/// always has a nonzero component along `axis`'s tangent direction (it is
+/// perpendicular to the segment's `inward`, i.e. along-axis by construction).
+const fn front_row_coord(axis: Orient, forward: Side, lo: i32, hi: i32) -> i32 {
+    let (dx, dy) = forward.delta();
+    let fwd_component = match axis {
+        Orient::Horizontal => dx,
+        Orient::Vertical => dy,
+    };
+    if fwd_component >= 0 { lo } else { hi }
+}
+
 /// The local-forward [`Side`] a `dir`-traversing car heads along a straight
 /// whose inward normal (toward the hole) is `inward`.
 ///
@@ -446,17 +461,25 @@ pub fn phase3_start_finish(
     let axis = seg.axis;
     let outward = opposite_side(seg.inward);
     let forward = forward_side(skel.dir, seg.inward);
+
+    let (lo, hi) = longest_flat_run(&wall_profile(&d, axis, outward));
     let d = thicken(d, axis, outward, m);
+
+    let front_coord = front_row_coord(axis, forward, lo, hi);
+    let chord = cross_section(&d, axis, outward, front_coord);
+
+    let sf = StartFinish {
+        chord: chord.clone(),
+        orient: perp_orient(axis),
+        gate: TimingGate {
+            behind: chord,
+            forward,
+        },
+    };
+
     Phase3Output {
         d,
-        sf: StartFinish {
-            chord: Vec::new(),
-            orient: perp_orient(axis),
-            gate: TimingGate {
-                behind: Vec::new(),
-                forward,
-            },
-        },
+        sf,
         grid: StartGrid::default(),
     }
 }
@@ -679,6 +702,64 @@ mod tests {
         let thickened = thicken(d, seg.axis, outward, 9);
         assert_eq!(component_count(&thickened), 1);
         assert_eq!(bounded_complement_components(&thickened), 1);
+    }
+
+    // ---- Subtask 4: front_chord + StartFinish/TimingGate assembly ------
+
+    /// A real Ф1+Ф2 fixture's `phase3_start_finish` output at a fixed seed.
+    fn phase3_fixture(
+        seed: u64,
+        k: i32,
+        n: i32,
+        m: u32,
+        v_target: i32,
+    ) -> (CoarseSkeleton, Phase3Output) {
+        let seeds = Seeds {
+            generation: seed,
+            ..Default::default()
+        };
+        let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let d = crate::phase2_rasterize(&skel, k, n);
+        let out = phase3_start_finish(d, &skel, m, v_target);
+        (skel, out)
+    }
+
+    #[test]
+    fn ac1_sf_orient_is_perpendicular_to_travel_and_width_at_least_m() {
+        let (skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+        let seg = pick_straight_run(&skel.ring, &skel.hole);
+        assert_eq!(out.sf.orient, perp_orient(seg.axis));
+        assert!(
+            out.sf.width() >= usize::try_from(4u32).unwrap_or(0),
+            "sf.width() {} < m",
+            out.sf.width()
+        );
+    }
+
+    #[test]
+    fn ac4_gate_behind_equals_chord_and_forward_matches_segment() {
+        let (skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+        let seg = pick_straight_run(&skel.ring, &skel.hole);
+        assert_eq!(out.sf.gate.behind, out.sf.chord);
+        assert_eq!(out.sf.gate.forward, forward_side(skel.dir, seg.inward));
+    }
+
+    #[test]
+    fn ac5_forward_side_equals_the_projection_formula() {
+        let (skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+        let seg = pick_straight_run(&skel.ring, &skel.hole);
+        let (ix, iy) = seg.inward.delta();
+        let expected = match skel.dir {
+            RaceDir::Ccw => (iy, 0_i32.saturating_sub(ix)),
+            RaceDir::Cw => (0_i32.saturating_sub(iy), ix),
+        };
+        assert_eq!(out.sf.gate.forward.delta(), expected);
+    }
+
+    #[test]
+    fn chord_is_non_empty_and_contiguous_on_an_adequate_fixture() {
+        let (_skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+        assert!(!out.sf.chord.is_empty());
     }
 
     #[test]
