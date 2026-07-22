@@ -8,7 +8,7 @@
 //! topology/width invariants. No RNG, integer-only, panic-free — mirroring
 //! Ф1's `saturating_*` / `try_from(..).unwrap_or(..)` discipline.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use gp_core::geom::{Corridor, Point, Side};
 use strum::IntoEnumIterator;
@@ -38,6 +38,7 @@ pub fn phase2_rasterize(skel: &CoarseSkeleton, k: i32, n: i32) -> Corridor {
     debug_assert!(n <= k, "n (min width) must not exceed k (block size)");
     let (mut d, h) = stage1_baseline(&skel.ring, &skel.hole, k);
     stage2_taper(&mut d, &h);
+    stage2b_absorb_pockets(&mut d, &h);
     d
 }
 
@@ -264,10 +265,90 @@ fn stage2_taper(d: &mut Corridor, h: &BTreeSet<Point>) {
     }
 }
 
+// ---- Stage 2b: pocket absorption (topology-safe closure) -----------------
+
+/// Whether `p` lies within `d`'s own bounding box (fine coordinates).
+fn in_box(d: &Corridor, p: Point) -> bool {
+    let origin = d.origin();
+    let w = i32::try_from(d.width()).unwrap_or(0);
+    let hgt = i32::try_from(d.height()).unwrap_or(0);
+    p.x >= origin.x
+        && p.x < origin.x.saturating_add(w)
+        && p.y >= origin.y
+        && p.y < origin.y.saturating_add(hgt)
+}
+
+/// Whether `p` lies on `d`'s bounding-box border (mirrors Ф1's `on_border`,
+/// `phase1.rs:388`) — a component touching the border is, by definition, the
+/// unbounded outfield, never absorbed.
+fn on_box_border(d: &Corridor, p: Point) -> bool {
+    let origin = d.origin();
+    let w = i32::try_from(d.width()).unwrap_or(0);
+    let hgt = i32::try_from(d.height()).unwrap_or(0);
+    p.x == origin.x
+        || p.y == origin.y
+        || p.x.saturating_add(1) == origin.x.saturating_add(w)
+        || p.y.saturating_add(1) == origin.y.saturating_add(hgt)
+}
+
+/// Stage 2b (design doc §"Stage 2b — pocket absorption"): enumerates every
+/// **bounded** 4-connected component of `d`'s complement inside `d`'s own
+/// bounding box (mirrors Ф1's `fill_holes` flood, `phase1.rs:402`) and
+/// absorbs (sets drivable) every one **disjoint from `h`** — i.e. every
+/// component that is not the legitimate hole. `H`'s own component is never
+/// absorbed because it shares at least one cell with `h` by construction (2a
+/// never fills `H`, so it survives 2a intact). Fixed row-major seed order —
+/// deterministic, no RNG. Additive only (only ever sets cells drivable) and
+/// `O(cells)` (one flood + one `h`-membership check per component cell).
+fn stage2b_absorb_pockets(d: &mut Corridor, h: &BTreeSet<Point>) {
+    let origin = d.origin();
+    let w = i32::try_from(d.width()).unwrap_or(0);
+    let hgt = i32::try_from(d.height()).unwrap_or(0);
+    let mut visited: HashSet<Point> = HashSet::new();
+    for by in 0..hgt {
+        for bx in 0..w {
+            let seed = Point::new(origin.x.saturating_add(bx), origin.y.saturating_add(by));
+            if d.contains(seed) || !visited.insert(seed) {
+                continue;
+            }
+            let mut component = Vec::new();
+            let mut touches_border = false;
+            let mut touches_h = false;
+            let mut stack = vec![seed];
+            while let Some(cur) = stack.pop() {
+                component.push(cur);
+                if on_box_border(d, cur) {
+                    touches_border = true;
+                }
+                if h.contains(&cur) {
+                    touches_h = true;
+                }
+                for n in cur.neighbors4() {
+                    if in_box(d, n) && !d.contains(n) && visited.insert(n) {
+                        stack.push(n);
+                    }
+                }
+            }
+            if !touches_border && !touches_h {
+                for p in component {
+                    d.set(p, true);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gp_core::geom::bounded_complement_components;
     use gp_core::track::RaceDir;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+
+    fn rng(seed: u64) -> ChaCha8Rng {
+        ChaCha8Rng::seed_from_u64(seed)
+    }
 
     /// The block-size the fixture uses (`k ≥ n`).
     const FIXTURE_K: i32 = 3;
@@ -455,6 +536,68 @@ mod tests {
         assert_eq!(drivable_points(&a), drivable_points(&b));
     }
 
+    // ---- Subtask 2b: Stage-2b pocket absorption ----------------------------
+
+    /// `l_min` the [`fn@crate::phase1_coarse_ring`] witness below runs at.
+    const POCKET_WITNESS_L_MIN: i32 = 3;
+    /// `k` the pocket-absorption witness runs at.
+    const POCKET_WITNESS_K: i32 = 6;
+    /// `n` the pocket-absorption witness runs at.
+    const POCKET_WITNESS_N: i32 = 3;
+
+    /// The design doc's Stage-2b witness (design doc §"Stage 2b" / Risks):
+    /// `phase1_coarse_ring(3, rng(0))` at `k=6, n=3` produces a Stage-2a
+    /// output with a spurious 12-cell pocket (`bounded_complement_components
+    /// == 2`); Stage 2b must restore `== 1`. Mirrors Ф1's
+    /// `seed_48_lmin3_widen_pinch_stays_one_hole` regression-pin style
+    /// (`phase1.rs`).
+    #[test]
+    fn seed_0_lmin3_stage2b_absorbs_the_spurious_pocket() {
+        let skel = crate::phase1_coarse_ring(POCKET_WITNESS_L_MIN, &mut rng(0));
+        let d = phase2_rasterize(&skel, POCKET_WITNESS_K, POCKET_WITNESS_N);
+        assert_eq!(
+            bounded_complement_components(&d),
+            1,
+            "stage 2b must absorb every bounded complement component except H"
+        );
+    }
+
+    #[test]
+    fn stage2b_absorption_is_additive_over_stage2a_output() {
+        let skel = crate::phase1_coarse_ring(POCKET_WITNESS_L_MIN, &mut rng(0));
+        let (mut envelope_only, h) = stage1_baseline(&skel.ring, &skel.hole, POCKET_WITNESS_K);
+        stage2_taper(&mut envelope_only, &h);
+        let envelope_points = drivable_points(&envelope_only);
+
+        let mut absorbed = envelope_only.clone();
+        stage2b_absorb_pockets(&mut absorbed, &h);
+
+        for p in envelope_points {
+            assert!(
+                absorbed.contains(p),
+                "2a point {p:?} missing after 2b absorption"
+            );
+        }
+    }
+
+    #[test]
+    fn stage2b_never_absorbs_a_hole_cell() {
+        let skel = crate::phase1_coarse_ring(POCKET_WITNESS_L_MIN, &mut rng(0));
+        let (mut d, h) = stage1_baseline(&skel.ring, &skel.hole, POCKET_WITNESS_K);
+        stage2_taper(&mut d, &h);
+        stage2b_absorb_pockets(&mut d, &h);
+        for &p in &h {
+            assert!(!d.contains(p), "hole cell {p:?} became drivable via 2b");
+        }
+    }
+
+    #[test]
+    fn stage2b_absorption_is_deterministic_across_repeated_calls() {
+        let skel = crate::phase1_coarse_ring(POCKET_WITNESS_L_MIN, &mut rng(0));
+        let a = phase2_rasterize(&skel, POCKET_WITNESS_K, POCKET_WITNESS_N);
+        let b = phase2_rasterize(&skel, POCKET_WITNESS_K, POCKET_WITNESS_N);
+        assert_eq!(drivable_points(&a), drivable_points(&b));
+    }
     /// `(y, x_max)` for every row of `d`'s bounding box with at least one
     /// drivable cell, in increasing-`y` order — the East-wall profile AC4
     /// walks.
