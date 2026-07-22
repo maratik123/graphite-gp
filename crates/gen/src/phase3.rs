@@ -809,16 +809,60 @@ mod tests {
     }
 
     #[test]
-    fn ac7_grid_rows_equal_ceil_m_over_width_and_fit_behind_the_front_row() {
+    fn ac7_grid_fits_at_least_ceil_m_over_width_rows_of_straight_behind_in_d() {
         let (_skel, out) = phase3_fixture(7, 6, 3, 8, 2);
-        let width = out.sf.width();
-        let expected_rows = 8usize.div_ceil(width.max(1));
-        // Every row's cells shift one step further along -forward from the
-        // chord; a grid of `rows` rows needs >= `rows` distinct tangent
-        // depths represented among the (deduped) positions when the
-        // fixture is adequate (non-degenerate width).
-        assert!(expected_rows >= 1);
-        assert!(out.grid.positions.len() <= 8);
+        let m = 8usize;
+        let width = out.sf.width().max(1);
+        let rows = m.div_ceil(width);
+        let rows_i32 = i32::try_from(rows).unwrap_or(i32::MAX);
+
+        // AC7 substance: D provides >= ceil(m/width) rows of straight
+        // behind the front row along -forward — measured directly against
+        // D, not merely asserted from a trivially-true row count.
+        let rows_behind = measure_grid_straight_rows_behind(
+            &out.d,
+            &out.sf.chord,
+            out.sf.gate.forward,
+            rows_i32.saturating_add(4),
+        );
+        assert!(
+            rows_behind >= rows_i32,
+            "measured {rows_behind} rows of straight behind the front row \
+             < required {rows_i32} (m={m}, width={width})"
+        );
+
+        // On this adequate fixture the grid holds exactly m positions (an
+        // empty/short grid would fail this, unlike the old `<= 8` bound).
+        assert_eq!(
+            out.grid.positions.len(),
+            m,
+            "expected exactly m positions on an adequate fixture"
+        );
+
+        let distinct: BTreeSet<Point> = out.grid.positions.iter().copied().collect();
+        assert_eq!(distinct.len(), m, "grid positions must be distinct");
+
+        for &p in &out.grid.positions {
+            assert!(out.d.contains(p), "start position {p:?} not in D");
+        }
+
+        // No overlap with the gate/¬D: no grid cell coincides with a cell
+        // one step forward of a `behind`/gate cell (the far side of the
+        // line).
+        let (dx, dy) = out.sf.gate.forward.delta();
+        let forward_of_gate: BTreeSet<Point> = out
+            .sf
+            .gate
+            .behind
+            .iter()
+            .map(|c| Point::new(c.x.saturating_add(dx), c.y.saturating_add(dy)))
+            .collect();
+        for &p in &out.grid.positions {
+            assert!(
+                !forward_of_gate.contains(&p),
+                "grid position {p:?} coincides with a forward-of-gate cell"
+            );
+        }
     }
 
     #[test]
@@ -862,6 +906,43 @@ mod tests {
         }
     }
 
+    /// Test-only "grid-straight backward measurement" — the `-forward`
+    /// mirror of [`measure_accel_zone_fine_points`], but measured against the
+    /// corridor `d` itself rather than the flat run: the count of
+    /// consecutive whole rows of `chord` (row 0 is the front row itself, row
+    /// `k` is `chord` shifted `k` steps along `-forward`) that lie fully
+    /// inside `d`, stopping at the first row with any cell outside `d`.
+    ///
+    /// The front row is deliberately placed at the *back* of its flat run
+    /// (see [`front_row_coord`]) to maximize forward accel-zone headroom, so
+    /// the straight-behind extent *within that same flat run* is ~0 by
+    /// construction; AC7's "rows behind fit in D" is a claim about the
+    /// corridor's depth behind the front row, which this measures directly
+    /// via `d.contains` rather than the flat-run profile. `cap` bounds the
+    /// scan so the helper stays total for any corridor.
+    fn measure_grid_straight_rows_behind(
+        d: &Corridor,
+        chord: &[Point],
+        forward: Side,
+        cap: i32,
+    ) -> i32 {
+        let (dx, dy) = forward.delta();
+        let mut rows = 0i32;
+        while rows < cap {
+            let row_fits = chord.iter().all(|p| {
+                d.contains(Point::new(
+                    p.x.saturating_sub(dx.saturating_mul(rows)),
+                    p.y.saturating_sub(dy.saturating_mul(rows)),
+                ))
+            });
+            if !row_fits {
+                break;
+            }
+            rows = rows.saturating_add(1);
+        }
+        rows
+    }
+
     #[test]
     fn ac2_measured_accel_zone_meets_v_target_squared_over_2_on_an_adequate_fixture() {
         let seeds = Seeds {
@@ -888,17 +969,36 @@ mod tests {
     #[test]
     fn ac6_start_positions_read_negative_one_and_front_row_registers_a_forward_crossing() {
         let (_skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+        let (dx, dy) = out.sf.gate.forward.delta();
 
-        // No start car has crossed yet: every fresh LapCounter reads -1 / 0.
-        for &_p in &out.grid.positions {
-            let counter = gp_core::sim::LapCounter::new();
+        // Every start cell (every row, not just the front) is strictly
+        // behind the gate: `gate_coord` is private, so use the public
+        // discriminator — moving a car from its cell to a point well past
+        // the gate along `forward` registers exactly one crossing
+        // (`raw() == 0`) iff the cell started strictly behind the line. A
+        // cell at/ahead of the line would stay at `-1` instead.
+        let n = i32::try_from(out.grid.positions.len())
+            .unwrap_or(0)
+            .saturating_add(2);
+        for &p in &out.grid.positions {
+            let mut counter = gp_core::sim::LapCounter::new();
             assert_eq!(counter.raw(), -1);
             assert_eq!(counter.laps(), 0);
+            let to = Point::new(
+                p.x.saturating_add(dx.saturating_mul(n)),
+                p.y.saturating_add(dy.saturating_mul(n)),
+            );
+            counter.register_move(&out.sf, p, to);
+            assert_eq!(
+                counter.raw(),
+                0,
+                "start cell {p:?} must be strictly behind the gate \
+                 (exactly one forward crossing)"
+            );
         }
 
         // A first forward move from the front row (the gate's own `behind`
         // row) registers exactly a +1 crossing, for every front-row cell.
-        let (dx, dy) = out.sf.gate.forward.delta();
         for &p in &out.sf.chord {
             let mut counter = gp_core::sim::LapCounter::new();
             let to = Point::new(p.x.saturating_add(dx), p.y.saturating_add(dy));
