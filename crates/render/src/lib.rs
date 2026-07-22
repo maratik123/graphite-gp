@@ -18,7 +18,6 @@ pub mod app;
 mod app_gallery;
 pub mod fonts;
 pub mod icons;
-pub mod placeholder;
 pub mod screens;
 #[cfg(test)]
 mod test_util;
@@ -79,8 +78,7 @@ pub struct Scene<'a> {
 /// lives in `gp-game` (see the ownership override in
 /// `ai-docs/key-decisions.md`). `rect` is explicit (not derived from
 /// `painter.clip_rect()`) so the drawn output is a pure function of `(rect,
-/// scene)` — the same precedent `draw_placeholder` sets (design §
-/// *Signature*).
+/// scene)` (design § *Signature*).
 ///
 /// `scene` bundles the caller-supplied, frame-immutable canvas inputs —
 /// `track`, `cars`, `reduced_motion`, `overlays` — into one [`Scene`] value

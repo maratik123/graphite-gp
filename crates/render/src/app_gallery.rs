@@ -112,8 +112,84 @@ mod tests {
         CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, PhaseStatus, fixture_standings, fixture_track,
     };
     use crate::app::{AppShell, Screen, ShellSession};
+    use egui::epaint::Primitive;
     use std::cell::Cell;
     use std::rc::Rc;
+
+    /// AC9 — relocated from the deleted `placeholder.rs::tessellation_smoke`
+    /// canary, repointed onto the production [`AppShell::show`] draw path
+    /// (design § Test Design, subtask 6). A full pass over the shell yields
+    /// non-empty tessellated output, with vertex/index counts strengthened
+    /// past "non-empty": a non-empty `Vec<ClippedPrimitive>` can still carry
+    /// zero-geometry meshes.
+    ///
+    /// This test owns its `egui::Context` and calls `set_fonts` **before**
+    /// the first (and only) `run_ui` pass, so one pass suffices — `run_ui`'s
+    /// internal `begin_pass` consumes the deferred `new_font_definitions`
+    /// and the fonts are live for that same pass (design D11).
+    #[test]
+    // Drawing the sample rasterises real glyphs — `epaint`'s glyph cache
+    // (`epaint::text::font::FontCell::allocate_glyph_uncached`,
+    // `epaint-0.35.0/src/text/font.rs:280`) reaches `vello_cpu`'s
+    // `U8Kernel::copy_solid`, whose body is a **checked**
+    // `bytemuck::cast_slice_mut::<u8, u32>` over the pixmap buffer. Native
+    // malloc over-aligns the buffer so the cast succeeds; Miri's allocator
+    // grants only `u8`'s alignment of 1, so the checked cast correctly
+    // refuses, panicking with `TargetAlignmentGreaterAndInputNotAligned`.
+    // This is a distinct abort site from the golden's FFI/`dlopen` ignore
+    // below — do not copy that reason here, it would be a false
+    // justification for a different failure.
+    #[cfg_attr(
+        miri,
+        ignore = "drawing text rasterises glyphs via vello_cpu, whose checked \
+                  u8->u32 pixmap cast panics under Miri's 1-byte allocator \
+                  alignment (TargetAlignmentGreaterAndInputNotAligned)"
+    )]
+    fn tessellation_smoke() {
+        let track = fixture_track();
+        let standings = fixture_standings();
+        let mut shell = AppShell::new(FIXED_CONFIG);
+
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::fonts::definitions());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, CANVAS_SIZE)),
+            ..Default::default()
+        };
+
+        let output = ctx.run_ui(input, |ui| {
+            let session = ShellSession {
+                track: &track,
+                cars: &[],
+                reduced_motion: false,
+                active: 0,
+                laps_done: 0,
+                total_laps: 1,
+                phases: [PhaseStatus::Ok; 7],
+                valid: true,
+                seed: 7,
+                standings: &standings,
+                summary: FIXED_SUMMARY,
+            };
+            let _ = shell.show(ui, session);
+        });
+        let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
+
+        assert!(
+            !primitives.is_empty(),
+            "AppShell::show produced no tessellated primitives"
+        );
+
+        let (vertex_count, index_count) = primitives.iter().fold((0usize, 0usize), |acc, p| {
+            let Primitive::Mesh(mesh) = &p.primitive else {
+                return acc;
+            };
+            (acc.0 + mesh.vertices.len(), acc.1 + mesh.indices.len())
+        });
+
+        assert!(vertex_count > 0, "tessellated meshes carried zero vertices");
+        assert!(index_count > 0, "tessellated meshes carried zero indices");
+    }
 
     /// AC3 — one wgpu frame renders the composed shell (top bar + fresh
     /// `SetupScreen` body) and matches the minted `app_shell.png` exactly
