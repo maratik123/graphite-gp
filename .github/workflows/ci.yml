@@ -184,8 +184,13 @@ jobs:
           cache-shared-key: ${{ runner.os }}-nightly-miri-v1
       - name: cargo miri setup
         run: cargo miri setup
-      - name: cargo miri test (workspace)
-        run: cargo miri test --workspace
+      # `gp-gen` is excluded: its multi-seed generator property sweeps (Ф1/Ф2/Ф3
+      # full-pipeline runs over large `k×k` corridors) blow up the Miri interpreter
+      # wall-clock (>1h and growing) — see #134 for the re-enable plan (gated seed
+      # sweeps). Native `cargo test` + `clippy::arithmetic_side_effects = deny` (#48)
+      # still cover gp-gen's integer discipline; only the Miri UB pass is dropped.
+      - name: cargo miri test (workspace, gp-gen excluded — #134)
+        run: cargo miri test --workspace --exclude gp-gen
 
   build-pass:
     name: Build
