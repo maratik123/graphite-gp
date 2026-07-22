@@ -7,10 +7,12 @@
 //! per cell, via `Painter::with_clip_rect` — not independent per-cell
 //! squares — so its outer silhouette traces the smoothed boundary exactly
 //! (no more blocky staircase poking past the walls at a corner). The outer
-//! loop is triangulated *once* (`regions::triangulated_loop`) and the shared
-//! index buffer is reused for every cell's `Mesh`; the infield hole(s) are
-//! re-cut on top of the whole per-cell pass (`regions::paint_infield_holes`)
-//! so heatmap color never bleeds into the infield.
+//! loop's triangulation topology is baked once per track (design
+//! `2026-07-22-cache-track-geometry`, `track::BakedTrackGeometry`) and the
+//! shared index buffer is reused for every cell's `Mesh`; the infield
+//! hole(s) are re-cut on top of the whole per-cell pass
+//! (`regions::paint_infield_holes`) so heatmap color never bleeds into the
+//! infield.
 //!
 //! Pure geometry/color core ([`speed_bounds`], [`normalize`],
 //! [`ramp_color`]) plus a thin [`paint`] that maps to screen via
@@ -139,29 +141,31 @@ fn cell_rect(transform: &TrackTransform, p: Point) -> Rect {
 }
 
 /// Paints the speed heatmap (design § Key decisions 1, amended 2026-07-20;
-/// design `2026-07-22-cache-track-geometry` — consumes the shared
-/// precomputed `triangulated` meshes, no per-frame re-triangulation, AC3).
+/// design `2026-07-22-cache-track-geometry` — consumes the parallel baked
+/// `indices`/per-frame `verts` slices, no per-frame re-triangulation, AC3).
 ///
 /// For each `(Point, i32)` in `heatmap`, builds a per-cell `Mesh` from each
-/// `roles.outer` loop's shared precomputed `(verts, indices)` pair, colored
+/// `roles.outer` loop's parallel `(verts, indices)` slice entry, colored
 /// by the `ramp_color` mapping its speed's [`normalize`]d position across the
 /// observed `[min, max]` at [`HEATMAP_ALPHA`], clipped to the cell's rect via
 /// `Painter::with_clip_rect` — so the union over all cells is the smoothed
 /// asphalt silhouette, colored per cell, never re-triangulated per cell (or
-/// per frame — `triangulated` is built once by [`super::cache`] and reused).
-/// After the full per-cell pass, `roles.holes` is re-cut as a
-/// `SURFACE_INFIELD` mesh via [`regions::paint_infield_holes`] (mirrors
-/// `regions::fill`'s own asphalt-then-infield structure) so heatmap color
-/// never bleeds into the infield. An empty `heatmap` — or one whose
-/// [`speed_bounds`] is `None` — returns **before** the infield re-cut, so the
-/// empty case stays a true no-op (AC7): zero shapes, not even the re-cut.
+/// per frame — `indices` is baked once by [`super::geometry`] and reused,
+/// borrowed; only `verts` is freshly mapped per frame). After the full
+/// per-cell pass, `roles.holes` is re-cut as a `SURFACE_INFIELD` mesh via
+/// [`regions::paint_infield_holes`] (mirrors `regions::fill`'s own
+/// asphalt-then-infield structure) so heatmap color never bleeds into the
+/// infield. An empty `heatmap` — or one whose [`speed_bounds`] is `None` —
+/// returns **before** the infield re-cut, so the empty case stays a true
+/// no-op (AC7): zero shapes, not even the re-cut.
 ///
-/// `triangulated` and `roles` must come from the same cached-build call
-/// `draw_frame` also passes to `regions::fill`.
+/// `verts`, `indices`, and `roles` must come from the same per-frame map +
+/// baked-geometry pair `draw_frame` also passes to `regions::fill`.
 pub(crate) fn paint(
     painter: &Painter,
     transform: &TrackTransform,
-    triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
+    verts: &[Vec<Pos2>],
+    indices: &[Vec<[u32; 3]>],
     roles: &LoopRoles,
     heatmap: &[(Point, i32)],
 ) {
@@ -174,15 +178,16 @@ pub(crate) fn paint(
         let color = ramp_color(t).gamma_multiply(HEATMAP_ALPHA);
         let clip = painter.with_clip_rect(cell_rect(transform, point));
         for &idx in &roles.outer {
-            if let Some((verts, indices)) = triangulated.get(idx) {
-                regions::paint_mesh(&clip, verts, indices, color);
+            if let (Some(v), Some(i)) = (verts.get(idx), indices.get(idx)) {
+                regions::paint_mesh(&clip, v, i, color);
             }
         }
     }
 
     regions::paint_infield_holes(
         painter,
-        triangulated,
+        verts,
+        indices,
         roles,
         crate::tokens::color::SURFACE_INFIELD,
     );
@@ -285,16 +290,24 @@ mod tests {
         (d, loops, roles)
     }
 
-    /// Triangulates every `loops` entry via `transform` — exactly the
-    /// cached-build computation `draw_frame` now feeds `heatmap::paint`
+    /// Maps every `loops` entry via `transform` — exactly the per-frame map
+    /// `draw_frame` now feeds `heatmap::paint` alongside the baked `indices`
     /// (design `2026-07-22-cache-track-geometry`).
-    fn triangulate_loops(
-        loops: &[Vec<(f32, f32)>],
-        transform: &TrackTransform,
-    ) -> Vec<(Vec<Pos2>, Vec<[u32; 3]>)> {
+    fn map_loops(loops: &[Vec<(f32, f32)>], transform: &TrackTransform) -> Vec<Vec<Pos2>> {
         loops
             .iter()
-            .map(|loop_points| regions::triangulated_loop(transform, loop_points))
+            .map(|loop_points| loop_points.iter().map(|&p| transform.map(p)).collect())
+            .collect()
+    }
+
+    /// Triangulates every `loops` entry in lattice space — exactly the baked
+    /// `indices` computation `draw_frame` now feeds `heatmap::paint`
+    /// alongside the per-frame `verts` map (design
+    /// `2026-07-22-cache-track-geometry`).
+    fn triangulate_loops(loops: &[Vec<(f32, f32)>]) -> Vec<Vec<[u32; 3]>> {
+        loops
+            .iter()
+            .map(|loop_points| regions::triangulate_lattice(loop_points))
             .collect()
     }
 
@@ -302,7 +315,8 @@ mod tests {
     /// `Mesh` shapes — mirrors `regions.rs`'s
     /// `fill_emits_asphalt_mesh_then_infield_mesh` capture idiom.
     fn painted_meshes(
-        triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
+        verts: &[Vec<Pos2>],
+        indices: &[Vec<[u32; 3]>],
         roles: &LoopRoles,
         transform: &TrackTransform,
         rect: Rect,
@@ -315,7 +329,7 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
-            paint(&painter, transform, triangulated, roles, heatmap);
+            paint(&painter, transform, verts, indices, roles, heatmap);
         });
         crate::track::test_support::captured_meshes(&output.shapes)
     }
@@ -344,14 +358,15 @@ mod tests {
 
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
-        let triangulated = triangulate_loops(&loops, &transform);
+        let verts = map_loops(&loops, &transform);
+        let indices = triangulate_loops(&loops);
 
         let heatmap = vec![
             (Point::new(1, 1), 2),
             (Point::new(2, 1), 5),
             (Point::new(1, 3), 8),
         ];
-        let meshes = painted_meshes(&triangulated, &roles, &transform, rect, &heatmap);
+        let meshes = painted_meshes(&verts, &indices, &roles, &transform, rect, &heatmap);
         assert_eq!(
             meshes.len(),
             heatmap.len() * roles.outer.len() + roles.holes.len(),
@@ -383,14 +398,17 @@ mod tests {
         let (d, loops, roles) = ring_3x3_loops_and_roles();
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
-        let triangulated = triangulate_loops(&loops, &transform);
-        let meshes = painted_meshes(&triangulated, &roles, &transform, rect, &[]);
+        let verts = map_loops(&loops, &transform);
+        let indices = triangulate_loops(&loops);
+        let meshes = painted_meshes(&verts, &indices, &roles, &transform, rect, &[]);
         assert!(meshes.is_empty());
     }
 
-    /// AC3 — `paint` consumes the shared precomputed `triangulated` outer
-    /// mesh rather than re-triangulating it: the outer loop's vertex buffer
-    /// pointer is unchanged before/after the call.
+    /// AC3 — `paint` consumes the baked, borrowed `indices` outer mesh
+    /// rather than re-triangulating it: the outer loop's baked index buffer
+    /// pointer is unchanged before/after the call (design
+    /// `2026-07-22-cache-track-geometry` — the topology, not the per-frame
+    /// mapped verts, is the artifact this AC pins).
     #[test]
     #[cfg_attr(
         miri,
@@ -402,17 +420,18 @@ mod tests {
         let (d, loops, roles) = ring_3x3_loops_and_roles();
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
-        let triangulated = triangulate_loops(&loops, &transform);
+        let verts = map_loops(&loops, &transform);
+        let indices = triangulate_loops(&loops);
 
         let outer_idx = roles.outer[0];
-        let verts_ptr_before = triangulated[outer_idx].0.as_ptr();
+        let indices_ptr_before = indices[outer_idx].as_ptr();
 
         let heatmap = vec![(Point::new(1, 1), 2), (Point::new(2, 1), 5)];
-        let _ = painted_meshes(&triangulated, &roles, &transform, rect, &heatmap);
+        let _ = painted_meshes(&verts, &indices, &roles, &transform, rect, &heatmap);
 
         assert_eq!(
-            triangulated[outer_idx].0.as_ptr(),
-            verts_ptr_before,
+            indices[outer_idx].as_ptr(),
+            indices_ptr_before,
             "heatmap::paint re-triangulated the outer mesh instead of reusing it"
         );
     }

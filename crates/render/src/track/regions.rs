@@ -18,7 +18,6 @@
 //! remaining `classify_loops_*`/`triangulate_*`/pure-set-theory tests build
 //! no `Context` and stay un-gated.
 
-use super::TrackTransform;
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape};
 use gp_core::geom::{Corridor, Point};
 use std::collections::HashSet;
@@ -367,31 +366,25 @@ pub(crate) fn triangulate(points: &[Pos2]) -> Vec<[u32; 3]> {
     triangles
 }
 
-/// Maps `loop_points` (lattice-space) to screen space via `transform` and
-/// ear-clips them **once**, returning the shared `(verts, indices)` pair
-/// (design § Key decisions 1 — "triangulate once, reuse the shared index
-/// buffer per cell"): [`paint_mesh`] then colors/clips that same pair as many
-/// times as a caller needs (e.g. `heatmap::paint`'s per-cell recolor) without
-/// re-triangulating. Loops shorter than a triangle (`< 3` points) return no
-/// vertices and no triangles.
-pub(crate) fn triangulated_loop(
-    transform: &TrackTransform,
-    loop_points: &[(f32, f32)],
-) -> (Vec<Pos2>, Vec<[u32; 3]>) {
+/// Ear-clips `loop_points` (lattice-space) **once**, in lattice space itself
+/// — not through [`super::TrackTransform`] — returning only the triangulation
+/// **topology** (design `2026-07-22-cache-track-geometry` § *Triangulating in
+/// lattice space*): the triangle indices are invariant under the rect-driven
+/// affine map, so this runs once per track (baked), never once per frame.
+/// Maps each `(x, y)` tuple directly to `Pos2(x, y)` (identity — the lattice
+/// coordinates themselves, not a screen mapping) before calling [`triangulate`].
+/// Loops shorter than a triangle (`< 3` points) return no triangles.
+pub(crate) fn triangulate_lattice(loop_points: &[(f32, f32)]) -> Vec<[u32; 3]> {
     if loop_points.len() < 3 {
-        return (Vec::new(), Vec::new());
+        return Vec::new();
     }
-    let screen_points: Vec<Pos2> = loop_points
-        .iter()
-        .copied()
-        .map(|p| transform.map(p))
-        .collect();
-    let triangles = triangulate(&screen_points);
-    (screen_points, triangles)
+    let lattice_points: Vec<Pos2> = loop_points.iter().map(|&(x, y)| Pos2::new(x, y)).collect();
+    triangulate(&lattice_points)
 }
 
-/// Builds one solid-`color` [`Mesh`] from *shared* `verts`/`indices` (as
-/// produced by [`triangulated_loop`]) and adds it to `painter` — the
+/// Builds one solid-`color` [`Mesh`] from *shared* `verts`/`indices` (per-frame
+/// mapped verts paired with baked, borrowed indices — design
+/// `2026-07-22-cache-track-geometry`) and adds it to `painter` — the
 /// concave-capable replacement for `Shape::convex_polygon` (design §
 /// Decision). Callers that need the same silhouette in several colors, or
 /// clipped to several sub-rects (`Painter::with_clip_rect`), call this once
@@ -411,22 +404,25 @@ pub(crate) fn paint_mesh(painter: &Painter, verts: &[Pos2], indices: &[[u32; 3]]
     painter.add(Shape::mesh(mesh));
 }
 
-/// Re-cuts each `roles.holes` loop as a solid-`color` mesh, from the shared
-/// precomputed `triangulated` pair, on top of whatever was drawn before it
-/// (mirrors `fill`'s own asphalt-then-infield-on-top structure) — shared by
-/// both [`fill`] and `heatmap::paint`'s post-per-cell infield re-cut (design
-/// § Key decisions 1). `triangulated` and `roles` must come from the same
-/// `classify_loops`/build call (design `2026-07-22-cache-track-geometry`); an
-/// out-of-range role index is skipped rather than panicking.
+/// Re-cuts each `roles.holes` loop as a solid-`color` mesh, from the parallel
+/// `verts` (per-frame mapped)/`indices` (baked, borrowed) slices, on top of
+/// whatever was drawn before it (mirrors `fill`'s own
+/// asphalt-then-infield-on-top structure) — shared by both [`fill`] and
+/// `heatmap::paint`'s post-per-cell infield re-cut (design § Key decisions
+/// 1, note the numbering there). `verts`, `indices`, and `roles` must come
+/// from the same per-frame map + baked-geometry pair (design
+/// `2026-07-22-cache-track-geometry`); an out-of-range role index is skipped
+/// rather than panicking.
 pub(crate) fn paint_infield_holes(
     painter: &Painter,
-    triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
+    verts: &[Vec<Pos2>],
+    indices: &[Vec<[u32; 3]>],
     roles: &LoopRoles,
     color: Color32,
 ) {
     for &idx in &roles.holes {
-        if let Some((verts, indices)) = triangulated.get(idx) {
-            paint_mesh(painter, verts, indices, color);
+        if let (Some(v), Some(i)) = (verts.get(idx), indices.get(idx)) {
+            paint_mesh(painter, v, i, color);
         }
     }
 }
@@ -438,30 +434,28 @@ pub(crate) fn paint_infield_holes(
 /// mesh(es), then the hole loop(s) as `SURFACE_INFIELD` mesh(es) drawn on top
 /// — asphalt and infield never overlap (disjoint by the annulus invariant),
 /// so their relative draw order is visually inert; this order is the one AC9
-/// pins. `triangulated` and `roles` must come from the same cached-build call
-/// (design `2026-07-22-cache-track-geometry`, replacing the former per-frame
-/// `triangulated_loop` call) — an out-of-range role index is skipped rather
-/// than panicking.
+/// pins. `verts` (per-frame mapped screen vertices) and `indices` (baked,
+/// borrowed triangulation topology) are parallel slices, both indexed by
+/// `roles` (design `2026-07-22-cache-track-geometry`, replacing the former
+/// per-frame `triangulated_loop` call) — an out-of-range role index is
+/// skipped rather than panicking.
 pub(crate) fn fill(
     painter: &Painter,
     rect: Rect,
-    triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
+    verts: &[Vec<Pos2>],
+    indices: &[Vec<[u32; 3]>],
     roles: &LoopRoles,
 ) {
     painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);
     for &idx in &roles.outer {
-        if let Some((verts, indices)) = triangulated.get(idx) {
-            paint_mesh(
-                painter,
-                verts,
-                indices,
-                crate::tokens::color::SURFACE_ASPHALT,
-            );
+        if let (Some(v), Some(i)) = (verts.get(idx), indices.get(idx)) {
+            paint_mesh(painter, v, i, crate::tokens::color::SURFACE_ASPHALT);
         }
     }
     paint_infield_holes(
         painter,
-        triangulated,
+        verts,
+        indices,
         roles,
         crate::tokens::color::SURFACE_INFIELD,
     );
@@ -469,7 +463,8 @@ pub(crate) fn fill(
 
 #[cfg(test)]
 mod tests {
-    use super::{TrackTransform, classify, classify_loops, fill, triangulate};
+    use super::super::TrackTransform;
+    use super::{classify, classify_loops, fill, triangulate, triangulate_lattice};
     use crate::track::test_support::{corridor, ring_3x3};
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Point, walls_from_boundary};
@@ -566,16 +561,24 @@ mod tests {
             .collect()
     }
 
-    /// A2/triangulate test fixture — a hand-built concave polygon: the raw
-    /// (unsmoothed) boundary loop of the L-tromino corridor `walls.rs`'s own
-    /// `l_shape` fixture mirrors (cells `(1,1), (2,1), (2,2)`), which has a
-    /// reflex corner around the missing `(1,2)` cell.
-    fn l_shape_loop() -> Vec<Pos2> {
+    /// A2/triangulate test fixture — a hand-built concave polygon in
+    /// **lattice** space: the raw (unsmoothed) boundary loop of the
+    /// L-tromino corridor `walls.rs`'s own `l_shape` fixture mirrors (cells
+    /// `(1,1), (2,1), (2,2)`), which has a reflex corner around the missing
+    /// `(1,2)` cell.
+    fn l_shape_loop_lattice() -> Vec<(f32, f32)> {
         let d = corridor((0, 0), 4, 4, &[(1, 1), (2, 1), (2, 2)]);
         let walls = walls_from_boundary(&d);
         let loops = super::super::walls::chain_walls(&walls);
         assert_eq!(loops.len(), 1, "l-tromino boundary must chain to one loop");
         super::super::walls::dual_loop_to_lattice(&loops[0])
+    }
+
+    /// [`l_shape_loop_lattice`], mapped identity-`Pos2` (the same mapping
+    /// [`triangulate_lattice`] itself performs) — the screen-space fixture
+    /// [`triangulate`]'s own concave test drives.
+    fn l_shape_loop() -> Vec<Pos2> {
+        l_shape_loop_lattice()
             .into_iter()
             .map(|(x, y)| pos2(x, y))
             .collect()
@@ -703,6 +706,61 @@ mod tests {
         }
     }
 
+    /// A2 (convex, lattice) — a lattice-space square loop triangulates to
+    /// `n - 2` triangles whose area sum equals the polygon's own `|area|` —
+    /// [`triangulate_lattice`] maps identity-`Pos2` first (design §
+    /// *Triangulating in lattice space*), so this mirrors
+    /// `triangulate_convex_square_covers_area` over tuples instead of
+    /// `Pos2`.
+    #[test]
+    fn triangulate_lattice_convex_square() {
+        let square = vec![(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)];
+        let triangles = triangulate_lattice(&square);
+        assert_eq!(triangles.len(), square.len() - 2);
+
+        let square_pos2: Vec<Pos2> = square.iter().map(|&(x, y)| pos2(x, y)).collect();
+        let area_sum = triangle_area_sum(&triangles, &square_pos2);
+        let expected = super::signed_area(&square).abs();
+        assert!(
+            (area_sum - expected).abs() < 1e-4,
+            "area_sum={area_sum} expected={expected}"
+        );
+    }
+
+    /// A2 (concave, lattice) — the hand-built L-shaped lattice loop
+    /// triangulates to `n - 2` triangles whose area sum equals the polygon's
+    /// own `|area|`, and no triangle covers the notch point (mirrors
+    /// `triangulate_concave_l_shape_covers_area_without_exiting`, proving
+    /// lattice-space triangulation of a concave loop is correct — design §
+    /// *Triangulating in lattice space*).
+    #[test]
+    fn triangulate_lattice_concave_l_shape() {
+        let loop_lattice = l_shape_loop_lattice();
+        let triangles = triangulate_lattice(&loop_lattice);
+        assert_eq!(triangles.len(), loop_lattice.len() - 2);
+
+        let loop_points: Vec<Pos2> = loop_lattice.iter().map(|&(x, y)| pos2(x, y)).collect();
+        let area_sum = triangle_area_sum(&triangles, &loop_points);
+        let expected = super::signed_area(&loop_lattice).abs();
+        assert!(
+            (area_sum - expected).abs() < 1e-4,
+            "area_sum={area_sum} expected={expected}"
+        );
+
+        let notch = pos2(1.0, 2.0);
+        for &[a, b, c] in &triangles {
+            assert!(
+                !super::point_in_triangle(
+                    notch,
+                    loop_points[a as usize],
+                    loop_points[b as usize],
+                    loop_points[c as usize],
+                ),
+                "triangle [{a},{b},{c}] covers the notch point, exiting the polygon"
+            );
+        }
+    }
+
     /// A2 (fill order) — `fill` emits the outer loop as an `ASPHALT` mesh
     /// then the hole loop as a `SURFACE_INFIELD` mesh, in that order.
     #[test]
@@ -718,9 +776,13 @@ mod tests {
         let d = ring_3x3();
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
-        let triangulated: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = loops
+        let mapped: Vec<Vec<Pos2>> = loops
             .iter()
-            .map(|loop_points| super::triangulated_loop(&transform, loop_points))
+            .map(|loop_points| loop_points.iter().map(|&p| transform.map(p)).collect())
+            .collect();
+        let indices: Vec<Vec<[u32; 3]>> = loops
+            .iter()
+            .map(|loop_points| triangulate_lattice(loop_points))
             .collect();
 
         let ctx = egui::Context::default();
@@ -730,7 +792,7 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
-            fill(&painter, rect, &triangulated, &roles);
+            fill(&painter, rect, &mapped, &indices, &roles);
         });
 
         let meshes = crate::track::test_support::captured_meshes(&output.shapes);

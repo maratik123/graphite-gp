@@ -93,21 +93,27 @@ pub(crate) fn draw_frame(
     // same smoothed loops, so they cannot disagree at a corner by
     // construction (design § Decision, "Boundary reuse").
     let loop_roles = regions::classify_loops(&smoothed_loops);
-    // Temporary per-frame triangulation (design
-    // `2026-07-22-cache-track-geometry` subtask 2/3 stepping stone) —
-    // replaced by `TrackGeometryCache::get_or_build`'s cached
-    // `triangulated` field in subtask 4.
-    let triangulated: Vec<(Vec<egui::Pos2>, Vec<[u32; 3]>)> = smoothed_loops
+    // Temporary per-frame map + lattice-triangulation (design
+    // `2026-07-22-cache-track-geometry` subtask 1 stepping stone) — replaced
+    // by `BakedTrackGeometry`'s baked `triangulated_indices` (topology,
+    // computed once per track) paired with a per-frame `mapped` vertex map
+    // in subtask 4.
+    let mapped: Vec<Vec<egui::Pos2>> = smoothed_loops
         .iter()
-        .map(|loop_points| regions::triangulated_loop(&transform, loop_points))
+        .map(|loop_points| loop_points.iter().map(|&p| transform.map(p)).collect())
         .collect();
-    regions::fill(painter, rect, &triangulated, &loop_roles);
+    let indices: Vec<Vec<[u32; 3]>> = smoothed_loops
+        .iter()
+        .map(|loop_points| regions::triangulate_lattice(loop_points))
+        .collect();
+    regions::fill(painter, rect, &mapped, &indices, &loop_roles);
 
     if overlays.speed_heatmap {
         heatmap::paint(
             painter,
             &transform,
-            &triangulated,
+            &mapped,
+            &indices,
             &loop_roles,
             &track.metrics.speed_heatmap,
         );

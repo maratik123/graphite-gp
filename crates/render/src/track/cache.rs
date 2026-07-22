@@ -58,9 +58,17 @@ impl TrackGeometryCache {
             .collect();
 
         let loop_roles = regions::classify_loops(&smoothed_loops);
+        // Stepping stone (design `2026-07-22-cache-track-geometry` subtask 1):
+        // `regions::triangulated_loop` was removed in favor of lattice-space
+        // `triangulate_lattice`; this whole type is rewritten rect-free by
+        // subtask 3, so the inline map+triangulate below is temporary.
         let triangulated: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = smoothed_loops
             .iter()
-            .map(|loop_points| regions::triangulated_loop(&transform, loop_points))
+            .map(|loop_points| {
+                let verts: Vec<Pos2> = loop_points.iter().map(|&p| transform.map(p)).collect();
+                let indices = regions::triangulate_lattice(loop_points);
+                (verts, indices)
+            })
             .collect();
 
         Self {
