@@ -33,7 +33,7 @@ gp-render = { path = "crates/render" }
 gp-ai = { path = "crates/ai" }
 thiserror = "2"
 strum = { version = "0.28", features = ["derive"] }
-enum-map = "2"
+enum-map = "3"
 enumflags2 = "0.7"
 rand = { version = "0.10", default-features = false, features = ["alloc"] }
 rand_chacha = { version = "0.10", default-features = false }
@@ -45,7 +45,7 @@ winit = { version = "0.30", default-features = true }
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
 egui-wgpu = "0.35"
 image = "0.25"
-skrifa = "0.44"
+skrifa = "0.45"
 cssparser = "0.37"
 
 # Workspace-wide lint posture. Each crate opts in via `[lints] workspace = true`.
