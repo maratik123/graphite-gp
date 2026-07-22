@@ -80,7 +80,7 @@ pub struct Scene<'a> {
 ///
 /// Draws back to front: the three regions (outfield / asphalt / infield),
 /// the walls (Chaikin-smoothed, M6-guarded), the checkered S/F chord, then
-/// every car (`track::LAYER_ORDER` pins the exact order — AC9).
+/// every car (`track::Layer` pins the exact order — AC9).
 ///
 /// Takes a **borrowed** `egui::Painter` draw context — this function does
 /// not own, construct, or store one; the window/event loop that produces it
