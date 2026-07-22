@@ -31,7 +31,7 @@ pub use screens::{
     Difficulty, LabInput, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceInput, RaceResponse,
     RaceScreen, RaceSummary, ResultsInput, ResultsResponse, ResultsScreen, StandingEntry,
 };
-pub use track::CarRender;
+pub use track::{CarRender, TrackGeometryCache};
 
 /// Optional analytics overlays (design doc §4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
