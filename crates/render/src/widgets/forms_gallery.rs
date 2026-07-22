@@ -77,7 +77,15 @@ fn draw_switches(painter: &Painter, x0: f32, y0: f32) -> f32 {
             max: Pos2::new(x + 160.0, y0 + 22.0),
         };
         let style = Switch::resolve(checked);
-        Switch::paint(painter, rect, &style, checked, Some(label), enabled);
+        let label_galley = painter.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::new(
+                crate::tokens::typography::FS_BODY,
+                egui::FontFamily::Name(crate::fonts::ONEST_REGULAR.into()),
+            ),
+            crate::tokens::color::TEXT_BODY,
+        );
+        Switch::paint(painter, rect, &style, checked, Some(&label_galley), enabled);
     }
     y0 + 50.0
 }
