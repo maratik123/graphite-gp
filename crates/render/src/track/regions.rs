@@ -21,6 +21,27 @@
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape};
 use gp_core::geom::{Corridor, Point};
 use std::collections::HashSet;
+use strum::IntoEnumIterator;
+
+/// The three regions [`fill`] draws, back-to-front (design doc §4, layer 1;
+/// AC9's documented layer order; Amendment — Rounded track, PR #100):
+/// `Outfield → Asphalt → Infield`. [`fill`] iterates
+/// [`RegionLayer::iter`](strum::IntoEnumIterator::iter) and dispatches each
+/// variant to its draw action, so this order **is** the draw order (no
+/// second, separately-maintained sequence to drift from it).
+#[derive(Clone, Copy, Debug, strum::EnumIter, strum::IntoStaticStr)]
+#[strum(serialize_all = "kebab-case")]
+pub(crate) enum RegionLayer {
+    /// The whole target rect filled `PAPER_1` — the outfield background,
+    /// drawn first so every other region paints on top of it.
+    Outfield,
+    /// The outer loop(s) in `roles.outer`, filled `SURFACE_ASPHALT`.
+    Asphalt,
+    /// The hole loop(s) in `roles.holes`, filled `SURFACE_INFIELD`, drawn on
+    /// top — disjoint from asphalt by the annulus invariant, so their
+    /// relative order is visually inert.
+    Infield,
+}
 
 /// Every drivable/non-drivable cell in `d`'s bounding box, classified into
 /// the three regions (design doc §4, layer 1). Order within each `Vec` is an
@@ -475,19 +496,29 @@ pub(crate) fn fill(
     indices: &[Vec<[u32; 3]>],
     roles: &LoopRoles,
 ) {
-    painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);
-    for &idx in &roles.outer {
-        if let (Some(v), Some(i)) = (verts.get(idx), indices.get(idx)) {
-            paint_mesh(painter, v, i, crate::tokens::color::SURFACE_ASPHALT);
+    for region in RegionLayer::iter() {
+        match region {
+            RegionLayer::Outfield => {
+                painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);
+            }
+            RegionLayer::Asphalt => {
+                for &idx in &roles.outer {
+                    if let (Some(v), Some(i)) = (verts.get(idx), indices.get(idx)) {
+                        paint_mesh(painter, v, i, crate::tokens::color::SURFACE_ASPHALT);
+                    }
+                }
+            }
+            RegionLayer::Infield => {
+                paint_infield_holes(
+                    painter,
+                    verts,
+                    indices,
+                    roles,
+                    crate::tokens::color::SURFACE_INFIELD,
+                );
+            }
         }
     }
-    paint_infield_holes(
-        painter,
-        verts,
-        indices,
-        roles,
-        crate::tokens::color::SURFACE_INFIELD,
-    );
 }
 
 #[cfg(test)]
