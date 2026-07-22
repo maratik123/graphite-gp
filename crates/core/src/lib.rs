@@ -14,10 +14,13 @@
 //!
 //! ## Modules
 //! - [`geom`]  — dual-grid primitives: points, walls, the corridor `D`, supercover.
+//! - [`rng`]   — grouped seeded-RNG configuration (`Seeds`), shared by every
+//!   consumer (collision, generation, AI learning/inference).
 //! - [`track`] — the exported track artifact (contract with block 1).
 //! - [`sim`]   — the deterministic simulation: `step`, `legal_move`, lap counter,
 //!   crash, car-collision resolution.
 
 pub mod geom;
+pub mod rng;
 pub mod sim;
 pub mod track;

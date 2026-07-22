@@ -119,12 +119,22 @@ pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut ChaCha8
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rng::Seeds;
     use crate::sim::common::*;
-    use rand::SeedableRng;
 
     /// A car at rest at `(x, y)` with velocity `(vx, vy)`.
     fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
         CarState { x, y, vx, vy }
+    }
+
+    /// A collision RNG seeded via [`Seeds::collision_rng`] (AC11) — the
+    /// grouped-config path, not a bare `ChaCha8Rng::seed_from_u64`.
+    fn collision_rng(seed: u64) -> ChaCha8Rng {
+        Seeds {
+            collision: seed,
+            ..Default::default()
+        }
+        .collision_rng()
     }
 
     #[test]
@@ -132,7 +142,7 @@ mod tests {
         let d = filled(5, 5);
         let mut cars = [car(2, 2, 1, 0)];
         let before = cars;
-        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        let mut rng = collision_rng(7);
         resolve_collisions(&d, &mut cars, &mut rng);
         assert_eq!(cars, before);
     }
@@ -141,7 +151,7 @@ mod tests {
     fn ac8_three_into_one_cell_resolved_distinctly() {
         let d = filled(5, 5);
         let mut cars = [car(2, 2, 1, 0), car(2, 2, 0, 1), car(2, 2, -1, 0)];
-        let mut rng = ChaCha8Rng::seed_from_u64(7);
+        let mut rng = collision_rng(7);
         resolve_collisions(&d, &mut cars, &mut rng);
         // Exactly one car remains at (2,2); the other two are on distinct
         // free cells.
@@ -176,8 +186,8 @@ mod tests {
             car(2, 1, 0, 0),
             car(2, 3, 0, 0),
         ];
-        let mut collision_rng = ChaCha8Rng::seed_from_u64(11);
-        resolve_collisions(&d, &mut cars, &mut collision_rng);
+        let mut seeded_rng = collision_rng(11);
+        resolve_collisions(&d, &mut cars, &mut seeded_rng);
         let ring = [
             Point::new(1, 2),
             Point::new(3, 2),
@@ -208,7 +218,7 @@ mod tests {
         let d = filled(5, 5);
         let mut cars = [car(1, 2, 1, 0), car(2, 2, -1, 0)];
         let before = cars;
-        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        let mut rng = collision_rng(3);
         resolve_collisions(&d, &mut cars, &mut rng);
         assert_eq!(cars, before);
     }
@@ -220,7 +230,7 @@ mod tests {
         // distinct final cells: A ends at (2,2), B ends at (0,2).
         let mut cars = [car(0, 2, 2, 0), car(2, 2, -2, 0)];
         let before = cars;
-        let mut rng = ChaCha8Rng::seed_from_u64(3);
+        let mut rng = collision_rng(3);
         resolve_collisions(&d, &mut cars, &mut rng);
         assert_eq!(cars, before);
     }
@@ -230,8 +240,8 @@ mod tests {
         let d = filled(5, 5);
         let mut cars_a = [car(2, 2, 1, 0), car(2, 2, 0, 1), car(2, 2, -1, 0)];
         let mut cars_b = cars_a;
-        let mut rng_a = ChaCha8Rng::seed_from_u64(99);
-        let mut rng_b = ChaCha8Rng::seed_from_u64(99);
+        let mut rng_a = collision_rng(99);
+        let mut rng_b = collision_rng(99);
         resolve_collisions(&d, &mut cars_a, &mut rng_a);
         resolve_collisions(&d, &mut cars_b, &mut rng_b);
         assert_eq!(cars_a, cars_b);
@@ -244,7 +254,7 @@ mod tests {
         // a genuine intra-layer tie the seeded RNG must break reproducibly.
         let d = filled(5, 5);
         let mut cars = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
-        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let mut rng = collision_rng(42);
         resolve_collisions(&d, &mut cars, &mut rng);
         // Seed 42 deterministically picks (2,3) among the equidistant free
         // ring cells {(1,2), (3,2), (2,1), (2,3)}.
@@ -252,7 +262,7 @@ mod tests {
 
         // A second independent run with the same seed reproduces exactly.
         let mut cars2 = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
-        let mut rng2 = ChaCha8Rng::seed_from_u64(42);
+        let mut rng2 = collision_rng(42);
         resolve_collisions(&d, &mut cars2, &mut rng2);
         assert_eq!(cars, cars2, "same seed must reproduce the same tie pick");
     }

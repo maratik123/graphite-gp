@@ -18,7 +18,11 @@ pub use graph::*;
 pub type Coord = i32;
 
 /// An integer grid point = the center of one unit cell.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+///
+/// Derives `Ord` (additive to the existing `Eq`/`Hash` set) so `Point` can key
+/// a `BTreeSet`/`BTreeMap` for deterministic, cross-platform iteration order
+/// (design doc §2, discharges #50) — the derived order is `x` then `y`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct Point {
     /// Horizontal cell coordinate (grid column), increasing eastward.
     pub x: Coord,
@@ -582,6 +586,35 @@ mod tests {
                 Point::new(i32::MIN, i32::MIN),     // west: saturated self
                 Point::new(i32::MIN, i32::MIN + 1), // north: in-domain
                 Point::new(i32::MIN, i32::MIN),     // south: saturated self
+            ]
+        );
+    }
+
+    #[test]
+    fn point_ord_orders_by_x_then_y() {
+        // AC12: derived Ord orders by x then y — the ordering a BTreeSet<Point>
+        // relies on for deterministic iteration.
+        assert!(Point::new(0, 5) < Point::new(1, 0));
+        assert!(Point::new(1, 0) < Point::new(1, 1));
+        assert_eq!(
+            Point::new(2, 3).cmp(&Point::new(2, 3)),
+            std::cmp::Ordering::Equal
+        );
+
+        let mut pts = vec![
+            Point::new(1, 1),
+            Point::new(0, 5),
+            Point::new(1, 0),
+            Point::new(0, 0),
+        ];
+        pts.sort();
+        assert_eq!(
+            pts,
+            vec![
+                Point::new(0, 0),
+                Point::new(0, 5),
+                Point::new(1, 0),
+                Point::new(1, 1),
             ]
         );
     }
