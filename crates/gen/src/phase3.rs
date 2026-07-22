@@ -183,6 +183,203 @@ fn pick_straight_run(ring: &BTreeSet<Point>, hole: &BTreeSet<Point>) -> Segment 
     }
 }
 
+// ---- Fine-D wall/cross-section scanning + thicken ------------------------
+
+/// The signed step of `s` along its own axis (`±1`) — exactly one of
+/// `s.delta()`'s components is nonzero, so the sum recovers its sign.
+const fn side_sign(s: Side) -> i32 {
+    let (dx, dy) = s.delta();
+    dx.saturating_add(dy)
+}
+
+/// The fine [`Point`] at tangent coordinate `t` along `axis` and perpendicular
+/// coordinate `perp`. For `axis == Horizontal`, `t` is `x` and `perp` is `y`;
+/// for `axis == Vertical`, `t` is `y` and `perp` is `x`.
+const fn point_at(axis: Orient, t: i32, perp: i32) -> Point {
+    match axis {
+        Orient::Horizontal => Point::new(t, perp),
+        Orient::Vertical => Point::new(perp, t),
+    }
+}
+
+/// The extremal (max if `sign > 0`, min if `sign < 0`) perpendicular
+/// coordinate at tangent coordinate `t` along `axis` with a drivable cell, or
+/// `None` if none exists — mirrors Ф2's `row_extent`/`col_extent`, unified
+/// over `axis` instead of duplicated per direction.
+fn extremal_at(d: &Corridor, axis: Orient, t: i32, sign: i32) -> Option<i32> {
+    let origin = d.origin();
+    let (lo, span) = match axis {
+        Orient::Horizontal => (origin.y, d.height()),
+        Orient::Vertical => (origin.x, d.width()),
+    };
+    let span = i32::try_from(span).unwrap_or(0);
+    let mut range = lo..lo.saturating_add(span);
+    if sign > 0 {
+        range
+            .rev()
+            .find(|&perp| d.contains(point_at(axis, t, perp)))
+    } else {
+        range.find(|&perp| d.contains(point_at(axis, t, perp)))
+    }
+}
+
+/// The maximal contiguous drivable run at tangent coordinate `t`, walking
+/// from the `outward`-facing extremal cell inward until the first `¬D` cell —
+/// the "front chord" (or thicken width measurement) at `t`. Empty if `t` has
+/// no drivable cell.
+fn cross_section(d: &Corridor, axis: Orient, outward: Side, t: i32) -> Vec<Point> {
+    let sign = side_sign(outward);
+    let Some(mut perp) = extremal_at(d, axis, t, sign) else {
+        return Vec::new();
+    };
+    let mut points = Vec::new();
+    loop {
+        let p = point_at(axis, t, perp);
+        if !d.contains(p) {
+            break;
+        }
+        points.push(p);
+        perp = perp.saturating_sub(sign);
+    }
+    points
+}
+
+/// The `outward`-wall profile over the whole of `d`, as `(tangent, extremal)`
+/// pairs in ascending tangent order — mirrors Ф2's wall-profile test helpers,
+/// generalized over `axis`/`outward`.
+fn wall_profile(d: &Corridor, axis: Orient, outward: Side) -> Vec<(i32, i32)> {
+    let sign = side_sign(outward);
+    let origin = d.origin();
+    let (lo, span) = match axis {
+        Orient::Horizontal => (origin.x, d.width()),
+        Orient::Vertical => (origin.y, d.height()),
+    };
+    let span = i32::try_from(span).unwrap_or(0);
+    (lo..lo.saturating_add(span))
+        .filter_map(|t| extremal_at(d, axis, t, sign).map(|perp| (t, perp)))
+        .collect()
+}
+
+/// The longest maximal contiguous sub-run of `profile` whose extremal value
+/// stays constant — the fine-D counterpart of `pick_straight_run`'s coarse
+/// straight-run search. Ties keep the first-encountered (lowest-tangent) run.
+/// `(0, 0)` for an empty profile.
+fn longest_flat_run(profile: &[(i32, i32)]) -> (i32, i32) {
+    let mut best: Option<(i32, i32, i32)> = None; // (len, lo, hi)
+    let mut i = 0;
+    while i < profile.len() {
+        let (lo, val) = profile[i];
+        let mut j = i;
+        while j.saturating_add(1) < profile.len()
+            && profile[j.saturating_add(1)].0 == profile[j].0.saturating_add(1)
+            && profile[j.saturating_add(1)].1 == val
+        {
+            j = j.saturating_add(1);
+        }
+        let hi = profile[j].0;
+        let len = hi.saturating_sub(lo).saturating_add(1);
+        if best.is_none_or(|(best_len, ..)| len > best_len) {
+            best = Some((len, lo, hi));
+        }
+        i = j.saturating_add(1);
+    }
+    best.map_or((0, 0), |(_, lo, hi)| (lo, hi))
+}
+
+/// Every cell point of `d`'s own bounding box, in row-major order — mirrors
+/// Ф1/Ф2's private `box_points`.
+fn box_points(d: &Corridor) -> impl Iterator<Item = Point> + '_ {
+    let origin = d.origin();
+    let (w, h) = (d.width(), d.height());
+    (0..h).flat_map(move |dy| {
+        (0..w).map(move |dx| {
+            Point::new(
+                origin.x.saturating_add(i32::try_from(dx).unwrap_or(0)),
+                origin.y.saturating_add(i32::try_from(dy).unwrap_or(0)),
+            )
+        })
+    })
+}
+
+/// A new [`Corridor`] with `d`'s content copied over a box grown by `amount`
+/// fine cells on `side` — used when a thicken push would otherwise land
+/// outside `d`'s own bounding box (design doc REC 2). A no-op clone when
+/// `amount <= 0`.
+fn expand_box(d: &Corridor, side: Side, amount: i32) -> Corridor {
+    if amount <= 0 {
+        return d.clone();
+    }
+    let origin = d.origin();
+    let w = i32::try_from(d.width()).unwrap_or(0);
+    let h = i32::try_from(d.height()).unwrap_or(0);
+    let (new_origin, new_w, new_h) = match side {
+        Side::East => (origin, w.saturating_add(amount), h),
+        Side::West => (
+            Point::new(origin.x.saturating_sub(amount), origin.y),
+            w.saturating_add(amount),
+            h,
+        ),
+        Side::North => (origin, w, h.saturating_add(amount)),
+        Side::South => (
+            Point::new(origin.x, origin.y.saturating_sub(amount)),
+            w,
+            h.saturating_add(amount),
+        ),
+    };
+    let mut grown = Corridor::new(
+        new_origin,
+        usize::try_from(new_w).unwrap_or(1).max(1),
+        usize::try_from(new_h).unwrap_or(1).max(1),
+    );
+    for p in box_points(d) {
+        if d.contains(p) {
+            grown.set(p, true);
+        }
+    }
+    grown
+}
+
+/// Additively thickens `d`'s `outward` wall across its longest flat run along
+/// `axis` to cross-section width `≥ m` (design doc "Thickening"). A no-op at
+/// any tangent coordinate already `≥ m` wide. Grows `d`'s bounding box first
+/// (via [`expand_box`]) when the push would otherwise land outside it.
+fn thicken(d: Corridor, axis: Orient, outward: Side, m: u32) -> Corridor {
+    let profile = wall_profile(&d, axis, outward);
+    let (lo, hi) = longest_flat_run(&profile);
+    let m_i32 = i32::try_from(m).unwrap_or(i32::MAX);
+
+    let mut max_extra = 0i32;
+    let mut t = lo;
+    while t <= hi {
+        let width = i32::try_from(cross_section(&d, axis, outward, t).len()).unwrap_or(i32::MAX);
+        max_extra = max_extra.max(m_i32.saturating_sub(width).max(0));
+        t = t.saturating_add(1);
+    }
+
+    let mut d = if max_extra > 0 {
+        expand_box(&d, outward, max_extra)
+    } else {
+        d
+    };
+
+    let sign = side_sign(outward);
+    let mut t = lo;
+    while t <= hi {
+        let width = i32::try_from(cross_section(&d, axis, outward, t).len()).unwrap_or(i32::MAX);
+        let extra = m_i32.saturating_sub(width).max(0);
+        if extra > 0
+            && let Some(mut perp) = extremal_at(&d, axis, t, sign)
+        {
+            for _ in 0..extra {
+                perp = perp.saturating_add(sign);
+                d.set(point_at(axis, t, perp), true);
+            }
+        }
+        t = t.saturating_add(1);
+    }
+    d
+}
+
 /// The local-forward [`Side`] a `dir`-traversing car heads along a straight
 /// whose inward normal (toward the hole) is `inward`.
 ///
@@ -245,12 +442,11 @@ pub fn phase3_start_finish(
     v_target: i32,
 ) -> Phase3Output {
     let _ = v_target;
-    let _ = m;
     let seg = pick_straight_run(&skel.ring, &skel.hole);
     let axis = seg.axis;
     let outward = opposite_side(seg.inward);
-    let _ = outward;
     let forward = forward_side(skel.dir, seg.inward);
+    let d = thicken(d, axis, outward, m);
     Phase3Output {
         d,
         sf: StartFinish {
@@ -413,5 +609,91 @@ mod tests {
         let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
         let seg = pick_straight_run(&skel.ring, &skel.hole);
         assert!(seg.run.1 >= seg.run.0);
+    }
+
+    // ---- Subtask 3: thicken -------------------------------------------
+
+    use gp_core::geom::{bounded_complement_components, component_count};
+    use gp_core::rng::Seeds;
+
+    /// A real Ф1+Ф2 fixture (fixed seed) plus its `pick_straight_run`
+    /// segment and derived `outward` side.
+    fn thicken_fixture(seed: u64, k: i32, n: i32) -> (Corridor, Segment, Side) {
+        let seeds = Seeds {
+            generation: seed,
+            ..Default::default()
+        };
+        let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let d = crate::phase2_rasterize(&skel, k, n);
+        let seg = pick_straight_run(&skel.ring, &skel.hole);
+        let outward = opposite_side(seg.inward);
+        (d, seg, outward)
+    }
+
+    #[test]
+    fn thicken_reaches_at_least_m_width_across_the_run() {
+        let (d, seg, outward) = thicken_fixture(7, 6, 3);
+        let profile = wall_profile(&d, seg.axis, outward);
+        let (lo, hi) = longest_flat_run(&profile);
+        let m = 8u32;
+        let thickened = thicken(d, seg.axis, outward, m);
+        let mut t = lo;
+        while t <= hi {
+            let w = cross_section(&thickened, seg.axis, outward, t).len();
+            assert!(
+                w >= usize::try_from(m).unwrap_or(0),
+                "t={t}: width {w} < m={m}"
+            );
+            t += 1;
+        }
+    }
+
+    #[test]
+    fn thicken_is_additive_d_before_subset_of_d_after() {
+        let (d, seg, outward) = thicken_fixture(7, 6, 3);
+        let before: Vec<Point> = box_points(&d).filter(|&p| d.contains(p)).collect();
+        let thickened = thicken(d, seg.axis, outward, 9);
+        for p in before {
+            assert!(
+                thickened.contains(p),
+                "D0 point {p:?} missing after thicken"
+            );
+        }
+    }
+
+    #[test]
+    fn thicken_is_noop_when_already_at_least_m_wide() {
+        // k = 6 >= m = 4: every straight cross-section is already >= m.
+        let (d, seg, outward) = thicken_fixture(7, 6, 3);
+        let before: BTreeSet<Point> = box_points(&d).filter(|&p| d.contains(p)).collect();
+        let thickened = thicken(d, seg.axis, outward, 4);
+        let after: BTreeSet<Point> = box_points(&thickened)
+            .filter(|&p| thickened.contains(p))
+            .collect();
+        assert_eq!(before, after, "no-op thicken must not change D");
+    }
+
+    #[test]
+    fn thicken_preserves_topology_on_fixture() {
+        let (d, seg, outward) = thicken_fixture(7, 6, 3);
+        let thickened = thicken(d, seg.axis, outward, 9);
+        assert_eq!(component_count(&thickened), 1);
+        assert_eq!(bounded_complement_components(&thickened), 1);
+    }
+
+    #[test]
+    fn thicken_boundary_margin_push_grows_the_box_and_preserves_topology() {
+        // REC 2: a 1-tall strip with no north margin at all — any north push
+        // must grow D's own bounding box rather than silently clip.
+        let d = Corridor::filled(Point::new(0, 0), 5, 1);
+        let before_components = component_count(&d);
+        let before_holes = bounded_complement_components(&d);
+        let thickened = thicken(d, Orient::Horizontal, Side::North, 3);
+        assert_eq!(component_count(&thickened), before_components);
+        assert_eq!(bounded_complement_components(&thickened), before_holes);
+        for x in 0..5 {
+            let w = cross_section(&thickened, Orient::Horizontal, Side::North, x).len();
+            assert!(w >= 3, "x={x}: width {w} < 3");
+        }
     }
 }
