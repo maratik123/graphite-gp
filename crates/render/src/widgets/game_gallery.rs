@@ -13,7 +13,8 @@
 use super::car_chip::{CarChip, CarKind};
 use super::lap_meter::LapMeter;
 use super::telemetry::{Align, Telemetry, Tone, telemetry_galleys};
-use egui::{Painter, Pos2, Rect};
+use crate::tokens::{color, typography};
+use egui::{FontFamily, FontId, Painter, Pos2, Rect};
 
 /// The gallery's fixed canvas: 640×420 logical points at
 /// `pixels_per_point = 1.0`.
@@ -150,7 +151,33 @@ fn draw_car_chips(painter: &Painter, x0: f32, y0: f32) -> f32 {
             egui::vec2(CAR_CHIP_WIDTH, CAR_CHIP_HEIGHT),
         );
         let style = CarChip::resolve(active, Some(kind));
-        CarChip::paint(painter, rect, style, color, name, Some(rank), Some(kind));
+        let name_galley = painter.layout_no_wrap(
+            name.to_owned(),
+            FontId::new(
+                typography::FS_BODY,
+                FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
+            ),
+            color::TEXT_INK,
+        );
+        let pill_galley = style.tag.map(|tag| {
+            painter.layout_no_wrap(
+                kind.label().to_owned(),
+                FontId::new(
+                    typography::FS_MICRO,
+                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+                ),
+                tag.fg,
+            )
+        });
+        CarChip::paint(
+            painter,
+            rect,
+            style,
+            color,
+            &name_galley,
+            Some(rank),
+            pill_galley.as_ref(),
+        );
         y += CAR_CHIP_HEIGHT + CAR_CHIP_ROW_GAP;
     }
     y
