@@ -5,9 +5,10 @@
 use super::Size;
 use crate::tokens::{color, spacing, typography};
 use egui::{
-    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind,
-    Ui,
+    Align2, Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Sense, Stroke,
+    StrokeKind, Ui,
 };
+use std::sync::Arc;
 
 /// Per-segment horizontal padding (`SegmentedControl.jsx:31` `0 14px`).
 const SEG_PAD_X: f32 = 14.0;
@@ -107,16 +108,16 @@ impl<'a> SegmentedControl<'a> {
     pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
-        options: &[&str],
+        galleys: &[Arc<Galley>],
         selected: Option<usize>,
         size: Size,
     ) {
         painter.rect_filled(rect, spacing::RADIUS_2, color::PAPER_0);
 
-        let widths = segment_widths(painter, options, size);
+        let widths = segment_widths_from_galleys(galleys);
         let clipped = painter.with_clip_rect(rect);
-        let last = options.len().saturating_sub(1);
-        for (i, &label) in options.iter().enumerate() {
+        let last = galleys.len().saturating_sub(1);
+        for (i, galley) in galleys.iter().enumerate() {
             let seg_rect = seg_rect_at(rect, &widths, i);
             let style = Self::resolve(Some(i) == selected, size);
             if Some(i) == selected {
@@ -132,7 +133,7 @@ impl<'a> SegmentedControl<'a> {
                 // for a uniform radius; taking `.nw` from that reuses it to
                 // get the single `u8` this per-corner struct needs.
                 let outer_radius = egui::CornerRadius::from(spacing::RADIUS_2).nw;
-                let corner_radius = if options.len() == 1 {
+                let corner_radius = if galleys.len() == 1 {
                     egui::CornerRadius::same(outer_radius)
                 } else if i == 0 {
                     egui::CornerRadius {
@@ -164,15 +165,11 @@ impl<'a> SegmentedControl<'a> {
                     Stroke::new(spacing::BW_HAIR, color::GRAPHITE_900),
                 );
             }
-            let font = FontId::new(
-                style.font_size,
-                FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
-            );
-            clipped.text(
+            crate::text::paint_galley_override(
+                &clipped,
                 seg_rect.center(),
                 Align2::CENTER_CENTER,
-                label,
-                font,
+                galley.clone(),
                 style.fg,
             );
         }
@@ -196,7 +193,8 @@ impl<'a> SegmentedControl<'a> {
     ///
     /// See the private `paint` layer's panics.
     pub fn show(self, ui: &mut Ui) -> SegmentedControlResponse {
-        let widths = segment_widths(ui.painter(), self.options, self.size);
+        let galleys = segment_galleys(ui.painter(), self.options, self.size);
+        let widths = segment_widths_from_galleys(&galleys);
         let total_width: f32 = widths.iter().sum();
         let height = Self::resolve(false, self.size).height;
         let (rect, response) =
@@ -213,7 +211,7 @@ impl<'a> SegmentedControl<'a> {
 
         let selected = clicked_index.or_else(|| selected_index(self.options, self.value));
         if ui.is_rect_visible(rect) {
-            Self::paint(ui.painter(), rect, self.options, selected, self.size);
+            Self::paint(ui.painter(), rect, &galleys, selected, self.size);
         }
 
         SegmentedControlResponse {
@@ -224,14 +222,16 @@ impl<'a> SegmentedControl<'a> {
     }
 }
 
-/// The width (`SEG_PAD_X` padding either side of the measured label) of
-/// every segment in `options`, at `size`'s font.
+/// Builds every segment's label galley once, at `size`'s font — the single
+/// shaping pass shared by [`SegmentedControl::show`] and
+/// [`forms_gallery::draw_segmented_controls`](super::forms_gallery), so
+/// `show`/the gallery/`paint` all agree by construction (AC3).
 ///
 /// `pub(crate)`, not private: `forms_gallery` (subtask 6) needs the same
-/// measured widths to size its own demo rects correctly — re-measuring here
-/// keeps the golden's chrome matching what `paint` will actually draw,
-/// rather than an independently-guessed width.
-pub(crate) fn segment_widths(painter: &Painter, options: &[&str], size: Size) -> Vec<f32> {
+/// galleys to size its own demo rects correctly — reusing them here keeps
+/// the golden's chrome matching what `paint` will actually draw, rather
+/// than an independently-guessed width.
+pub(crate) fn segment_galleys(painter: &Painter, options: &[&str], size: Size) -> Vec<Arc<Galley>> {
     let font_size = match size {
         Size::Sm => typography::FS_SM,
         Size::Md | Size::Lg => typography::FS_BODY,
@@ -242,13 +242,16 @@ pub(crate) fn segment_widths(painter: &Painter, options: &[&str], size: Size) ->
     );
     options
         .iter()
-        .map(|label| {
-            let text_width = painter
-                .layout_no_wrap((*label).to_owned(), font.clone(), color::TEXT_BODY)
-                .rect
-                .width();
-            SEG_PAD_X.mul_add(2.0, text_width)
-        })
+        .map(|label| painter.layout_no_wrap((*label).to_owned(), font.clone(), color::TEXT_BODY))
+        .collect()
+}
+
+/// The padded width (`SEG_PAD_X` either side) of every pre-shaped segment
+/// galley — arithmetic on already-shaped runs, not a re-shape.
+pub(crate) fn segment_widths_from_galleys(galleys: &[Arc<Galley>]) -> Vec<f32> {
+    galleys
+        .iter()
+        .map(|galley| SEG_PAD_X.mul_add(2.0, galley.size().x))
         .collect()
 }
 
