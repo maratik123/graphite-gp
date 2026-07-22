@@ -107,7 +107,7 @@ pub(crate) fn draw_frame(
         heatmap::paint(
             painter,
             &transform,
-            &smoothed_loops,
+            &triangulated,
             &loop_roles,
             &track.metrics.speed_heatmap,
         );

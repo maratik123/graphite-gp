@@ -138,44 +138,36 @@ fn cell_rect(transform: &TrackTransform, p: Point) -> Rect {
     Rect::from_two_pos(transform.map(min), transform.map(max))
 }
 
-/// Paints the speed heatmap (design § Key decisions 1, amended 2026-07-20):
-/// triangulates each `roles.outer` loop **once** into a shared
-/// `(verts, indices)` pair, then for each `(Point, i32)` in `heatmap` builds a
-/// per-cell `Mesh` from that same shared pair, colored by the `ramp_color`
-/// mapping its speed's [`normalize`]d position across the observed
-/// `[min, max]` at [`HEATMAP_ALPHA`], clipped to the cell's rect via
-/// `Painter::with_clip_rect` — so the union over all cells is the smoothed
-/// asphalt silhouette, colored per cell, never re-triangulated per cell.
-/// After the full per-cell pass, `roles.holes` is re-cut as a
-/// `SURFACE_INFIELD` mesh (mirrors `regions::fill`'s own asphalt-then-infield
-/// structure) so heatmap color never bleeds into the infield. An empty
-/// `heatmap` — or one whose [`speed_bounds`] is `None` — returns **before**
-/// the infield re-cut, so the empty case stays a true no-op (AC7): zero
-/// shapes, not even the re-cut.
+/// Paints the speed heatmap (design § Key decisions 1, amended 2026-07-20;
+/// design `2026-07-22-cache-track-geometry` — consumes the shared
+/// precomputed `triangulated` meshes, no per-frame re-triangulation, AC3).
 ///
-/// `loops` and `roles` must come from the same `regions::classify_loops` call
-/// `draw_frame` also passes to `regions::fill` (design § Key decisions 1).
+/// For each `(Point, i32)` in `heatmap`, builds a per-cell `Mesh` from each
+/// `roles.outer` loop's shared precomputed `(verts, indices)` pair, colored
+/// by the `ramp_color` mapping its speed's [`normalize`]d position across the
+/// observed `[min, max]` at [`HEATMAP_ALPHA`], clipped to the cell's rect via
+/// `Painter::with_clip_rect` — so the union over all cells is the smoothed
+/// asphalt silhouette, colored per cell, never re-triangulated per cell (or
+/// per frame — `triangulated` is built once by [`super::cache`] and reused).
+/// After the full per-cell pass, `roles.holes` is re-cut as a
+/// `SURFACE_INFIELD` mesh via [`regions::paint_infield_holes`] (mirrors
+/// `regions::fill`'s own asphalt-then-infield structure) so heatmap color
+/// never bleeds into the infield. An empty `heatmap` — or one whose
+/// [`speed_bounds`] is `None` — returns **before** the infield re-cut, so the
+/// empty case stays a true no-op (AC7): zero shapes, not even the re-cut.
+///
+/// `triangulated` and `roles` must come from the same cached-build call
+/// `draw_frame` also passes to `regions::fill`.
 pub(crate) fn paint(
     painter: &Painter,
     transform: &TrackTransform,
-    loops: &[Vec<(f32, f32)>],
+    triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
     roles: &LoopRoles,
     heatmap: &[(Point, i32)],
 ) {
     let Some((min, max)) = speed_bounds(heatmap) else {
         return;
     };
-
-    // Temporary per-frame triangulation of every loop (design
-    // `2026-07-22-cache-track-geometry` subtask 2 stepping stone, ahead of
-    // subtask 3's full `triangulated`-consuming signature) — needed so
-    // `paint_infield_holes`'s new precomputed-mesh signature can be called
-    // for the hole loops too, not just the outer ones this fn already
-    // triangulated.
-    let triangulated: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = loops
-        .iter()
-        .map(|loop_points| regions::triangulated_loop(transform, loop_points))
-        .collect();
 
     for &(point, speed) in heatmap {
         let t = normalize(speed, min, max);
@@ -190,7 +182,7 @@ pub(crate) fn paint(
 
     regions::paint_infield_holes(
         painter,
-        &triangulated,
+        triangulated,
         roles,
         crate::tokens::color::SURFACE_INFIELD,
     );
@@ -293,11 +285,24 @@ mod tests {
         (d, loops, roles)
     }
 
+    /// Triangulates every `loops` entry via `transform` — exactly the
+    /// cached-build computation `draw_frame` now feeds `heatmap::paint`
+    /// (design `2026-07-22-cache-track-geometry`).
+    fn triangulate_loops(
+        loops: &[Vec<(f32, f32)>],
+        transform: &TrackTransform,
+    ) -> Vec<(Vec<Pos2>, Vec<[u32; 3]>)> {
+        loops
+            .iter()
+            .map(|loop_points| regions::triangulated_loop(transform, loop_points))
+            .collect()
+    }
+
     /// Renders `paint` alone into a fresh frame and returns the captured
     /// `Mesh` shapes — mirrors `regions.rs`'s
     /// `fill_emits_asphalt_mesh_then_infield_mesh` capture idiom.
     fn painted_meshes(
-        loops: &[Vec<(f32, f32)>],
+        triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
         roles: &LoopRoles,
         transform: &TrackTransform,
         rect: Rect,
@@ -310,7 +315,7 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
-            paint(&painter, transform, loops, roles, heatmap);
+            paint(&painter, transform, triangulated, roles, heatmap);
         });
         crate::track::test_support::captured_meshes(&output.shapes)
     }
@@ -339,13 +344,14 @@ mod tests {
 
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
+        let triangulated = triangulate_loops(&loops, &transform);
 
         let heatmap = vec![
             (Point::new(1, 1), 2),
             (Point::new(2, 1), 5),
             (Point::new(1, 3), 8),
         ];
-        let meshes = painted_meshes(&loops, &roles, &transform, rect, &heatmap);
+        let meshes = painted_meshes(&triangulated, &roles, &transform, rect, &heatmap);
         assert_eq!(
             meshes.len(),
             heatmap.len() * roles.outer.len() + roles.holes.len(),
@@ -377,7 +383,37 @@ mod tests {
         let (d, loops, roles) = ring_3x3_loops_and_roles();
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
-        let meshes = painted_meshes(&loops, &roles, &transform, rect, &[]);
+        let triangulated = triangulate_loops(&loops, &transform);
+        let meshes = painted_meshes(&triangulated, &roles, &transform, rect, &[]);
         assert!(meshes.is_empty());
+    }
+
+    /// AC3 — `paint` consumes the shared precomputed `triangulated` outer
+    /// mesh rather than re-triangulating it: the outer loop's vertex buffer
+    /// pointer is unchanged before/after the call.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "painted_meshes drives a Context::run_ui + layer_painter \
+                  pass through heatmap::paint, capturing per-cell meshes — \
+                  interpreted-pass wall-clock cost, not an abort"
+    )]
+    fn heatmap_reuses_cached_outer_mesh() {
+        let (d, loops, roles) = ring_3x3_loops_and_roles();
+        let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
+        let transform = TrackTransform::new(&d, rect);
+        let triangulated = triangulate_loops(&loops, &transform);
+
+        let outer_idx = roles.outer[0];
+        let verts_ptr_before = triangulated[outer_idx].0.as_ptr();
+
+        let heatmap = vec![(Point::new(1, 1), 2), (Point::new(2, 1), 5)];
+        let _ = painted_meshes(&triangulated, &roles, &transform, rect, &heatmap);
+
+        assert_eq!(
+            triangulated[outer_idx].0.as_ptr(),
+            verts_ptr_before,
+            "heatmap::paint re-triangulated the outer mesh instead of reusing it"
+        );
     }
 }
