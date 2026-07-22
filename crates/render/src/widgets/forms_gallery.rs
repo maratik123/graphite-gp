@@ -12,7 +12,7 @@
 //! which `dlopen`s the Vulkan ICD (no FFI under Miri).
 
 use super::Size;
-use super::segmented_control::{SegmentedControl, segment_widths};
+use super::segmented_control::{SegmentedControl, segment_galleys, segment_widths_from_galleys};
 use super::slider::Slider;
 use super::stepper::{Stepper, dec_disabled, inc_disabled};
 use super::switch::Switch;
@@ -77,14 +77,23 @@ fn draw_switches(painter: &Painter, x0: f32, y0: f32) -> f32 {
             max: Pos2::new(x + 160.0, y0 + 22.0),
         };
         let style = Switch::resolve(checked);
-        Switch::paint(painter, rect, &style, checked, Some(label), enabled);
+        let label_galley = painter.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::new(
+                crate::tokens::typography::FS_BODY,
+                egui::FontFamily::Name(crate::fonts::ONEST_REGULAR.into()),
+            ),
+            crate::tokens::color::TEXT_BODY,
+        );
+        Switch::paint(painter, rect, &style, checked, Some(&label_galley), enabled);
     }
     y0 + 50.0
 }
 
 /// Draws the `SegmentedControl` rows: sm/md/lg sizes, each with a different
-/// selected index. Re-measures with `segment_widths` (the same fn `paint`
-/// uses internally) so the chrome rect matches the drawn segments exactly.
+/// selected index. Re-shapes with `segment_galleys` (the same fn `paint`'s
+/// caller uses internally) so the chrome rect matches the drawn segments
+/// exactly.
 fn draw_segmented_controls(painter: &Painter, x0: f32, y0: f32) -> f32 {
     let rows: [(&[&str], usize, Size); 3] = [
         (&["Rookie", "Pro", "Ace"], 0, Size::Sm),
@@ -93,13 +102,14 @@ fn draw_segmented_controls(painter: &Painter, x0: f32, y0: f32) -> f32 {
     ];
     let mut y = y0;
     for (options, selected, size) in rows {
-        let total_w: f32 = segment_widths(painter, options, size).iter().sum();
+        let galleys = segment_galleys(painter, options, size);
+        let total_w: f32 = segment_widths_from_galleys(&galleys).iter().sum();
         let height = SegmentedControl::resolve(false, size).height;
         let rect = Rect {
             min: Pos2::new(x0, y),
             max: Pos2::new(x0 + total_w, y + height),
         };
-        SegmentedControl::paint(painter, rect, options, Some(selected), size);
+        SegmentedControl::paint(painter, rect, &galleys, Some(selected), size);
         y += height + 10.0;
     }
     y

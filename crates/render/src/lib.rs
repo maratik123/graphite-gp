@@ -21,6 +21,7 @@ pub mod icons;
 pub mod screens;
 #[cfg(test)]
 mod test_util;
+mod text;
 pub mod tokens;
 pub mod track;
 pub mod widgets;

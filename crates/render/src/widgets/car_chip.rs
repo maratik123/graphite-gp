@@ -6,9 +6,10 @@
 
 use crate::tokens::{color, spacing, typography};
 use egui::{
-    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind,
-    Ui,
+    Align2, Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Sense, Stroke,
+    StrokeKind, Ui,
 };
+use std::sync::Arc;
 
 /// Chip height (`CarChip.jsx`: `height: 34`) — not a token (nearest are
 /// `CONTROL_H_SM = 30`/`_MD = 38`).
@@ -176,9 +177,9 @@ impl<'a> CarChip<'a> {
         rect: Rect,
         style: CarChipStyle,
         dot_color: Color32,
-        name: &str,
+        name_galley: &Arc<Galley>,
         rank: Option<u32>,
-        kind: Option<CarKind>,
+        pill_galley: Option<&Arc<Galley>>,
     ) {
         let corner_radius = spacing::RADIUS_1;
         painter.rect_filled(rect, corner_radius, style.bg);
@@ -215,36 +216,19 @@ impl<'a> CarChip<'a> {
         );
         cursor_x += DOT_DIAMETER + GAP;
 
-        let name_font = FontId::new(
-            typography::FS_BODY,
-            FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
-        );
         let name_pos = Pos2::new(cursor_x, rect.center().y);
-        let name_galley = painter.layout_no_wrap(name.to_owned(), name_font, color::TEXT_INK);
-        let name_width = name_galley.rect.width();
-        painter.text(
+        let name_rect = crate::text::paint_galley(
+            painter,
             name_pos,
             Align2::LEFT_CENTER,
-            name,
-            FontId::new(
-                typography::FS_BODY,
-                FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
-            ),
+            name_galley.clone(),
             color::TEXT_INK,
         );
-        cursor_x += name_width;
+        cursor_x += name_rect.size().x;
 
-        if let (Some(kind), Some(tag)) = (kind, style.tag) {
+        if let (Some(pill_galley), Some(tag)) = (pill_galley, style.tag) {
             cursor_x += GAP;
-            let pill_font = FontId::new(
-                typography::FS_MICRO,
-                FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-            );
-            let label = kind.label();
-            let text_width = painter
-                .layout_no_wrap(label.to_owned(), pill_font.clone(), tag.fg)
-                .rect
-                .width();
+            let text_width = pill_galley.size().x;
             let pill_height = TAG_PAD_Y.mul_add(2.0, typography::FS_MICRO);
             let pill_rect = Rect::from_min_max(
                 Pos2::new(cursor_x, rect.center().y - pill_height / 2.0),
@@ -259,11 +243,11 @@ impl<'a> CarChip<'a> {
                 Stroke::new(spacing::BW_HAIR, tag.border),
                 StrokeKind::Inside,
             );
-            painter.text(
+            crate::text::paint_galley(
+                painter,
                 pill_rect.center(),
                 Align2::CENTER_CENTER,
-                label,
-                pill_font,
+                pill_galley.clone(),
                 tag.fg,
             );
         }
@@ -286,28 +270,25 @@ impl<'a> CarChip<'a> {
             typography::FS_BODY,
             FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
         );
-        let name_width = ui
-            .painter()
-            .layout_no_wrap(self.name.to_owned(), name_font, color::TEXT_INK)
-            .rect
-            .width();
+        let name_galley =
+            ui.painter()
+                .layout_no_wrap(self.name.to_owned(), name_font, color::TEXT_INK);
 
-        let mut width = PAD_LEFT + DOT_DIAMETER + GAP + name_width + PAD_RIGHT;
+        let mut width = PAD_LEFT + DOT_DIAMETER + GAP + name_galley.size().x + PAD_RIGHT;
         if self.rank.is_some() {
             width += RANK_MIN_W + GAP;
         }
-        if let Some(kind) = self.kind {
+        let pill_galley = self.kind.zip(style.tag).map(|(kind, tag)| {
             let pill_font = FontId::new(
                 typography::FS_MICRO,
                 FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
             );
-            let pill_text_width = ui
+            let galley = ui
                 .painter()
-                .layout_no_wrap(kind.label().to_owned(), pill_font, color::TEXT_INK)
-                .rect
-                .width();
-            width += TAG_PAD_X.mul_add(2.0, GAP + pill_text_width);
-        }
+                .layout_no_wrap(kind.label().to_owned(), pill_font, tag.fg);
+            width += TAG_PAD_X.mul_add(2.0, GAP + galley.size().x);
+            galley
+        });
 
         let desired = egui::vec2(width, HEIGHT);
         let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
@@ -317,9 +298,9 @@ impl<'a> CarChip<'a> {
                 rect,
                 style,
                 self.color,
-                self.name,
+                &name_galley,
                 self.rank,
-                self.kind,
+                pill_galley.as_ref(),
             );
         }
         response

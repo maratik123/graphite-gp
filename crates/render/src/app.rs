@@ -426,16 +426,14 @@ fn draw_wordmark(ui: &mut Ui) {
         WORDMARK_FS,
         FontFamily::Name(crate::fonts::ONEST_BOLD.into()),
     );
-    let graphite_w = ui
+    let graphite_galley =
+        ui.painter()
+            .layout_no_wrap("GRAPHITE ".to_owned(), font.clone(), color::TEXT_INK);
+    let gp_galley = ui
         .painter()
-        .layout_no_wrap("GRAPHITE ".to_owned(), font.clone(), color::TEXT_INK)
-        .rect
-        .width();
-    let gp_w = ui
-        .painter()
-        .layout_no_wrap("GP".to_owned(), font.clone(), color::ACCENT)
-        .rect
-        .width();
+        .layout_no_wrap("GP".to_owned(), font, color::ACCENT);
+    let graphite_w = graphite_galley.size().x;
+    let gp_w = gp_galley.size().x;
     let row_w = ACCENT_DOT_D + WORDMARK_GAP + graphite_w + gp_w;
     let row_h = WORDMARK_FS.max(ACCENT_DOT_D);
     let (rect, _response) = ui.allocate_exact_size(egui::vec2(row_w, row_h), Sense::hover());
@@ -451,18 +449,18 @@ fn draw_wordmark(ui: &mut Ui) {
 
     let text_x = rect.min.x + ACCENT_DOT_D + WORDMARK_GAP;
     let text_y = rect.center().y - WORDMARK_FS / 2.0;
-    let graphite_rect = ui.painter().text(
+    let graphite_rect = crate::text::paint_galley(
+        ui.painter(),
         Pos2::new(text_x, text_y),
         Align2::LEFT_TOP,
-        "GRAPHITE ",
-        font.clone(),
+        graphite_galley,
         color::TEXT_INK,
     );
-    ui.painter().text(
+    crate::text::paint_galley(
+        ui.painter(),
         Pos2::new(graphite_rect.max.x, text_y),
         Align2::LEFT_TOP,
-        "GP",
-        font,
+        gp_galley,
         color::ACCENT,
     );
 }
@@ -482,11 +480,10 @@ fn nav_item(ui: &mut Ui, label: &str, active: bool, enabled: bool) -> (egui::Res
         typography::FS_BODY,
         FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
     );
-    let text_w = ui
+    let label_galley = ui
         .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), color::TEXT_BODY)
-        .rect
-        .width();
+        .layout_no_wrap(label.to_owned(), font, color::TEXT_BODY);
+    let text_w = label_galley.size().x;
     let width = NAV_PAD_X.mul_add(2.0, text_w);
 
     let sense = if enabled {
@@ -506,11 +503,11 @@ fn nav_item(ui: &mut Ui, label: &str, active: bool, enabled: bool) -> (egui::Res
     if ui.is_rect_visible(rect) {
         ui.painter()
             .rect_filled(rect, spacing::RADIUS_2, bg.gamma_multiply(opacity));
-        ui.painter().text(
+        crate::text::paint_galley_override(
+            ui.painter(),
             rect.center(),
             Align2::CENTER_CENTER,
-            label,
-            font,
+            label_galley,
             fg.gamma_multiply(opacity),
         );
     }

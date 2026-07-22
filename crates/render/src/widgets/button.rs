@@ -5,8 +5,10 @@ use super::Size;
 use crate::icons::{self, ICON_LOGICAL_SIZE_PX};
 use crate::tokens::{color, spacing, typography};
 use egui::{
-    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, TextureHandle, Ui,
+    Align2, Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Sense,
+    TextureHandle, Ui,
 };
+use std::sync::Arc;
 
 /// Button variant (`Button.d.ts` `variant`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,7 +240,7 @@ impl<'a> Button<'a> {
         painter: &Painter,
         rect: Rect,
         style: &ButtonStyle,
-        label: &str,
+        label_galley: &Arc<Galley>,
         icon_left: Option<&TextureHandle>,
         icon_right: Option<&TextureHandle>,
         enabled: bool,
@@ -276,18 +278,15 @@ impl<'a> Button<'a> {
             cursor_x += ICON_LOGICAL_SIZE_PX + style.gap;
         }
         let text_pos = Pos2::new(cursor_x, rect.center().y + nudge);
-        let galley = painter.text(
+        let text_rect = crate::text::paint_galley_override(
+            painter,
             text_pos,
             Align2::LEFT_CENTER,
-            label,
-            FontId::new(
-                style.font_size,
-                FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
-            ),
+            label_galley.clone(),
             tint(style.fg),
         );
         if let Some(icon) = icon_right {
-            let after_text_x = cursor_x + galley.size().x + style.gap;
+            let after_text_x = cursor_x + text_rect.size().x + style.gap;
             let icon_rect = Rect {
                 min: Pos2::new(after_text_x, icon_y),
                 max: Pos2::new(
@@ -311,19 +310,15 @@ impl<'a> Button<'a> {
         // Measured with rest-state style: height/pad_x/gap/font_size don't
         // depend on hover/press, only bg/fg/border do.
         let metrics = Self::resolve(self.variant, self.size, false, false);
-        let text_width = ui
-            .painter()
-            .layout_no_wrap(
-                self.label.to_owned(),
-                FontId::new(
-                    metrics.font_size,
-                    FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
-                ),
-                metrics.fg,
-            )
-            .rect
-            .width();
-        let mut content_width = text_width;
+        let label_galley = ui.painter().layout_no_wrap(
+            self.label.to_owned(),
+            FontId::new(
+                metrics.font_size,
+                FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
+            ),
+            metrics.fg,
+        );
+        let mut content_width = label_galley.size().x;
         if self.icon_left.is_some() {
             content_width += ICON_LOGICAL_SIZE_PX + metrics.gap;
         }
@@ -353,7 +348,7 @@ impl<'a> Button<'a> {
                 ui.painter(),
                 rect,
                 &style,
-                self.label,
+                &label_galley,
                 self.icon_left,
                 self.icon_right,
                 self.enabled,

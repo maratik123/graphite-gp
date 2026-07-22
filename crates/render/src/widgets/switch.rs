@@ -2,7 +2,10 @@
 //! surface* / *Style-mapping ground truth*, AC2).
 
 use crate::tokens::{color, spacing, typography};
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, Ui};
+use egui::{
+    Align2, Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Sense, Stroke, Ui,
+};
+use std::sync::Arc;
 
 /// Track width (`Switch.jsx:27` `width: 40`).
 const TRACK_W: f32 = 40.0;
@@ -121,7 +124,7 @@ impl<'a> Switch<'a> {
         rect: Rect,
         style: &SwitchStyle,
         checked: bool,
-        label: Option<&str>,
+        label_galley: Option<&Arc<Galley>>,
         enabled: bool,
     ) {
         let opacity = if enabled {
@@ -152,15 +155,12 @@ impl<'a> Switch<'a> {
             Stroke::new(KNOB_RING_W, tint(style.knob_ring)),
         );
 
-        if let Some(label) = label {
-            painter.text(
+        if let Some(label_galley) = label_galley {
+            crate::text::paint_galley_override(
+                painter,
                 Pos2::new(track_rect.max.x + LABEL_GAP, rect.center().y),
                 Align2::LEFT_CENTER,
-                label,
-                FontId::new(
-                    typography::FS_BODY,
-                    FontFamily::Name(crate::fonts::ONEST_REGULAR.into()),
-                ),
+                label_galley.clone(),
                 tint(color::TEXT_BODY),
             );
         }
@@ -174,21 +174,18 @@ impl<'a> Switch<'a> {
     /// See the private `paint` layer's panics.
     pub fn show(self, ui: &mut Ui) -> SwitchResponse {
         let mut content_width = TRACK_W;
-        if let Some(label) = self.label {
-            let text_width = ui
-                .painter()
-                .layout_no_wrap(
-                    label.to_owned(),
-                    FontId::new(
-                        typography::FS_BODY,
-                        FontFamily::Name(crate::fonts::ONEST_REGULAR.into()),
-                    ),
-                    color::TEXT_BODY,
-                )
-                .rect
-                .width();
-            content_width += LABEL_GAP + text_width;
-        }
+        let label_galley = self.label.map(|label| {
+            let galley = ui.painter().layout_no_wrap(
+                label.to_owned(),
+                FontId::new(
+                    typography::FS_BODY,
+                    FontFamily::Name(crate::fonts::ONEST_REGULAR.into()),
+                ),
+                color::TEXT_BODY,
+            );
+            content_width += LABEL_GAP + galley.size().x;
+            galley
+        });
 
         let sense = if self.enabled {
             Sense::click()
@@ -211,7 +208,7 @@ impl<'a> Switch<'a> {
                 rect,
                 &style,
                 checked,
-                self.label,
+                label_galley.as_ref(),
                 self.enabled,
             );
         }

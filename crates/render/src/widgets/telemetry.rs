@@ -5,7 +5,8 @@
 //! (`Sense::hover()`), matching `Badge`/`Tag`.
 
 use crate::tokens::{color, spacing, typography};
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Ui};
+use egui::{Align2, Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Sense, Ui};
+use std::sync::Arc;
 
 /// Gap between the label row and the value row (`Telemetry.jsx`: `gap: 3`) —
 /// not a token (nearest is `spacing::SPACE_1 = 4`).
@@ -75,6 +76,51 @@ pub struct Telemetry<'a> {
     /// `Default`/muted colors for their on-ink equivalents; semantic tones
     /// are unchanged.
     pub on_ink: bool,
+}
+
+/// Pre-shaped galleys for [`Telemetry::paint`]: label / value / optional
+/// unit, each shaped exactly once (AC1/AC2) and reused for both measurement
+/// (in [`Telemetry::show`]) and drawing.
+pub(crate) struct TelemetryGalleys {
+    /// The uppercased label run, baked with `style.muted_color`.
+    pub(crate) label: Arc<Galley>,
+    /// The value run, baked with `style.value_color`.
+    pub(crate) value: Arc<Galley>,
+    /// The optional trailing-unit run, baked with `style.muted_color`.
+    pub(crate) unit: Option<Arc<Galley>>,
+}
+
+/// Builds [`TelemetryGalleys`] once from `label`/`value`/`unit` and the
+/// resolved `style`'s baked colors — the single shaping pass shared by
+/// [`Telemetry::show`] and its direct `paint`-layer gallery-harness callers
+/// (`game_gallery.rs`, 4 sites), so `show`/the gallery/`paint` all agree by
+/// construction (AC3).
+pub(crate) fn telemetry_galleys(
+    painter: &Painter,
+    label: &str,
+    value: &str,
+    unit: Option<&str>,
+    style: &TelemetryStyle,
+) -> TelemetryGalleys {
+    let label_font = FontId::new(
+        typography::FS_XS,
+        FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+    );
+    let value_font = FontId::new(
+        style.value_size,
+        FontFamily::Name(crate::fonts::JETBRAINS_MONO_BOLD.into()),
+    );
+    let unit_font = FontId::new(
+        typography::FS_SM,
+        FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+    );
+
+    TelemetryGalleys {
+        label: painter.layout_no_wrap(label.to_uppercase(), label_font, style.muted_color),
+        value: painter.layout_no_wrap(value.to_owned(), value_font, style.value_color),
+        unit: unit
+            .map(|unit| painter.layout_no_wrap(unit.to_owned(), unit_font, style.muted_color)),
+    }
 }
 
 impl<'a> Telemetry<'a> {
@@ -175,17 +221,11 @@ impl<'a> Telemetry<'a> {
     /// Panics at layout time if the caller has not installed
     /// [`crate::fonts::definitions`] first — draws through
     /// `FontFamily::Name(fonts::JETBRAINS_MONO_BOLD/_REGULAR)`.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "paint layer takes every resolved input explicitly, per the design's 3-layer split"
-    )]
     pub(crate) fn paint(
         painter: &Painter,
         rect: Rect,
         style: &TelemetryStyle,
-        label: &str,
-        value: &str,
-        unit: Option<&str>,
+        galleys: &TelemetryGalleys,
         align: Align,
     ) {
         let (anchor_x, align2) = match align {
@@ -194,31 +234,25 @@ impl<'a> Telemetry<'a> {
         };
 
         let label_pos = Pos2::new(anchor_x, rect.min.y);
-        let label_rect = painter.text(
+        let label_rect = crate::text::paint_galley(
+            painter,
             label_pos,
             align2,
-            label.to_uppercase(),
-            FontId::new(
-                typography::FS_XS,
-                FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-            ),
+            galleys.label.clone(),
             style.muted_color,
         );
 
         let value_top = label_rect.max.y + LABEL_VALUE_GAP;
         let value_pos = Pos2::new(anchor_x, value_top);
-        let value_rect = painter.text(
+        let value_rect = crate::text::paint_galley(
+            painter,
             value_pos,
             align2,
-            value,
-            FontId::new(
-                style.value_size,
-                FontFamily::Name(crate::fonts::JETBRAINS_MONO_BOLD.into()),
-            ),
+            galleys.value.clone(),
             style.value_color,
         );
 
-        if let Some(unit) = unit {
+        if let Some(unit_galley) = &galleys.unit {
             let unit_x = match align {
                 Align::Left => value_rect.max.x + VALUE_UNIT_GAP,
                 Align::Right => value_rect.min.x - VALUE_UNIT_GAP,
@@ -227,14 +261,11 @@ impl<'a> Telemetry<'a> {
                 Align::Left => Align2::LEFT_BOTTOM,
                 Align::Right => Align2::RIGHT_BOTTOM,
             };
-            painter.text(
+            crate::text::paint_galley(
+                painter,
                 Pos2::new(unit_x, value_rect.max.y),
                 unit_align2,
-                unit,
-                FontId::new(
-                    typography::FS_SM,
-                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-                ),
+                unit_galley.clone(),
                 style.muted_color,
             );
         }
@@ -252,64 +283,22 @@ impl<'a> Telemetry<'a> {
     /// `paint` layer this delegates to).
     pub fn show(self, ui: &mut Ui) -> Response {
         let style = Self::resolve(self.tone, self.size, self.on_ink);
+        let galleys = telemetry_galleys(ui.painter(), self.label, self.value, self.unit, &style);
 
-        let label_font = FontId::new(
-            typography::FS_XS,
-            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-        );
-        let value_font = FontId::new(
-            style.value_size,
-            FontFamily::Name(crate::fonts::JETBRAINS_MONO_BOLD.into()),
-        );
-        let unit_font = FontId::new(
-            typography::FS_SM,
-            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-        );
-
-        let painter = ui.painter();
-        let label_width = painter
-            .layout_no_wrap(
-                self.label.to_uppercase(),
-                label_font.clone(),
-                style.muted_color,
-            )
-            .rect
-            .width();
-        let value_width = painter
-            .layout_no_wrap(self.value.to_owned(), value_font.clone(), style.value_color)
-            .rect
-            .width();
-        let unit_width = self.unit.map_or(0.0, |unit| {
-            VALUE_UNIT_GAP
-                + painter
-                    .layout_no_wrap(unit.to_owned(), unit_font, style.muted_color)
-                    .rect
-                    .width()
-        });
+        let label_width = galleys.label.size().x;
+        let value_width = galleys.value.size().x;
+        let unit_width = galleys
+            .unit
+            .as_ref()
+            .map_or(0.0, |unit| VALUE_UNIT_GAP + unit.size().x);
 
         let width = label_width.max(value_width + unit_width);
-        let label_height = painter
-            .layout_no_wrap(self.label.to_uppercase(), label_font, style.muted_color)
-            .rect
-            .height();
-        let value_height = painter
-            .layout_no_wrap(self.value.to_owned(), value_font, style.value_color)
-            .rect
-            .height();
-        let height = label_height + LABEL_VALUE_GAP + value_height;
+        let height = galleys.label.size().y + LABEL_VALUE_GAP + galleys.value.size().y;
 
         let desired = egui::vec2(width, height);
         let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
         if ui.is_rect_visible(rect) {
-            Self::paint(
-                ui.painter(),
-                rect,
-                &style,
-                self.label,
-                self.value,
-                self.unit,
-                self.align,
-            );
+            Self::paint(ui.painter(), rect, &style, &galleys, self.align);
         }
         response
     }

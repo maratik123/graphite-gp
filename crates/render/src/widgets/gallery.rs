@@ -12,9 +12,10 @@ use super::badge::{Badge, Tone};
 use super::button::{Button, Variant as ButtonVariant};
 use super::card::{Card, Elevation};
 use super::icon_button::{IconButton, Variant as IconButtonVariant};
-use super::tag::Tag;
+use super::tag::{Tag, tag_label_galley};
 use crate::icons::{Icon, IconSet};
-use egui::{Pos2, Rect};
+use crate::tokens::typography;
+use egui::{FontFamily, FontId, Pos2, Rect};
 
 /// The gallery's fixed canvas: 1040×900 logical points at
 /// `pixels_per_point = 1.0`.
@@ -71,7 +72,24 @@ fn draw_buttons(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
                 36.0,
             );
             let style = Button::resolve(variant, Size::Md, hovered, pressed);
-            Button::paint(painter, rect, &style, label, None, None, enabled, pressed);
+            let label_galley = painter.layout_no_wrap(
+                label.to_owned(),
+                FontId::new(
+                    style.font_size,
+                    FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
+                ),
+                style.fg,
+            );
+            Button::paint(
+                painter,
+                rect,
+                &style,
+                &label_galley,
+                None,
+                None,
+                enabled,
+                pressed,
+            );
         }
     }
     let size_row_y = y0 + cell_h * 4.0 + 10.0;
@@ -90,7 +108,24 @@ fn draw_buttons(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
             50.0,
         );
         let style = Button::resolve(ButtonVariant::Primary, size, false, false);
-        Button::paint(painter, rect, &style, label, None, None, true, false);
+        let label_galley = painter.layout_no_wrap(
+            label.to_owned(),
+            FontId::new(
+                style.font_size,
+                FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
+            ),
+            style.fg,
+        );
+        Button::paint(
+            painter,
+            rect,
+            &style,
+            &label_galley,
+            None,
+            None,
+            true,
+            false,
+        );
     }
     size_row_y + 60.0
 }
@@ -152,7 +187,15 @@ fn draw_badges(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
                 20.0,
             );
             let style = Badge::resolve(tone, solid);
-            Badge::paint(painter, rect, &style, label);
+            let label_galley = painter.layout_no_wrap(
+                label.to_owned(),
+                FontId::new(
+                    typography::FS_XS,
+                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_MEDIUM.into()),
+                ),
+                style.fg,
+            );
+            Badge::paint(painter, rect, &style, &label_galley);
         }
     }
     y0 + cell_h * 5.0 + 10.0
@@ -164,44 +207,44 @@ fn draw_tags(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
     let cell_h = 40.0;
 
     let rest = cell(x0, y0, 0, 0, cell_w, cell_h, 110.0, 26.0);
-    Tag::paint(
-        painter,
-        rest,
-        &Tag::resolve(false),
-        "L3",
-        None,
-        false,
-        false,
-    );
+    let rest_style = Tag::resolve(false);
+    let rest_galley = tag_label_galley(painter, "L3", rest_style.fg);
+    Tag::paint(painter, rest, &rest_style, &rest_galley, None, false, false);
 
     let selected = cell(x0, y0, 1, 0, cell_w, cell_h, 110.0, 26.0);
+    let selected_style = Tag::resolve(true);
+    let selected_galley = tag_label_galley(painter, "SELECTED", selected_style.fg);
     Tag::paint(
         painter,
         selected,
-        &Tag::resolve(true),
-        "SELECTED",
+        &selected_style,
+        &selected_galley,
         None,
         false,
         false,
     );
 
     let with_dot = cell(x0, y0, 2, 0, cell_w, cell_h, 110.0, 26.0);
+    let with_dot_style = Tag::resolve(false);
+    let with_dot_galley = tag_label_galley(painter, "CAR-2", with_dot_style.fg);
     Tag::paint(
         painter,
         with_dot,
-        &Tag::resolve(false),
-        "CAR-2",
+        &with_dot_style,
+        &with_dot_galley,
         Some(crate::tokens::color::CAR_2),
         false,
         false,
     );
 
     let with_remove = cell(x0, y0, 3, 0, cell_w, cell_h, 110.0, 26.0);
+    let with_remove_style = Tag::resolve(false);
+    let with_remove_galley = tag_label_galley(painter, "REMOVE", with_remove_style.fg);
     Tag::paint(
         painter,
         with_remove,
-        &Tag::resolve(false),
-        "REMOVE",
+        &with_remove_style,
+        &with_remove_galley,
         None,
         true,
         false,

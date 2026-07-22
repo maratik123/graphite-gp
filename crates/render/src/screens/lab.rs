@@ -275,20 +275,19 @@ fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: i32) -> Response {
                 typography::FS_H2,
                 FontFamily::Name(crate::fonts::ONEST_BOLD.into()),
             );
-            let title_width = ui
-                .painter()
-                .layout_no_wrap("Track lab".to_owned(), title_font.clone(), color::TEXT_INK)
-                .rect
-                .width();
+            let title_galley =
+                ui.painter()
+                    .layout_no_wrap("Track lab".to_owned(), title_font, color::TEXT_INK);
+            let title_width = title_galley.size().x;
             let (title_rect, _resp) = ui.allocate_exact_size(
                 egui::vec2(title_width, typography::FS_H2),
                 egui::Sense::hover(),
             );
-            ui.painter().text(
+            crate::text::paint_galley(
+                ui.painter(),
                 Pos2::new(title_rect.min.x, title_rect.center().y),
                 Align2::LEFT_CENTER,
-                "Track lab",
-                title_font,
+                title_galley,
                 color::TEXT_INK,
             );
 
