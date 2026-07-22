@@ -3,10 +3,8 @@
 //! Rc<Cell> click-rect-capture idiom (design § *Test Design*).
 
 use super::lab::{LabInput, LabScreen, PhaseStatus};
-use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
-use gp_core::track::{
-    Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackArtifact, TrackMetrics,
-};
+use crate::track::test_support::{scene_metrics, scene_track};
+use gp_core::track::TrackArtifact;
 
 /// The golden's fixed canvas: wide enough to fit the two-column layout
 /// (left column + `COL_GAP` + 320px right column + outer padding) with
@@ -30,72 +28,18 @@ const FIXED_PHASES: [PhaseStatus; 7] = [
 /// The fixed header seed the golden/interaction tests render.
 const FIXED_SEED: i32 = 42;
 
-/// A hand-built `TrackArtifact` fixture: a chunky rounded-rect ring (mirrors
-/// `track/golden.rs::scene_track`) with hand-populated `TrackMetrics`
-/// (`speed_heatmap` + `fastest_lap`) **and** a concrete `width_min` — the
-/// `scene_track_with_metrics` pattern extended for `width_min` (spec §
-/// Technical constraints; AC6). The S/F chord is 4 points long, so
-/// `sf.width() == 4`.
+/// A `TrackArtifact` fixture: the shared chunky rounded-rect ring
+/// ([`scene_track`]) with [`scene_metrics`]-populated `speed_heatmap` +
+/// `fastest_lap`, plus the `vmax_attain`/`tempo` this screen's oracle report
+/// renders (spec § Technical constraints; AC6). The S/F chord is 4 points
+/// long, so `sf.width() == 4`.
 fn fixture_track() -> TrackArtifact {
-    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if !in_hole {
-                corridor.set(Point::new(x, y), true);
-            }
-        }
-    }
-    let walls = walls_from_boundary(&corridor);
-
-    let mut speed_heatmap = Vec::new();
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if in_hole {
-                continue;
-            }
-            let point = Point::new(x, y);
-            if corridor.contains(point) {
-                speed_heatmap.push((point, x.saturating_add(y)));
-            }
-        }
-    }
-    let fastest_lap = vec![
-        Point::new(3, 3),
-        Point::new(12, 3),
-        Point::new(12, 12),
-        Point::new(3, 12),
-    ];
-
-    TrackArtifact {
-        walls,
-        sf: StartFinish {
-            chord: vec![
-                Point::new(7, 2),
-                Point::new(7, 3),
-                Point::new(7, 4),
-                Point::new(7, 5),
-            ],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![],
-                forward: Side::East,
-            },
-        },
-        corridor,
-        race_dir: RaceDir::Cw,
-        s_field: SField::default(),
-        start_grid: StartGrid::default(),
-        centerline: Centerline::default(),
-        metrics: TrackMetrics {
-            vmax_attain: Some(7),
-            tempo: Some(0.87),
-            speed_heatmap,
-            fastest_lap,
-        },
-        width_min: 3,
-    }
+    let mut track = scene_track();
+    let mut metrics = scene_metrics(&track.corridor);
+    metrics.vmax_attain = Some(7);
+    metrics.tempo = Some(0.87);
+    track.metrics = metrics;
+    track
 }
 
 #[cfg(test)]

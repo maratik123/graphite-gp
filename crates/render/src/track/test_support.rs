@@ -58,6 +58,34 @@ pub(super) fn ring_3x3() -> Corridor {
     corridor((0, 0), 5, 5, &cells)
 }
 
+/// A minimal `TrackArtifact` over the [`ring_3x3`] corridor — every field a
+/// consumer (`BakedTrackGeometry::new`, `draw_frame`) does not read stays at
+/// its cheapest valid default, and `width_min == 1`. Shared by the
+/// `track::geometry` and `track::mod` test suites, which each rebuilt it
+/// verbatim (`JetBrains` duplicate-code inspection).
+pub(crate) fn ring_track() -> TrackArtifact {
+    let corridor = ring_3x3();
+    let walls = walls_from_boundary(&corridor);
+    TrackArtifact {
+        walls,
+        sf: StartFinish {
+            chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![],
+                forward: Side::East,
+            },
+        },
+        corridor,
+        race_dir: RaceDir::Cw,
+        s_field: gp_core::track::SField::default(),
+        start_grid: gp_core::track::StartGrid::default(),
+        centerline: gp_core::track::Centerline::default(),
+        metrics: gp_core::track::TrackMetrics::default(),
+        width_min: 1,
+    }
+}
+
 /// `d`'s `contains` value at every cell of its `n × n` bounding box, in
 /// row-major order — a before/after snapshot for "did this call mutate the
 /// corridor" tests.

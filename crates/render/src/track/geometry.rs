@@ -72,35 +72,13 @@ impl BakedTrackGeometry {
 #[cfg(test)]
 mod tests {
     use super::BakedTrackGeometry;
-    use crate::track::test_support::ring_3x3;
-    use gp_core::geom::walls_from_boundary;
-    use gp_core::geom::{Orient, Point, Side};
-    use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
+    use crate::track::test_support::ring_track;
+    use gp_core::track::TrackArtifact;
 
     /// A minimal `TrackArtifact` over the shared `ring_3x3` corridor fixture
-    /// — every field `new` does not read stays at its cheapest valid default
-    /// (mirrors `track/mod.rs::tests::fixture_track`).
+    /// — delegates to the single [`ring_track`] definition in `test_support`.
     fn fixture_track() -> TrackArtifact {
-        let corridor = ring_3x3();
-        let walls = walls_from_boundary(&corridor);
-        TrackArtifact {
-            walls,
-            sf: StartFinish {
-                chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
-                orient: Orient::Horizontal,
-                gate: TimingGate {
-                    behind: vec![],
-                    forward: Side::East,
-                },
-            },
-            corridor,
-            race_dir: RaceDir::Cw,
-            s_field: gp_core::track::SField::default(),
-            start_grid: gp_core::track::StartGrid::default(),
-            centerline: gp_core::track::Centerline::default(),
-            metrics: gp_core::track::TrackMetrics::default(),
-            width_min: 1,
-        }
+        ring_track()
     }
 
     /// AC1 — `new` on the ring fixture yields 2 smoothed loops, a

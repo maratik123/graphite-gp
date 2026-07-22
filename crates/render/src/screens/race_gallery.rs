@@ -4,11 +4,9 @@
 
 use super::race::{CAR_NAMES, RaceInput, RaceScreen};
 use crate::{CarRender, Overlays, Scene};
-use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+use gp_core::geom::Point;
 use gp_core::sim::CarState;
-use gp_core::track::{
-    Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackArtifact, TrackMetrics,
-};
+use gp_core::track::TrackArtifact;
 
 /// The golden's fixed canvas: wide enough to fit the two-column layout
 /// (a comfortable left column + `COL_GAP` + `COL_RIGHT_W` right column) with
@@ -32,43 +30,11 @@ const FIXED_LAPS_DONE: i32 = 2;
 /// The fixed total-laps the golden/interaction tests render.
 const FIXED_TOTAL_LAPS: i32 = 5;
 
-/// A hand-built `TrackArtifact` fixture: a chunky rounded-rect ring (mirrors
-/// `lab_gallery.rs::fixture_track`'s pattern).
+/// A hand-built `TrackArtifact` fixture: the shared chunky rounded-rect ring
+/// with default (empty) metrics — the single [`scene_track`] definition in
+/// `track::test_support`.
 fn fixture_track() -> TrackArtifact {
-    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if !in_hole {
-                corridor.set(Point::new(x, y), true);
-            }
-        }
-    }
-    let walls = walls_from_boundary(&corridor);
-
-    TrackArtifact {
-        walls,
-        sf: StartFinish {
-            chord: vec![
-                Point::new(7, 2),
-                Point::new(7, 3),
-                Point::new(7, 4),
-                Point::new(7, 5),
-            ],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![],
-                forward: Side::East,
-            },
-        },
-        corridor,
-        race_dir: RaceDir::Cw,
-        s_field: SField::default(),
-        start_grid: StartGrid::default(),
-        centerline: Centerline::default(),
-        metrics: TrackMetrics::default(),
-        width_min: 3,
-    }
+    crate::track::test_support::scene_track()
 }
 
 /// The fixed 3-car render slice (player index 0 + 2 rivals), each with a
