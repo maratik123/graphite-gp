@@ -124,30 +124,24 @@ pub(crate) fn draw_frame(
                     &geometry.loop_roles,
                 );
             }
-            Layer::Heatmap => {
-                if overlays.speed_heatmap {
-                    heatmap::paint(
-                        painter,
-                        &transform,
-                        &mapped,
-                        &geometry.triangulated_indices,
-                        &geometry.loop_roles,
-                        &track.metrics.speed_heatmap,
-                    );
-                }
+            Layer::Heatmap if overlays.speed_heatmap => {
+                heatmap::paint(
+                    painter,
+                    &transform,
+                    &mapped,
+                    &geometry.triangulated_indices,
+                    &geometry.loop_roles,
+                    &track.metrics.speed_heatmap,
+                );
             }
-            Layer::Grid => {
-                if overlays.grid {
-                    grid::paint(painter, rect, &transform);
-                }
+            Layer::Grid if overlays.grid => {
+                grid::paint(painter, rect, &transform);
             }
             Layer::Walls => {
                 walls::paint(painter, &transform, &geometry.smoothed_loops);
             }
-            Layer::FastestLap => {
-                if overlays.fastest_lap {
-                    fastest_lap::paint(painter, &transform, &track.metrics.fastest_lap);
-                }
+            Layer::FastestLap if overlays.fastest_lap => {
+                fastest_lap::paint(painter, &transform, &track.metrics.fastest_lap);
             }
             Layer::Sf => {
                 let checker = sf::checker_cells(&track.sf.chord);
@@ -158,6 +152,7 @@ pub(crate) fn draw_frame(
                     car::paint(painter, &transform, render, render.progress, reduced_motion);
                 }
             }
+            _ => {}
         }
     }
 }
