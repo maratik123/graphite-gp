@@ -14,9 +14,9 @@
 //! never calls `tessellate`/`set_fonts`). `layer_order_is_documented` builds
 //! no `Context` and stays un-gated.
 
-mod cache;
 mod car;
 mod fastest_lap;
+mod geometry;
 #[cfg(test)]
 mod golden;
 mod grid;
@@ -28,8 +28,8 @@ pub(crate) mod test_support;
 mod transform;
 mod walls;
 
-pub use cache::TrackGeometryCache;
 pub use car::CarRender;
+pub use geometry::BakedTrackGeometry;
 pub use transform::TrackTransform;
 
 use crate::Overlays;
