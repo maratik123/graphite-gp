@@ -404,11 +404,15 @@ mod tests {
         assert!(meshes.is_empty());
     }
 
-    /// AC3 — `paint` consumes the baked, borrowed `indices` outer mesh
-    /// rather than re-triangulating it: the outer loop's baked index buffer
-    /// pointer is unchanged before/after the call (design
-    /// `2026-07-22-cache-track-geometry` — the topology, not the per-frame
-    /// mapped verts, is the artifact this AC pins).
+    /// AC3 — `paint` consumes the baked, borrowed `indices` outer mesh rather
+    /// than re-triangulating it: across a full per-cell heatmap pass the O(n³)
+    /// ear-clip runs **zero** times (design `2026-07-22-cache-track-geometry`
+    /// — the topology is baked once, reused for every cell). The load-bearing
+    /// assertion is the `regions::triangulate` call counter, reset after the
+    /// loops are triangulated once above; a regression that re-cut the outer
+    /// mesh per cell (or per call) would bump it even though the borrowed
+    /// `indices` `&` pointer would stay put. The pointer check is kept as a
+    /// cheap secondary guard.
     #[test]
     #[cfg_attr(
         miri,
@@ -426,9 +430,17 @@ mod tests {
         let outer_idx = roles.outer[0];
         let indices_ptr_before = indices[outer_idx].as_ptr();
 
+        // The `triangulate_loops` bake above ear-clipped once per loop; zero
+        // the counter so the heatmap pass below is measured on its own.
+        regions::reset_triangulate_calls();
         let heatmap = vec![(Point::new(1, 1), 2), (Point::new(2, 1), 5)];
         let _ = painted_meshes(&verts, &indices, &roles, &transform, rect, &heatmap);
 
+        assert_eq!(
+            regions::triangulate_calls(),
+            0,
+            "heatmap::paint re-triangulated instead of reusing the baked outer indices"
+        );
         assert_eq!(
             indices[outer_idx].as_ptr(),
             indices_ptr_before,

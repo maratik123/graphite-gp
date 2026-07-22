@@ -260,9 +260,13 @@ mod tests {
 
     /// AC2/AC5 — a resize does not rebuild the baked geometry: driving
     /// `render_frame` at rect A then rect B through the same
-    /// `BakedTrackGeometry` leaves its `triangulated_indices` pointer
-    /// unchanged — the static triangulation pipeline runs zero times in the
-    /// draw path, at either rect (design `2026-07-22-cache-track-geometry`).
+    /// `BakedTrackGeometry` runs the O(n³) ear-clip **zero** times in the draw
+    /// path, at either rect (design `2026-07-22-cache-track-geometry`). The
+    /// load-bearing assertion is the `regions::triangulate` call counter —
+    /// reset after the bake, it must still read `0` after both frames; a
+    /// regression that re-triangulated per frame (or per resize) would bump it
+    /// even though the caller-owned `triangulated_indices` `&` pointer would
+    /// stay put. The pointer check is kept as a cheap secondary guard.
     #[test]
     #[cfg_attr(
         miri,
@@ -273,6 +277,9 @@ mod tests {
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
         let indices_ptr_before = geometry.triangulated_indices.as_ptr();
+        // The bake above triangulated once per loop; zero the counter so the
+        // draw pass below is measured on its own.
+        crate::track::regions::reset_triangulate_calls();
         let cars: [CarRender<'_>; 0] = [];
 
         for rect in [
@@ -300,6 +307,11 @@ mod tests {
             });
         }
 
+        assert_eq!(
+            crate::track::regions::triangulate_calls(),
+            0,
+            "the ear-clipping triangulation ran during a per-frame render (it must run only at bake time)"
+        );
         assert_eq!(
             geometry.triangulated_indices.as_ptr(),
             indices_ptr_before,

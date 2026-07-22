@@ -323,6 +323,33 @@ fn find_ear(working: &[usize], points: &[Pos2]) -> Option<Ear> {
     None
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only counter of [`triangulate`] invocations on the current thread
+    /// — the O(n³) ear-clip whose per-frame elimination is this feature's
+    /// whole point (design `2026-07-22-cache-track-geometry`). The
+    /// no-per-frame-re-triangulation tests (AC2/AC3/AC5) reset it after the
+    /// bake and assert it stays `0` across a draw pass, proving the expensive
+    /// step runs *only* at `BakedTrackGeometry::new` time, never in the draw
+    /// path. `thread_local` (not a global `AtomicUsize`) so parallel test
+    /// threads never cross-count — every `triangulate` call sits on the same
+    /// thread as the `new`/`render_frame`/`paint` call that drives it.
+    static TRIANGULATE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Test-only: [`triangulate`] call count on the current thread since the last
+/// [`reset_triangulate_calls`].
+#[cfg(test)]
+pub(crate) fn triangulate_calls() -> usize {
+    TRIANGULATE_CALLS.with(std::cell::Cell::get)
+}
+
+/// Test-only: zero the current thread's [`triangulate`] call counter.
+#[cfg(test)]
+pub(crate) fn reset_triangulate_calls() {
+    TRIANGULATE_CALLS.with(|c| c.set(0));
+}
+
 /// Ear-clipping triangulation of a simple polygon (design § Decision —
 /// epaint 0.35 has no concave/even-odd fill, so gp-render supplies one).
 ///
@@ -338,6 +365,8 @@ fn find_ear(working: &[usize], points: &[Pos2]) -> Option<Ear> {
 /// input that leaves no clippable ear stops early rather than looping or
 /// indexing out of bounds — `triangulate` never panics.
 pub(crate) fn triangulate(points: &[Pos2]) -> Vec<[u32; 3]> {
+    #[cfg(test)]
+    TRIANGULATE_CALLS.with(|c| c.set(c.get().saturating_add(1)));
     let n = points.len();
     if n < 3 {
         return Vec::new();
