@@ -9,11 +9,12 @@
 //! wgpu/`dlopen` Miri abort applies, hence the sole `#[cfg_attr(miri,
 //! ignore)]` guard below.
 
+use super::test_support::scene_track;
 use crate::{CarRender, Overlays};
 use egui::{Painter, Pos2, Rect};
-use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+use gp_core::geom::Point;
 use gp_core::sim::CarState;
-use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
+use gp_core::track::TrackArtifact;
 
 /// The golden's fixed canvas: 320×320 logical points at
 /// `pixels_per_point = 1.0` — square, matching the scene's square corridor
@@ -23,49 +24,6 @@ const CANVAS_RECT: Rect = Rect {
     max: Pos2::new(320.0, 320.0),
 };
 
-/// Amendment — widened golden fixture (PR #100): a hand-built chunky
-/// rounded-rect corridor `TrackArtifact` over a 16×16 bbox — the outer block
-/// `x∈[2,13] × y∈[2,13]` minus a centered hole `x∈[6,9] × y∈[6,9]`, a thick
-/// loop with 4-cell-wide arms. The S/F chord is a `Vertical` column across
-/// the bottom straight (thin in x = racing direction), matching `Track.jsx`'s
-/// cross-track checkered bar. Every field `draw_frame` does not read stays at
-/// its cheapest valid default.
-fn scene_track() -> TrackArtifact {
-    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if !in_hole {
-                corridor.set(Point::new(x, y), true);
-            }
-        }
-    }
-    let walls = walls_from_boundary(&corridor);
-    TrackArtifact {
-        walls,
-        sf: StartFinish {
-            chord: vec![
-                Point::new(7, 2),
-                Point::new(7, 3),
-                Point::new(7, 4),
-                Point::new(7, 5),
-            ],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![],
-                forward: Side::East,
-            },
-        },
-        corridor,
-        race_dir: RaceDir::Cw,
-        s_field: gp_core::track::SField::default(),
-        start_grid: gp_core::track::StartGrid::default(),
-        centerline: gp_core::track::Centerline::default(),
-        metrics: gp_core::track::TrackMetrics::default(),
-        width_min: 3,
-    }
-}
-
 /// Draws the full scene into `rect` via the public `render_frame` entry
 /// point: the widened corridor plus two cars — a moving, trailed "you" car
 /// near the S/F on the bottom straight (mid move-animation, drawing the
@@ -73,51 +31,6 @@ fn scene_track() -> TrackArtifact {
 /// (no arrow, matching `Track.jsx:95`'s guard).
 fn draw_scene(painter: &Painter, rect: Rect) {
     draw_scene_with(painter, rect, &scene_track(), Overlays::default());
-}
-
-/// AC6 — a spatially-graded `speed_heatmap` over every drivable cell of
-/// `corridor` (so the ramp spans `HEAT_0`→`HEAT_3` across the fixture, and
-/// the rounded-rect's own convex corners are covered — exercising the
-/// heatmap-corner-bleed risk, design § Risks) plus a `fastest_lap` loop of
-/// cell centers around one of the corridor's arms.
-fn scene_metrics(corridor: &Corridor) -> gp_core::track::TrackMetrics {
-    let mut speed_heatmap = Vec::new();
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if in_hole {
-                continue;
-            }
-            let point = Point::new(x, y);
-            if corridor.contains(point) {
-                // A simple, deterministic per-cell gradient — no physical
-                // meaning, only spatial spread across the ramp's full range.
-                let speed = x.saturating_add(y);
-                speed_heatmap.push((point, speed));
-            }
-        }
-    }
-    let fastest_lap = vec![
-        Point::new(3, 3),
-        Point::new(12, 3),
-        Point::new(12, 12),
-        Point::new(3, 12),
-    ];
-    gp_core::track::TrackMetrics {
-        speed_heatmap,
-        fastest_lap,
-        ..gp_core::track::TrackMetrics::default()
-    }
-}
-
-/// [`scene_track`], with [`scene_metrics`] populated over its own corridor —
-/// the AC6 per-overlay golden fixture (block 1's metrics generator is not
-/// yet built, so goldens hand-populate `TrackMetrics`, per design § Technical
-/// constraints).
-fn scene_track_with_metrics() -> TrackArtifact {
-    let mut track = scene_track();
-    track.metrics = scene_metrics(&track.corridor);
-    track
 }
 
 /// Draws `track` into `rect` via the public `render_frame` entry point, with
@@ -167,7 +80,8 @@ fn draw_scene_with(painter: &Painter, rect: Rect, track: &TrackArtifact, overlay
 
 #[cfg(test)]
 mod tests {
-    use super::{CANVAS_RECT, draw_scene, draw_scene_with, scene_track, scene_track_with_metrics};
+    use super::super::test_support::{scene_track, scene_track_with_metrics};
+    use super::{CANVAS_RECT, draw_scene, draw_scene_with};
     use crate::Overlays;
     use egui::{Painter, Pos2, Rect};
 

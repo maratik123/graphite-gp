@@ -13,9 +13,11 @@
 use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
 
+pub mod app;
+#[cfg(test)]
+mod app_gallery;
 pub mod fonts;
 pub mod icons;
-pub mod placeholder;
 pub mod screens;
 #[cfg(test)]
 mod test_util;
@@ -23,14 +25,15 @@ pub mod tokens;
 pub mod track;
 pub mod widgets;
 
+pub use app::{AppShell, Screen, ShellResponse, ShellSession};
 pub use screens::{
     Difficulty, LabInput, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceInput, RaceResponse,
-    RaceScreen,
+    RaceScreen, RaceSummary, ResultsInput, ResultsResponse, ResultsScreen, StandingEntry,
 };
 pub use track::CarRender;
 
 /// Optional analytics overlays (design doc §4).
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Overlays {
     /// Color the asphalt by `speed_heatmap`.
     pub speed_heatmap: bool,
@@ -75,8 +78,7 @@ pub struct Scene<'a> {
 /// lives in `gp-game` (see the ownership override in
 /// `ai-docs/key-decisions.md`). `rect` is explicit (not derived from
 /// `painter.clip_rect()`) so the drawn output is a pure function of `(rect,
-/// scene)` — the same precedent `draw_placeholder` sets (design §
-/// *Signature*).
+/// scene)` (design § *Signature*).
 ///
 /// `scene` bundles the caller-supplied, frame-immutable canvas inputs —
 /// `track`, `cars`, `reduced_motion`, `overlays` — into one [`Scene`] value
