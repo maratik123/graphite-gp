@@ -230,6 +230,14 @@ impl AppShell {
         let top_bar_rect = Rect::from_min_size(full.min, egui::vec2(full.width(), TOP_BAR_H));
         let body_rect = Rect::from_min_max(Pos2::new(full.min.x, top_bar_rect.max.y), full.max);
 
+        // The app's page background (`App.jsx`'s root `--surface-page`),
+        // painted once for the whole shell so the app reads as one fixed
+        // design-token palette independent of egui's ambient light/dark
+        // visuals (PR #118 round 3 — the body previously inherited whatever
+        // `Visuals` the host set, which was black in `gp-game`). The top
+        // bar's own `PAPER_0` fill below paints over the header band.
+        ui.painter().rect_filled(full, 0, color::SURFACE_PAGE);
+
         let jump = ui
             .scope_builder(egui::UiBuilder::new().max_rect(top_bar_rect), |ui| {
                 draw_top_bar(ui, self.screen, self.has_generated)

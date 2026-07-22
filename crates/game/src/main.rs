@@ -270,6 +270,13 @@ fn main() -> eframe::Result {
             creation_context
                 .egui_ctx
                 .set_fonts(gp_render::fonts::definitions());
+            // Pin one fixed palette (PR #118 round 3 — the app is
+            // custom-drawn entirely from design tokens and has no
+            // light/dark-switching feature; without this, egui defaults to
+            // its dark `Visuals`, which is what made the body render black).
+            creation_context
+                .egui_ctx
+                .set_visuals(egui::Visuals::light());
             Ok(Box::new(GraphiteGpApp::new()))
         }),
     )
