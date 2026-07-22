@@ -73,48 +73,49 @@ pub(crate) const LAYER_ORDER: [&str; 9] = [
 /// `overlays` drives which analytics/grid layers are drawn (design § Key
 /// decisions) — each flag adds or removes exactly its own layer's shapes;
 /// all-off reproduces the #17 baseline byte-for-byte (design § Draw order).
+///
+/// `geometry` is the pre-baked, rect-free geometry for `track` (design
+/// `2026-07-22-cache-track-geometry`) — its triangulation topology is never
+/// recomputed here; only the cheap `O(n)` lattice→screen vertex map runs
+/// per frame, via the rect-dependent [`TrackTransform`] this fn builds.
 pub(crate) fn draw_frame(
     painter: &Painter,
     rect: Rect,
     track: &TrackArtifact,
+    geometry: &BakedTrackGeometry,
     cars: &[CarRender<'_>],
     reduced_motion: bool,
     overlays: Overlays,
 ) {
     let transform = TrackTransform::new(&track.corridor, rect);
 
-    let wall_loops = walls::chain_walls(&track.walls);
-    let smoothed_loops: Vec<Vec<(f32, f32)>> = wall_loops
-        .iter()
-        .map(|loop_corners| walls::chaikin_smooth(&track.corridor, loop_corners))
-        .collect();
-
     // Amendment — Rounded track (PR #100): fill and stroke share the exact
     // same smoothed loops, so they cannot disagree at a corner by
-    // construction (design § Decision, "Boundary reuse").
-    let loop_roles = regions::classify_loops(&smoothed_loops);
-    // Temporary per-frame map + lattice-triangulation (design
-    // `2026-07-22-cache-track-geometry` subtask 1 stepping stone) — replaced
-    // by `BakedTrackGeometry`'s baked `triangulated_indices` (topology,
-    // computed once per track) paired with a per-frame `mapped` vertex map
-    // in subtask 4.
-    let mapped: Vec<Vec<egui::Pos2>> = smoothed_loops
+    // construction (design § Decision, "Boundary reuse"). Map-on-the-fly
+    // (design `2026-07-22-cache-track-geometry` § *Per-frame draw path*):
+    // the baked `smoothed_loops` are mapped through this frame's `transform`
+    // once and shared by `fill`/`heatmap::paint`; `triangulated_indices` is
+    // borrowed straight from `geometry`, never recomputed or cloned.
+    let mapped: Vec<Vec<egui::Pos2>> = geometry
+        .smoothed_loops
         .iter()
         .map(|loop_points| loop_points.iter().map(|&p| transform.map(p)).collect())
         .collect();
-    let indices: Vec<Vec<[u32; 3]>> = smoothed_loops
-        .iter()
-        .map(|loop_points| regions::triangulate_lattice(loop_points))
-        .collect();
-    regions::fill(painter, rect, &mapped, &indices, &loop_roles);
+    regions::fill(
+        painter,
+        rect,
+        &mapped,
+        &geometry.triangulated_indices,
+        &geometry.loop_roles,
+    );
 
     if overlays.speed_heatmap {
         heatmap::paint(
             painter,
             &transform,
             &mapped,
-            &indices,
-            &loop_roles,
+            &geometry.triangulated_indices,
+            &geometry.loop_roles,
             &track.metrics.speed_heatmap,
         );
     }
@@ -123,7 +124,7 @@ pub(crate) fn draw_frame(
         grid::paint(painter, rect, &transform);
     }
 
-    walls::paint(painter, &transform, &smoothed_loops);
+    walls::paint(painter, &transform, &geometry.smoothed_loops);
 
     if overlays.fastest_lap {
         fastest_lap::paint(painter, &transform, &track.metrics.fastest_lap);
@@ -139,7 +140,7 @@ pub(crate) fn draw_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::LAYER_ORDER;
+    use super::{BakedTrackGeometry, LAYER_ORDER};
     use crate::{CarRender, Overlays};
     use egui::{Pos2, Rect, pos2};
     use gp_core::geom::{Orient, Point, Side, walls_from_boundary};
@@ -195,12 +196,15 @@ mod tests {
     /// Renders `track`/`cars` once with a bare (fontless) `egui::Context` —
     /// the track canvas draws no text, so no `set_fonts` install is needed —
     /// and returns the tessellation-independent `Shape` list for comparison.
+    /// Builds a fresh [`BakedTrackGeometry`] from `track` (design
+    /// `2026-07-22-cache-track-geometry`).
     fn render_shapes(
         track: &TrackArtifact,
         cars: &[CarRender<'_>],
         reduced_motion: bool,
         overlays: Overlays,
     ) -> String {
+        let geometry = BakedTrackGeometry::new(track);
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let ctx = egui::Context::default();
         let input = egui::RawInput {
@@ -214,6 +218,7 @@ mod tests {
                 rect,
                 crate::Scene {
                     track,
+                    geometry: &geometry,
                     cars,
                     reduced_motion,
                     overlays,
@@ -251,6 +256,55 @@ mod tests {
         )];
         let shapes = render_shapes(&track, &cars, false, Overlays::default());
         assert_ne!(shapes, "[]", "render_frame produced no shapes");
+    }
+
+    /// AC2/AC5 — a resize does not rebuild the baked geometry: driving
+    /// `render_frame` at rect A then rect B through the same
+    /// `BakedTrackGeometry` leaves its `triangulated_indices` pointer
+    /// unchanged — the static triangulation pipeline runs zero times in the
+    /// draw path, at either rect (design `2026-07-22-cache-track-geometry`).
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drives a fontless Context::run_ui pass over render_frame at \
+                  two rects — interpreted-pass wall-clock cost, not an abort"
+    )]
+    fn resize_does_not_rebuild_geometry() {
+        let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
+        let indices_ptr_before = geometry.triangulated_indices.as_ptr();
+        let cars: [CarRender<'_>; 0] = [];
+
+        for rect in [
+            Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0)),
+            Rect::from_min_max(Pos2::ZERO, pos2(240.0, 200.0)),
+        ] {
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let painter = ui.ctx().layer_painter(egui::LayerId::background());
+                crate::render_frame(
+                    &painter,
+                    rect,
+                    crate::Scene {
+                        track: &track,
+                        geometry: &geometry,
+                        cars: &cars,
+                        reduced_motion: false,
+                        overlays: Overlays::default(),
+                    },
+                );
+            });
+        }
+
+        assert_eq!(
+            geometry.triangulated_indices.as_ptr(),
+            indices_ptr_before,
+            "a resize rebuilt the baked triangulation topology"
+        );
     }
 
     // `overlays_are_inert` (AC9, #17) is retired here (AC5): the `grid`

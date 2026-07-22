@@ -54,6 +54,14 @@ pub struct Overlays {
 pub struct Scene<'a> {
     /// The track fixture drawn this frame.
     pub track: &'a TrackArtifact,
+    /// The baked geometry for `track` (design
+    /// `2026-07-22-cache-track-geometry`) — the chained/Chaikin-smoothed
+    /// wall loops, their outer/hole role split, and each loop's baked
+    /// triangulation topology. Must have been built from this same `track`
+    /// (the same track↔geometry coupling the region-fill/heatmap
+    /// `roles`/`indices` "same call" doc-contract already carries) — a
+    /// mismatched pair is a caller bug, not a checked precondition.
+    pub geometry: &'a BakedTrackGeometry,
     /// Caller-supplied per-frame render input ([`CarRender`]) — this crate
     /// is draw-only and buffers no car history or clock of its own
     /// (`ai-docs/key-decisions.md`, 2026-07-16).
@@ -82,8 +90,12 @@ pub struct Scene<'a> {
 /// scene)` (design § *Signature*).
 ///
 /// `scene` bundles the caller-supplied, frame-immutable canvas inputs —
-/// `track`, `cars`, `reduced_motion`, `overlays` — into one [`Scene`] value
-/// (design `2026-07-22-consolidate-render-inputs`).
+/// `track`, `geometry`, `cars`, `reduced_motion`, `overlays` — into one
+/// [`Scene`] value (design `2026-07-22-consolidate-render-inputs`, amended
+/// `2026-07-22-cache-track-geometry` to carry `geometry`). `geometry`'s
+/// triangulation topology is baked once per track (never rebuilt by this
+/// function, regardless of `rect` — AC2/AC5); only the cheap per-frame
+/// `O(n)` lattice→screen vertex map runs here.
 ///
 /// Cosmetic wall smoothing (Chaikin) is allowed only within the half-cell
 /// gap — it must not cross any point or change the set of drivable cells
@@ -91,9 +103,18 @@ pub struct Scene<'a> {
 pub fn render_frame(painter: &Painter, rect: Rect, scene: Scene<'_>) {
     let Scene {
         track,
+        geometry,
         cars,
         reduced_motion,
         overlays,
     } = scene;
-    track::draw_frame(painter, rect, track, cars, reduced_motion, overlays);
+    track::draw_frame(
+        painter,
+        rect,
+        track,
+        geometry,
+        cars,
+        reduced_motion,
+        overlays,
+    );
 }

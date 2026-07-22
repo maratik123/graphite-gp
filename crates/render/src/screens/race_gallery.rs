@@ -125,6 +125,7 @@ mod tests {
         CANVAS_SIZE, CAR_NAMES, FIXED_ACTIVE, FIXED_LAPS_DONE, FIXED_OVERLAYS, FIXED_TOTAL_LAPS,
         RaceInput, RaceScreen, Scene, fixture_cars, fixture_track,
     };
+    use crate::BakedTrackGeometry;
     use gp_core::geom::Point;
     use std::cell::Cell;
     use std::rc::Rc;
@@ -156,6 +157,7 @@ mod tests {
 
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let trails: [[Point; 2]; 3] = [
             [Point::new(3, 7), Point::new(4, 7)],
             [Point::new(8, 2), Point::new(8, 3)],
@@ -178,6 +180,7 @@ mod tests {
                 let _ = RaceScreen::new(RaceInput {
                     scene: Scene {
                         track: &track,
+                        geometry: &geometry,
                         cars: &cars,
                         reduced_motion: false,
                         overlays: FIXED_OVERLAYS,
@@ -229,6 +232,7 @@ mod tests {
         let movepad_rect_c = Rc::clone(&movepad_rect);
 
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let trails: [[Point; 2]; 3] = [
             [Point::new(3, 7), Point::new(4, 7)],
             [Point::new(8, 2), Point::new(8, 3)],
@@ -248,6 +252,7 @@ mod tests {
                 let resp = RaceScreen::new(RaceInput {
                     scene: Scene {
                         track: &track,
+                        geometry: &geometry,
                         cars: &cars,
                         reduced_motion: false,
                         overlays: FIXED_OVERLAYS,

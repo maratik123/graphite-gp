@@ -18,7 +18,10 @@
 use crate::screens::setup::SetupScreen;
 use crate::screens::{LabInput, LabScreen, RaceInput, RaceScreen, ResultsInput, ResultsScreen};
 use crate::tokens::{color, spacing, typography};
-use crate::{CarRender, Overlays, PhaseStatus, RaceConfig, RaceSummary, Scene, StandingEntry};
+use crate::{
+    BakedTrackGeometry, CarRender, Overlays, PhaseStatus, RaceConfig, RaceSummary, Scene,
+    StandingEntry,
+};
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Rect, Sense, Stroke, Ui};
 use gp_core::track::TrackArtifact;
 
@@ -275,6 +278,7 @@ impl AppShell {
             Screen::Lab => {
                 let input = LabInput {
                     track: session.track,
+                    geometry: session.geometry,
                     phases: session.phases,
                     valid: session.valid,
                     seed: session.seed,
@@ -295,6 +299,7 @@ impl AppShell {
                 let input = RaceInput {
                     scene: Scene {
                         track: session.track,
+                        geometry: session.geometry,
                         cars: session.cars,
                         reduced_motion: session.reduced_motion,
                         overlays: self.overlays,
@@ -340,6 +345,9 @@ impl AppShell {
 pub struct ShellSession<'a> {
     /// The track fixture — `Lab`'s canvas + oracle tiles, `Race`'s canvas.
     pub track: &'a TrackArtifact,
+    /// The baked geometry for `track` (design
+    /// `2026-07-22-cache-track-geometry`) — `Lab`'s and `Race`'s canvas.
+    pub geometry: &'a BakedTrackGeometry,
     /// Per-frame car render input — `Race`'s canvas.
     pub cars: &'a [CarRender<'a>],
     /// Snaps every car's move animation to its final position — `Race`'s
