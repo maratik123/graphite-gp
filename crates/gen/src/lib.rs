@@ -7,6 +7,7 @@
 
 mod phase1;
 mod phase2;
+mod phase3;
 
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
@@ -14,6 +15,7 @@ use rand_chacha::ChaCha8Rng;
 
 pub use phase1::*;
 pub use phase2::*;
+pub use phase3::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]
