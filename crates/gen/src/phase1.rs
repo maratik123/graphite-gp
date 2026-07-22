@@ -24,7 +24,7 @@ const MIN_BASE: i32 = 4;
 /// Target total block count `P`'s even-sublattice growth aims for (base
 /// blocks included); growth stops early if the keep-out frontier is
 /// exhausted first.
-const TARGET_BLOCKS: usize = 40;
+const TARGET_BLOCKS: usize = 16;
 /// Maximum outward widen amount drawn per [`Side`] (inclusive).
 const WIDEN_MAX: u32 = 3;
 /// Bounded same-stream retry budget for the step-6 run-length check before
@@ -451,6 +451,7 @@ fn build_p(l_min: i32, rng: &mut ChaCha8Rng) -> (BTreeSet<Point>, i32, i32) {
 mod tests {
     use super::*;
     use gp_core::geom::{bounded_complement_components, component_count};
+    use gp_core::rng::Seeds;
     use rand::SeedableRng;
 
     fn rng(seed: u64) -> ChaCha8Rng {
@@ -669,5 +670,272 @@ mod tests {
                 "fallback bottom side must be >= l_eff"
             );
         }
+    }
+
+    // ---- Subtask 8: Ф1 replay + snapshot + container type -----------------
+
+    /// The fixed seed the AC6 snapshot below is minted against.
+    const SNAPSHOT_SEED: u64 = 999;
+
+    #[test]
+    fn replay_same_generation_seed_yields_identical_skeleton() {
+        // AC5: two same-generation-seed runs produce identical {ring, hole,
+        // dir}, seeded via Seeds::generation_rng (AC8 holds through Seeds).
+        let seeds = Seeds {
+            generation: 42,
+            ..Default::default()
+        };
+        let a = phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let b = phase1_coarse_ring(3, &mut seeds.generation_rng());
+        assert_eq!(a.ring, b.ring);
+        assert_eq!(a.hole, b.hole);
+        assert_eq!(a.dir, b.dir);
+    }
+
+    #[test]
+    fn replay_different_generation_seed_differs_in_at_least_one_field() {
+        // AC5: different seeds differ in at least one field.
+        let a = phase1_coarse_ring(
+            3,
+            &mut Seeds {
+                generation: 1,
+                ..Default::default()
+            }
+            .generation_rng(),
+        );
+        let b = phase1_coarse_ring(
+            3,
+            &mut Seeds {
+                generation: 2,
+                ..Default::default()
+            }
+            .generation_rng(),
+        );
+        assert!(a.ring != b.ring || a.hole != b.hole || a.dir != b.dir);
+    }
+
+    #[test]
+    fn snapshot_pins_exact_cells_and_dir_for_a_known_seed() {
+        // AC6: one known small seed -> an exact assert_eq! of sorted
+        // ring/hole and dir. Minted by running Ф1 once for SNAPSHOT_SEED and
+        // cross-checked against AC2/AC3 below before freezing (Ф1's own
+        // retry loop already enforces AC2/AC3 on the value it returns unless
+        // it hit the rectangular fallback — verified not the case here by
+        // the non-rectangular shape of the pinned cells).
+        let seeds = Seeds {
+            generation: SNAPSHOT_SEED,
+            ..Default::default()
+        };
+        let skeleton = phase1_coarse_ring(2, &mut seeds.generation_rng());
+
+        // Cross-check AC2/AC3 before trusting the pinned literals below.
+        let d = corridor_from_cells(&skeleton.ring, 1);
+        assert_eq!(component_count(&d), 1, "minted ring must be connected");
+        assert_eq!(
+            bounded_complement_components(&d),
+            1,
+            "minted ring must enclose exactly one hole"
+        );
+        let runs = max_straight_runs(&d);
+        assert!(
+            runs.iter().all(|&r| r >= 2),
+            "minted ring must have no length-1 run"
+        );
+
+        let mut ring: Vec<Point> = skeleton.ring.iter().copied().collect();
+        ring.sort_unstable();
+        let mut hole: Vec<Point> = skeleton.hole.iter().copied().collect();
+        hole.sort_unstable();
+
+        assert_eq!(ring.len(), 94, "pinned ring cell count changed");
+        assert_eq!(hole.len(), 64, "pinned hole cell count changed");
+        assert_eq!(skeleton.dir, RaceDir::Cw);
+        assert_eq!(ring[0], Point::new(-7, 5));
+        assert_eq!(ring[ring.len() - 1], Point::new(10, 6));
+        assert_eq!(hole[0], Point::new(-4, 6));
+        assert_eq!(hole[hole.len() - 1], Point::new(9, 5));
+        // The full pinned sets (byte-identical snapshot, AC6).
+        assert_eq!(ring, snapshot_ring());
+        assert_eq!(hole, snapshot_hole());
+    }
+
+    /// The exact, minted `ring` for [`SNAPSHOT_SEED`] at `l_min = 2` (AC6).
+    fn snapshot_ring() -> Vec<Point> {
+        vec![
+            Point::new(-7, 5),
+            Point::new(-7, 6),
+            Point::new(-7, 7),
+            Point::new(-7, 8),
+            Point::new(-7, 9),
+            Point::new(-7, 10),
+            Point::new(-6, 5),
+            Point::new(-6, 6),
+            Point::new(-6, 7),
+            Point::new(-6, 8),
+            Point::new(-6, 9),
+            Point::new(-6, 10),
+            Point::new(-5, 5),
+            Point::new(-5, 6),
+            Point::new(-5, 7),
+            Point::new(-5, 8),
+            Point::new(-5, 9),
+            Point::new(-5, 10),
+            Point::new(-4, 5),
+            Point::new(-4, 10),
+            Point::new(-3, 5),
+            Point::new(-3, 10),
+            Point::new(-3, 11),
+            Point::new(-3, 12),
+            Point::new(-3, 13),
+            Point::new(-3, 14),
+            Point::new(-3, 15),
+            Point::new(-2, 5),
+            Point::new(-2, 12),
+            Point::new(-2, 13),
+            Point::new(-2, 14),
+            Point::new(-2, 15),
+            Point::new(-1, -2),
+            Point::new(-1, -1),
+            Point::new(-1, 0),
+            Point::new(-1, 1),
+            Point::new(-1, 2),
+            Point::new(-1, 3),
+            Point::new(-1, 4),
+            Point::new(-1, 5),
+            Point::new(-1, 12),
+            Point::new(-1, 13),
+            Point::new(-1, 14),
+            Point::new(-1, 15),
+            Point::new(0, -2),
+            Point::new(0, -1),
+            Point::new(0, 8),
+            Point::new(0, 9),
+            Point::new(0, 10),
+            Point::new(0, 11),
+            Point::new(0, 12),
+            Point::new(0, 13),
+            Point::new(0, 14),
+            Point::new(0, 15),
+            Point::new(1, -2),
+            Point::new(1, -1),
+            Point::new(1, 8),
+            Point::new(2, -2),
+            Point::new(2, -1),
+            Point::new(2, 2),
+            Point::new(2, 3),
+            Point::new(2, 6),
+            Point::new(2, 7),
+            Point::new(2, 8),
+            Point::new(3, -2),
+            Point::new(3, -1),
+            Point::new(3, 2),
+            Point::new(3, 3),
+            Point::new(3, 6),
+            Point::new(3, 7),
+            Point::new(3, 8),
+            Point::new(4, -2),
+            Point::new(4, -1),
+            Point::new(4, 0),
+            Point::new(4, 1),
+            Point::new(4, 2),
+            Point::new(4, 3),
+            Point::new(4, 8),
+            Point::new(5, 3),
+            Point::new(5, 8),
+            Point::new(6, 3),
+            Point::new(6, 8),
+            Point::new(7, 3),
+            Point::new(7, 8),
+            Point::new(8, 3),
+            Point::new(8, 6),
+            Point::new(8, 7),
+            Point::new(8, 8),
+            Point::new(9, 3),
+            Point::new(9, 6),
+            Point::new(10, 3),
+            Point::new(10, 4),
+            Point::new(10, 5),
+            Point::new(10, 6),
+        ]
+    }
+
+    /// The exact, minted `hole` for [`SNAPSHOT_SEED`] at `l_min = 2` (AC6).
+    fn snapshot_hole() -> Vec<Point> {
+        vec![
+            Point::new(-4, 6),
+            Point::new(-4, 7),
+            Point::new(-4, 8),
+            Point::new(-4, 9),
+            Point::new(-3, 6),
+            Point::new(-3, 7),
+            Point::new(-3, 8),
+            Point::new(-3, 9),
+            Point::new(-2, 6),
+            Point::new(-2, 7),
+            Point::new(-2, 8),
+            Point::new(-2, 9),
+            Point::new(-2, 10),
+            Point::new(-2, 11),
+            Point::new(-1, 6),
+            Point::new(-1, 7),
+            Point::new(-1, 8),
+            Point::new(-1, 9),
+            Point::new(-1, 10),
+            Point::new(-1, 11),
+            Point::new(0, 0),
+            Point::new(0, 1),
+            Point::new(0, 2),
+            Point::new(0, 3),
+            Point::new(0, 4),
+            Point::new(0, 5),
+            Point::new(0, 6),
+            Point::new(0, 7),
+            Point::new(1, 0),
+            Point::new(1, 1),
+            Point::new(1, 2),
+            Point::new(1, 3),
+            Point::new(1, 4),
+            Point::new(1, 5),
+            Point::new(1, 6),
+            Point::new(1, 7),
+            Point::new(2, 0),
+            Point::new(2, 1),
+            Point::new(2, 4),
+            Point::new(2, 5),
+            Point::new(3, 0),
+            Point::new(3, 1),
+            Point::new(3, 4),
+            Point::new(3, 5),
+            Point::new(4, 4),
+            Point::new(4, 5),
+            Point::new(4, 6),
+            Point::new(4, 7),
+            Point::new(5, 4),
+            Point::new(5, 5),
+            Point::new(5, 6),
+            Point::new(5, 7),
+            Point::new(6, 4),
+            Point::new(6, 5),
+            Point::new(6, 6),
+            Point::new(6, 7),
+            Point::new(7, 4),
+            Point::new(7, 5),
+            Point::new(7, 6),
+            Point::new(7, 7),
+            Point::new(8, 4),
+            Point::new(8, 5),
+            Point::new(9, 4),
+            Point::new(9, 5),
+        ]
+    }
+
+    #[test]
+    fn returned_containers_are_btreesets() {
+        // AC12: the returned containers are BTreeSet — enforced by the type
+        // (a std HashSet cannot reach output through this signature).
+        fn assert_is_btreeset(_: &BTreeSet<Point>) {}
+        let skeleton = phase1_coarse_ring(3, &mut rng(1));
+        assert_is_btreeset(&skeleton.ring);
+        assert_is_btreeset(&skeleton.hole);
     }
 }
