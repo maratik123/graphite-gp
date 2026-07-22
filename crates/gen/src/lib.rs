@@ -5,8 +5,8 @@
 //! acts as a certifier, not a regeneration engine. The pipeline runs in phases
 //! Ф1–Ф7 and emits a [`TrackArtifact`].
 
+use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
-use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
 /// Generation parameters (design doc §2).
@@ -20,8 +20,9 @@ pub struct GenParams {
     pub v_ceiling: i32,
     /// `k` — coarse-block size = the nominal corridor width (`k ≥ n`).
     pub block_size: i32,
-    /// Seed for the (replay-deterministic) RNG.
-    pub seed: u64,
+    /// The grouped seeded-RNG config (issue #49) — `seeds.generation` feeds
+    /// [`generation_rng`](Self::generation_rng), the pipeline's sole RNG path.
+    pub seeds: Seeds,
 }
 
 impl GenParams {
@@ -35,11 +36,12 @@ impl GenParams {
         self.cars
     }
 
-    /// A replay-deterministic RNG seeded from `self.seed`, for the generation
-    /// pipeline's stochastic phases (design doc §2). No OS entropy — the same
-    /// `seed` always yields the same draw stream (issue #49).
-    pub fn rng(&self) -> ChaCha8Rng {
-        ChaCha8Rng::seed_from_u64(self.seed)
+    /// A replay-deterministic RNG seeded from `self.seeds.generation`, for the
+    /// generation pipeline's stochastic phases (design doc §2). No OS
+    /// entropy — the same seed always yields the same draw stream (issue
+    /// #49). The single generation RNG path (AC10) — no divergent duplicate.
+    pub fn generation_rng(&self) -> ChaCha8Rng {
+        self.seeds.generation_rng()
     }
 }
 
@@ -58,31 +60,70 @@ mod tests {
     use super::*;
     use rand::Rng;
 
+    /// A `GenParams` with `seeds.generation` set to `seed` and all other
+    /// seeds zeroed.
     fn params(seed: u64) -> GenParams {
         GenParams {
             cars: 4,
             min_straight: 3,
             v_ceiling: 5,
             block_size: 6,
-            seed,
+            seeds: Seeds {
+                generation: seed,
+                ..Default::default()
+            },
         }
+    }
+
+    fn draws(mut rng: ChaCha8Rng) -> Vec<u64> {
+        (0..8).map(|_| rng.next_u64()).collect()
     }
 
     #[test]
     fn rng_same_seed_yields_identical_stream() {
-        let mut a = params(42).rng();
-        let mut b = params(42).rng();
-        let draws_a: Vec<u64> = (0..8).map(|_| a.next_u64()).collect();
-        let draws_b: Vec<u64> = (0..8).map(|_| b.next_u64()).collect();
-        assert_eq!(draws_a, draws_b);
+        // AC8: same generation seed -> identical stream.
+        assert_eq!(
+            draws(params(42).generation_rng()),
+            draws(params(42).generation_rng())
+        );
     }
 
     #[test]
     fn rng_different_seed_yields_different_stream() {
-        let mut a = params(1).rng();
-        let mut b = params(2).rng();
-        let draws_a: Vec<u64> = (0..8).map(|_| a.next_u64()).collect();
-        let draws_b: Vec<u64> = (0..8).map(|_| b.next_u64()).collect();
-        assert_ne!(draws_a, draws_b);
+        assert_ne!(
+            draws(params(1).generation_rng()),
+            draws(params(2).generation_rng())
+        );
+    }
+
+    #[test]
+    fn generation_rng_is_the_sole_generation_path() {
+        // AC10: a GenParams built with a given `seeds.generation` reproduces
+        // the same stream regardless of the other three seeds.
+        let a = GenParams {
+            cars: 4,
+            min_straight: 3,
+            v_ceiling: 5,
+            block_size: 6,
+            seeds: Seeds {
+                collision: 1,
+                generation: 42,
+                ai_learning: 2,
+                ai_inference: 3,
+            },
+        };
+        let b = GenParams {
+            cars: 4,
+            min_straight: 3,
+            v_ceiling: 5,
+            block_size: 6,
+            seeds: Seeds {
+                collision: 99,
+                generation: 42,
+                ai_learning: 98,
+                ai_inference: 97,
+            },
+        };
+        assert_eq!(draws(a.generation_rng()), draws(b.generation_rng()));
     }
 }
