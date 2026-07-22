@@ -530,12 +530,7 @@ mod tests {
     /// A minimal drivable-rectangle `TrackArtifact` fixture; only
     /// `corridor` is exercised by [`active_legal_mask`].
     fn fixture_track(w: usize, h: usize) -> TrackArtifact {
-        let mut corridor = Corridor::new(Point::new(0, 0), w, h);
-        for y in 0..i32::try_from(h).unwrap() {
-            for x in 0..i32::try_from(w).unwrap() {
-                corridor.set(Point::new(x, y), true);
-            }
-        }
+        let corridor = Corridor::filled(Point::new(0, 0), w, h);
         TrackArtifact {
             walls: vec![],
             sf: StartFinish {
