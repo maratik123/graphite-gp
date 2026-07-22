@@ -7,8 +7,11 @@
 //! [`StartGrid`] pair. Integer-only, no RNG of its own, total (no `Result`,
 //! no production panic) — mirroring Ф1/Ф2's discipline.
 
-use gp_core::geom::{Corridor, Orient, Side};
+use std::collections::{BTreeMap, BTreeSet};
+
+use gp_core::geom::{Corridor, Orient, Point, Side};
 use gp_core::track::{RaceDir, StartFinish, StartGrid, TimingGate};
+use strum::IntoEnumIterator;
 
 use crate::CoarseSkeleton;
 
@@ -66,6 +69,117 @@ const fn opposite_side(s: Side) -> Side {
         Side::West => Side::East,
         Side::North => Side::South,
         Side::South => Side::North,
+    }
+}
+
+// ---- Straight-run selection (pick_straight_run) --------------------------
+
+/// `Side::iter()`'s fixed enumeration order, as a rank — the primary
+/// tie-break key for deterministic straight-run selection (AC8).
+const fn side_rank(s: Side) -> u8 {
+    match s {
+        Side::East => 0,
+        Side::West => 1,
+        Side::North => 2,
+        Side::South => 3,
+    }
+}
+
+/// The inverse of [`side_rank`].
+const fn side_from_rank(r: u8) -> Side {
+    match r {
+        0 => Side::East,
+        1 => Side::West,
+        2 => Side::North,
+        _ => Side::South,
+    }
+}
+
+/// The maximal contiguous runs of a sorted, deduplicated coordinate set, as
+/// `(start, end)` inclusive pairs in ascending order.
+fn contiguous_runs(vals: &BTreeSet<i32>) -> Vec<(i32, i32)> {
+    let mut runs = Vec::new();
+    let mut iter = vals.iter().copied();
+    let Some(first) = iter.next() else {
+        return runs;
+    };
+    let mut start = first;
+    let mut prev = first;
+    for v in iter {
+        if v != prev.saturating_add(1) {
+            runs.push((start, prev));
+            start = v;
+        }
+        prev = v;
+    }
+    runs.push((start, prev));
+    runs
+}
+
+/// Selects a straight (non-corner) run of the coarse `ring`, deterministically
+/// (design doc "Straight-selection algorithm").
+///
+/// A ring cell `c` is hole-facing on side `s` iff `c + s.delta() ∈ hole`; a
+/// straight cell is hole-facing on **exactly one** side (a corner is
+/// hole-facing on two). Straight cells are grouped by `(inward side, fixed
+/// coordinate)` and split into maximal along-axis contiguous runs; the
+/// **longest** run wins, tie-broken by `(inward-side enum order, fixed
+/// coordinate, run-start)` — a total order over deterministic keys (AC8).
+///
+/// Total: an empty `ring` (unreachable via [`crate::phase1_coarse_ring`], but
+/// not excluded by this function's own type) yields a degenerate zero-length
+/// segment rather than panicking.
+fn pick_straight_run(ring: &BTreeSet<Point>, hole: &BTreeSet<Point>) -> Segment {
+    let mut groups: BTreeMap<(u8, i32), BTreeSet<i32>> = BTreeMap::new();
+    for &c in ring {
+        let hole_facing: Vec<Side> = Side::iter()
+            .filter(|&s| {
+                let (dx, dy) = s.delta();
+                hole.contains(&Point::new(c.x.saturating_add(dx), c.y.saturating_add(dy)))
+            })
+            .collect();
+        if hole_facing.len() != 1 {
+            continue; // not adjacent to the hole, or a corner (2 sides).
+        }
+        let inward = hole_facing[0];
+        let (fixed, varying) = match axis_for_inward(inward) {
+            Orient::Horizontal => (c.y, c.x),
+            Orient::Vertical => (c.x, c.y),
+        };
+        groups
+            .entry((side_rank(inward), fixed))
+            .or_default()
+            .insert(varying);
+    }
+
+    // (len, side_rank, fixed, start, end) — strictly-greater updates keep the
+    // first-encountered (lowest-key) run on a length tie, giving the
+    // documented total tie-break order for free from BTreeMap's iteration.
+    let mut best: Option<(usize, u8, i32, i32, i32)> = None;
+    for (&(rank, fixed), vals) in &groups {
+        for (start, end) in contiguous_runs(vals) {
+            let len = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(0);
+            let is_better = best.is_none_or(|(best_len, ..)| len > best_len);
+            if is_better {
+                best = Some((len, rank, fixed, start, end));
+            }
+        }
+    }
+
+    let Some((_, rank, fixed, start, end)) = best else {
+        return Segment {
+            axis: Orient::Horizontal,
+            inward: Side::North,
+            fixed_coord: 0,
+            run: (0, 0),
+        };
+    };
+    let inward = side_from_rank(rank);
+    Segment {
+        axis: axis_for_inward(inward),
+        inward,
+        fixed_coord: fixed,
+        run: (start, end),
     }
 }
 
@@ -132,13 +246,11 @@ pub fn phase3_start_finish(
 ) -> Phase3Output {
     let _ = v_target;
     let _ = m;
-    // Placeholder segment selection (subtask 1 scaffold) — `pick_straight_run`
-    // (subtask 2) replaces this with the actual coarse-ring straight search.
-    let inward = Side::North;
-    let axis = axis_for_inward(inward);
-    let outward = opposite_side(inward);
+    let seg = pick_straight_run(&skel.ring, &skel.hole);
+    let axis = seg.axis;
+    let outward = opposite_side(seg.inward);
     let _ = outward;
-    let forward = forward_side(skel.dir, inward);
+    let forward = forward_side(skel.dir, seg.inward);
     Phase3Output {
         d,
         sf: StartFinish {
@@ -211,5 +323,95 @@ mod tests {
         }
         assert_eq!(opposite_side(Side::East), Side::West);
         assert_eq!(opposite_side(Side::North), Side::South);
+    }
+
+    // ---- Subtask 2: pick_straight_run --------------------------------------
+
+    /// A hand-built rectangular ring (thickness 1) enclosing a rectangular
+    /// hole: `hole = [0,3)x[0,2)`, ring is the 1-thick border of
+    /// `[-1,4)x[-1,3)`. The ring's 4 corner cells face the hole on 0 sides
+    /// (excluded, not corners in the 2-side sense but not hole-adjacent
+    /// either) — the north/south straight runs are `x in 0..=2` (length 3,
+    /// matching the hole's width); the east/west runs are `y in 0..=1`
+    /// (length 2, matching the hole's height). North/south tie at length 3;
+    /// `side_rank` picks North (rank 2) over South (rank 3).
+    fn fixture_rectangle() -> (BTreeSet<Point>, BTreeSet<Point>) {
+        let mut hole = BTreeSet::new();
+        for y in 0..2 {
+            for x in 0..3 {
+                hole.insert(Point::new(x, y));
+            }
+        }
+        let mut ring = BTreeSet::new();
+        for y in -1..=2 {
+            for x in -1..=3 {
+                let p = Point::new(x, y);
+                if !hole.contains(&p) {
+                    ring.insert(p);
+                }
+            }
+        }
+        (ring, hole)
+    }
+
+    #[test]
+    fn pick_straight_run_chosen_run_is_straight_not_a_corner() {
+        let (ring, hole) = fixture_rectangle();
+        let seg = pick_straight_run(&ring, &hole);
+        // Every cell in the chosen run must be hole-facing on exactly the
+        // segment's own `inward` side (i.e. not a corner).
+        let (fixed_is_y, start, end) = match seg.axis {
+            Orient::Horizontal => (true, seg.run.0, seg.run.1),
+            Orient::Vertical => (false, seg.run.0, seg.run.1),
+        };
+        for v in start..=end {
+            let c = if fixed_is_y {
+                Point::new(v, seg.fixed_coord)
+            } else {
+                Point::new(seg.fixed_coord, v)
+            };
+            let hole_facing_count = Side::iter()
+                .filter(|&s| {
+                    let (dx, dy) = s.delta();
+                    hole.contains(&Point::new(c.x.saturating_add(dx), c.y.saturating_add(dy)))
+                })
+                .count();
+            assert_eq!(
+                hole_facing_count, 1,
+                "cell {c:?} is a corner or non-adjacent"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_straight_run_picks_the_longest_run_on_a_known_fixture() {
+        let (ring, hole) = fixture_rectangle();
+        let seg = pick_straight_run(&ring, &hole);
+        // Longest run length is 3 (north/south arms); tie-broken by
+        // side_rank (East=0, West=1, North=2, South=3) -> North wins.
+        let len = seg.run.1.saturating_sub(seg.run.0).saturating_add(1);
+        assert_eq!(len, 3);
+        assert_eq!(seg.inward, Side::North);
+        assert_eq!(seg.axis, Orient::Horizontal);
+    }
+
+    #[test]
+    fn pick_straight_run_is_deterministic() {
+        let (ring, hole) = fixture_rectangle();
+        let a = pick_straight_run(&ring, &hole);
+        let b = pick_straight_run(&ring, &hole);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn pick_straight_run_on_phase1_output_returns_a_non_degenerate_segment() {
+        use gp_core::rng::Seeds;
+        let seeds = Seeds {
+            generation: 7,
+            ..Default::default()
+        };
+        let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let seg = pick_straight_run(&skel.ring, &skel.hole);
+        assert!(seg.run.1 >= seg.run.0);
     }
 }
