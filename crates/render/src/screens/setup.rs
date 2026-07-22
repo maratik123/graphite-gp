@@ -258,21 +258,15 @@ fn draw_wordmark(ui: &mut Ui) {
             typography::FS_H1,
             FontFamily::Name(crate::fonts::ONEST_BOLD.into()),
         );
-        let graphite_w = ui
+        let graphite_galley = ui.painter().layout_no_wrap(
+            "GRAPHITE ".to_owned(),
+            wordmark_font.clone(),
+            color::TEXT_INK,
+        );
+        let gp_galley = ui
             .painter()
-            .layout_no_wrap(
-                "GRAPHITE ".to_owned(),
-                wordmark_font.clone(),
-                color::TEXT_INK,
-            )
-            .rect
-            .width();
-        let gp_w = ui
-            .painter()
-            .layout_no_wrap("GP".to_owned(), wordmark_font.clone(), color::ACCENT)
-            .rect
-            .width();
-        let row_w = ACCENT_DOT_D + spacing::SPACE_3 + graphite_w + gp_w;
+            .layout_no_wrap("GP".to_owned(), wordmark_font, color::ACCENT);
+        let row_w = ACCENT_DOT_D + spacing::SPACE_3 + graphite_galley.size().x + gp_galley.size().x;
         let row_h = typography::FS_H1.max(ACCENT_DOT_D);
 
         let (rect, _response) = ui.allocate_exact_size(egui::vec2(row_w, row_h), Sense::hover());
@@ -288,18 +282,18 @@ fn draw_wordmark(ui: &mut Ui) {
 
         let text_x = rect.min.x + ACCENT_DOT_D + spacing::SPACE_3;
         let text_y = rect.center().y - typography::FS_H1 / 2.0;
-        let graphite_rect = ui.painter().text(
+        let graphite_rect = crate::text::paint_galley(
+            ui.painter(),
             Pos2::new(text_x, text_y),
             Align2::LEFT_TOP,
-            "GRAPHITE ",
-            wordmark_font.clone(),
+            graphite_galley,
             color::TEXT_INK,
         );
-        ui.painter().text(
+        crate::text::paint_galley(
+            ui.painter(),
             Pos2::new(graphite_rect.max.x, text_y),
             Align2::LEFT_TOP,
-            "GP",
-            wordmark_font,
+            gp_galley,
             color::ACCENT,
         );
 
@@ -310,20 +304,21 @@ fn draw_wordmark(ui: &mut Ui) {
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
         );
         let subtitle = "GRID VECTOR RACING".to_uppercase();
-        let subtitle_w = ui
-            .painter()
-            .layout_no_wrap(subtitle.clone(), subtitle_font.clone(), color::TEXT_MUTED)
-            .rect
-            .width();
+        let subtitle_galley =
+            ui.painter()
+                .layout_no_wrap(subtitle, subtitle_font, color::TEXT_MUTED);
         let (subtitle_rect, _response) = ui.allocate_exact_size(
-            egui::vec2(subtitle_w, typography::FS_XS * typography::LH_SNUG),
+            egui::vec2(
+                subtitle_galley.size().x,
+                typography::FS_XS * typography::LH_SNUG,
+            ),
             Sense::hover(),
         );
-        ui.painter().text(
+        crate::text::paint_galley(
+            ui.painter(),
             subtitle_rect.left_top(),
             Align2::LEFT_TOP,
-            subtitle,
-            subtitle_font,
+            subtitle_galley,
             color::TEXT_MUTED,
         );
     });
@@ -370,20 +365,18 @@ fn draw_footer(ui: &mut Ui) {
             typography::FS_XS,
             FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
         );
-        let width = ui
+        let galley = ui
             .painter()
-            .layout_no_wrap(FOOTER_TEXT.to_owned(), font.clone(), color::TEXT_FAINT)
-            .rect
-            .width();
+            .layout_no_wrap(FOOTER_TEXT.to_owned(), font, color::TEXT_FAINT);
         let (rect, _response) = ui.allocate_exact_size(
-            egui::vec2(width, typography::FS_XS * typography::LH_SNUG),
+            egui::vec2(galley.size().x, typography::FS_XS * typography::LH_SNUG),
             Sense::hover(),
         );
-        ui.painter().text(
+        crate::text::paint_galley(
+            ui.painter(),
             rect.left_top(),
             Align2::LEFT_TOP,
-            FOOTER_TEXT,
-            font,
+            galley,
             color::TEXT_FAINT,
         );
     });
