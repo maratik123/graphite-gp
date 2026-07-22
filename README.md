@@ -37,8 +37,13 @@ block 1, state + legal mask onto 3a).
 ## Status
 
 **Block 3a (the `gp-core` physics core) is complete** — every `block:core` issue is
-closed; next up per the §6 build order (`3a → (1 ∥ 2) → 4`) are block 1 (`gp-gen`,
-the Ф1–Ф7 generator pipeline) and, in parallel, block 2 (`gp-render`).
+closed. Per the §6 build order (`3a → (1 ∥ 2) → 4`), **block 1 (`gp-gen`) has now
+started**: the first generator phase **Ф1 (coarse-block ring, infield-first) + the
+grouped seeded-RNG config** are landed (`gp_core::rng::Seeds` groups four
+independently-seeded `ChaCha8Rng` sources — collision / generation / AI-learning /
+AI-inference; `phase1_coarse_ring` builds the deterministic coarse annulus), closing
+issues #24 and #49 and discharging #50 (deterministic-order collections). The
+remaining pipeline is Ф2–Ф7 (#25–#34). Block 2 (`gp-render`) proceeds in parallel.
 
 **Block 2 has started**: the foundational GUI-backend decision (issue #11) is landed
 — the backend is **eframe/egui 0.35**, `gp-game` owns the window + event loop, and
