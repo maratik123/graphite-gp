@@ -7,7 +7,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use gp_core::geom::{Corridor, Point, Side, walls_from_boundary};
+use gp_core::geom::{
+    Corridor, Point, Side, bounded_complement_components, component_count, walls_from_boundary,
+};
 use gp_core::track::RaceDir;
 use rand::RngExt;
 use rand_chacha::ChaCha8Rng;
@@ -34,6 +36,12 @@ const MAX_ATTEMPTS: u32 = 8;
 const MIN_RECT_W: i32 = 4;
 /// Fixed fallback rectangle height.
 const MIN_RECT_H: i32 = 4;
+/// Multi-seed property-test fallback-rate ceiling (design doc, recommendation):
+/// a healthy construction falls back rarely, so `fallback_count / N` staying
+/// under this catches a construction regression that fails the step-6 check
+/// on most seeds, which a weaker "not all fall back" check would miss.
+#[cfg(test)]
+const FALLBACK_RATE_MAX: f64 = 0.20;
 
 /// The Ф1 output: a coarse annulus `ring` enclosing exactly one hole `hole`
 /// (the infield polyomino `P`), plus the fixed traversal orientation.
@@ -54,23 +62,46 @@ pub struct CoarseSkeleton {
 ///
 /// Infallible: a bounded same-stream retry plus a guaranteed-terminating
 /// rectangular fallback make this a total function — no `Result`, no panic.
+pub fn phase1_coarse_ring(l_min: i32, rng: &mut ChaCha8Rng) -> CoarseSkeleton {
+    phase1_coarse_ring_attempts(l_min, rng, MAX_ATTEMPTS).0
+}
+
+/// [`phase1_coarse_ring`]'s core, parameterized over the retry budget so
+/// tests can force immediate exhaustion (`max_attempts = 0`, the forced-
+/// exhaustion fallback test) or observe the fallback rate at the production
+/// budget. Returns the skeleton plus whether it is the rectangular fallback
+/// terminal (design doc §2 Ф1 steps 6-8).
 #[allow(
     clippy::similar_names,
     reason = "ring/rng are established, unambiguous domain vocabulary here \
               (skeleton.ring, the RNG stream) — no realistic confusion risk"
 )]
-pub fn phase1_coarse_ring(l_min: i32, rng: &mut ChaCha8Rng) -> CoarseSkeleton {
+fn phase1_coarse_ring_attempts(
+    l_min: i32,
+    rng: &mut ChaCha8Rng,
+    max_attempts: u32,
+) -> (CoarseSkeleton, bool) {
     let l_eff = clamp_l_min(l_min);
-    for _attempt in 0..MAX_ATTEMPTS {
+    for _attempt in 0..max_attempts {
         let (p, l_eff, _base_w) = build_p(l_min, rng);
         let ring = widen(&ring_from_p(&p), rng);
-        let runs = max_straight_runs(&corridor_from_cells(&ring, 1));
+        let d = corridor_from_cells(&ring, 1);
+        // Verified on the actual returned ring, not assumed: widening a
+        // concave-shaped ring's extremal run can — in a rare case — pinch
+        // off a second bounded pocket, so AC2 is checked here alongside
+        // AC3(a)/(b), exactly like the design's own "checked, not by
+        // construction" posture for the outer border's run lengths.
+        let runs = max_straight_runs(&d);
         let min_run = runs.iter().copied().min().unwrap_or(0);
         let max_run = runs.iter().copied().max().unwrap_or(0);
         let max_run = i32::try_from(max_run).unwrap_or(i32::MAX);
-        if min_run >= 2 && max_run >= l_eff {
+        if component_count(&d) == 1
+            && bounded_complement_components(&d) == 1
+            && min_run >= 2
+            && max_run >= l_eff
+        {
             let dir = choose_dir(rng);
-            return CoarseSkeleton { ring, hole: p, dir };
+            return (CoarseSkeleton { ring, hole: p, dir }, false);
         }
     }
     // Guaranteed-terminating fallback (step 7): a rectangular annulus
@@ -78,7 +109,7 @@ pub fn phase1_coarse_ring(l_min: i32, rng: &mut ChaCha8Rng) -> CoarseSkeleton {
     // so it is seeded regardless of which terminal Ф1 hits (AC4).
     let (ring, hole) = rectangular_fallback(l_eff);
     let dir = choose_dir(rng);
-    CoarseSkeleton { ring, hole, dir }
+    (CoarseSkeleton { ring, hole, dir }, true)
 }
 
 /// Moore (3×3 / Chebyshev-1) dilation of `p` by one cell.
@@ -103,10 +134,12 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
 /// per side, in `Side::iter()`'s fixed order (design doc §2 Ф1 step 5).
 ///
 /// Each widened layer is attached only to `ring`'s existing extremal cells on
-/// that side (the whole outer-border run for that side, since every such
-/// cell already touches `ring`), so widening cannot disconnect the ring, add
-/// a length-1 run, or touch the inner hole — outward-only, annulus invariants
-/// preserved by construction.
+/// that side and never touches the inner hole — outward-only. For a concave
+/// ring shape, widening a side whose extremal run has multiple disjoint arms
+/// can, rarely, pinch off a second bounded pocket; that case is **not**
+/// assumed away — [`phase1_coarse_ring_attempts`] re-verifies AC2 on the
+/// actual post-widen ring (step 6) and retries/falls back on failure, exactly
+/// like the run-length check.
 #[allow(
     clippy::similar_names,
     reason = "ring/rng are established, unambiguous domain vocabulary here \
@@ -937,5 +970,112 @@ mod tests {
         let skeleton = phase1_coarse_ring(3, &mut rng(1));
         assert_is_btreeset(&skeleton.ring);
         assert_is_btreeset(&skeleton.hole);
+    }
+
+    // ---- Subtask 9: multi-seed property test -------------------------------
+
+    /// Seed count the multi-seed property test and fallback-rate assertion
+    /// run over.
+    const PROPERTY_SEED_COUNT: u64 = 64;
+
+    #[test]
+    fn multi_seed_property_holds_ac2_and_ac3_for_every_seed() {
+        let l_min = 3;
+        for seed in 0..PROPERTY_SEED_COUNT {
+            let (skeleton, _used_fallback) =
+                phase1_coarse_ring_attempts(l_min, &mut rng(seed), MAX_ATTEMPTS);
+            let d = corridor_from_cells(&skeleton.ring, 1);
+            assert_eq!(
+                component_count(&d),
+                1,
+                "seed {seed}: ring must be one connected component"
+            );
+            assert_eq!(
+                bounded_complement_components(&d),
+                1,
+                "seed {seed}: ring must enclose exactly one hole"
+            );
+            assert!(
+                !skeleton.hole.is_empty(),
+                "seed {seed}: hole must have >= 1 cell"
+            );
+            let runs = max_straight_runs(&d);
+            assert!(
+                runs.iter().all(|&r| r >= 2),
+                "seed {seed}: ring has a length-1 run: {runs:?}"
+            );
+            let max_run =
+                i32::try_from(runs.iter().copied().max().unwrap_or(0)).unwrap_or(i32::MAX);
+            assert!(
+                max_run >= clamp_l_min(l_min),
+                "seed {seed}: ring has no run >= l_eff: {runs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fallback_rate_stays_under_the_ceiling() {
+        // Recommendation: a healthy construction falls back rarely — assert
+        // the rate, not merely "not all seeds fall back".
+        let fallback_count = (0..PROPERTY_SEED_COUNT)
+            .filter(|&seed| phase1_coarse_ring_attempts(3, &mut rng(seed), MAX_ATTEMPTS).1)
+            .count();
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "PROPERTY_SEED_COUNT (64) and fallback_count (<= 64) are both \
+                      small integers, exactly representable in f64"
+        )]
+        let rate = fallback_count as f64 / PROPERTY_SEED_COUNT as f64;
+        assert!(
+            rate <= FALLBACK_RATE_MAX,
+            "fallback rate {rate} exceeds ceiling {FALLBACK_RATE_MAX} \
+             ({fallback_count}/{PROPERTY_SEED_COUNT} seeds fell back)"
+        );
+    }
+
+    #[test]
+    fn clamp_boundary_extremes_yield_a_bounded_valid_skeleton() {
+        // NOTE 2: l_min = i32::MAX / i32::MIN clamp to the documented domain
+        // on both the primary and fallback paths — bounded work, valid
+        // skeleton, no hang, no multi-billion-cell allocation.
+        for l_min in [i32::MAX, i32::MIN] {
+            let skeleton = phase1_coarse_ring(l_min, &mut rng(1));
+            let d = corridor_from_cells(&skeleton.ring, 1);
+            assert_eq!(component_count(&d), 1);
+            assert_eq!(bounded_complement_components(&d), 1);
+            assert!(!skeleton.hole.is_empty());
+            let runs = max_straight_runs(&d);
+            assert!(runs.iter().all(|&r| r >= 2));
+
+            let side = usize::try_from(MAX_COARSE_STRAIGHT)
+                .unwrap_or(usize::MAX)
+                .saturating_add(2);
+            let bound = side.saturating_mul(side).saturating_mul(4);
+            assert!(
+                skeleton.ring.len() <= bound && skeleton.hole.len() <= bound,
+                "l_min {l_min}: unbounded cell count (ring {}, hole {})",
+                skeleton.ring.len(),
+                skeleton.hole.len()
+            );
+        }
+    }
+
+    #[test]
+    fn forced_exhaustion_returns_a_valid_rectangular_fallback() {
+        // Drive max_attempts to 0 via the test-only entry: every attempt is
+        // skipped, so Ф1 must go straight to the rectangular fallback, which
+        // itself satisfies AC2 + AC3 (all runs >= 2, bottom side >= l_eff,
+        // one hole >= 1).
+        let l_min = 5;
+        let (skeleton, used_fallback) = phase1_coarse_ring_attempts(l_min, &mut rng(1), 0);
+        assert!(used_fallback, "max_attempts = 0 must force the fallback");
+        let d = corridor_from_cells(&skeleton.ring, 1);
+        assert_eq!(component_count(&d), 1);
+        assert_eq!(bounded_complement_components(&d), 1);
+        assert!(!skeleton.hole.is_empty());
+        let runs = max_straight_runs(&d);
+        assert!(runs.iter().all(|&r| r >= 2));
+        let max_run = i32::try_from(runs.iter().copied().max().unwrap_or(0)).unwrap_or(i32::MAX);
+        assert!(max_run >= clamp_l_min(l_min));
     }
 }
