@@ -10,6 +10,7 @@
 //! `gp_gen::generate`, owns no RNG, and buffers no state (spec § Key
 //! decisions).
 
+use crate::BakedTrackGeometry;
 use crate::tokens::{color, spacing, typography};
 use crate::widgets::{
     Badge, BadgeTone, Button, ButtonVariant, Card, Size, Tag, Telemetry, TelemetryTone,
@@ -152,6 +153,10 @@ pub struct LabResponse {
 pub struct LabInput<'a> {
     /// The track fixture — drives the canvas and all 4 oracle-report tiles.
     pub track: &'a TrackArtifact,
+    /// The baked geometry for `track` (design
+    /// `2026-07-22-cache-track-geometry`) — threaded into the canvas
+    /// `Scene`.
+    pub geometry: &'a BakedTrackGeometry,
     /// The Ф1–Ф7 generation-pipeline phase statuses, in `PHASE_IDS` order.
     pub phases: [PhaseStatus; 7],
     /// The header validity flag (`VALID`/`INVALID` badge).
@@ -249,7 +254,7 @@ impl<'a> LabScreen<'a> {
         );
 
         let menu_response = draw_header(ui, header_rect, self.input.valid, self.input.seed);
-        draw_canvas(ui, canvas_rect, self.input.track);
+        draw_canvas(ui, canvas_rect, self.input.track, self.input.geometry);
         let (regenerate_response, test_lap_response) =
             draw_action_row(ui, action_rect, self.regenerate_icon, self.test_lap_icon);
         draw_right_column(ui, col_right_rect, self.input.track, self.input.phases);
@@ -320,7 +325,7 @@ fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: i32) -> Response {
 /// Draws the canvas border (rounded-rect stroke, clip inside) then renders
 /// `track` via [`crate::render_frame`] with [`LAB_OVERLAYS`] and an empty
 /// car slice (`Screens.jsx`'s `cars={[]}`, spec § *Key decisions*).
-fn draw_canvas(ui: &mut Ui, rect: Rect, track: &TrackArtifact) {
+fn draw_canvas(ui: &mut Ui, rect: Rect, track: &TrackArtifact, geometry: &BakedTrackGeometry) {
     let painter = ui.painter();
     painter.rect_stroke(
         rect,
@@ -334,6 +339,7 @@ fn draw_canvas(ui: &mut Ui, rect: Rect, track: &TrackArtifact) {
         inner,
         crate::Scene {
             track,
+            geometry,
             cars: &[],
             reduced_motion: false,
             overlays: LAB_OVERLAYS,

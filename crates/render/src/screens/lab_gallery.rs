@@ -101,6 +101,7 @@ fn fixture_track() -> TrackArtifact {
 #[cfg(test)]
 mod tests {
     use super::{CANVAS_SIZE, FIXED_PHASES, FIXED_SEED, LabInput, LabScreen, fixture_track};
+    use crate::BakedTrackGeometry;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -128,6 +129,7 @@ mod tests {
 
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
 
         let mut fonts_installed = false;
         let mut harness = egui_kittest::Harness::builder()
@@ -143,6 +145,7 @@ mod tests {
                 }
                 let _ = LabScreen::new(LabInput {
                     track: &track,
+                    geometry: &geometry,
                     phases: FIXED_PHASES,
                     valid: true,
                     seed: FIXED_SEED,
@@ -191,6 +194,7 @@ mod tests {
         let menu_rect_c = Rc::clone(&menu_rect);
 
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let mut fonts_installed = false;
         let mut harness = egui_kittest::Harness::builder()
             .with_size(CANVAS_SIZE)
@@ -202,6 +206,7 @@ mod tests {
                 }
                 let resp = LabScreen::new(LabInput {
                     track: &track,
+                    geometry: &geometry,
                     phases: FIXED_PHASES,
                     valid: true,
                     seed: FIXED_SEED,

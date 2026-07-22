@@ -156,6 +156,7 @@ mod tests {
         CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, PhaseStatus, fixture_race_cars,
         fixture_standings, fixture_track,
     };
+    use crate::BakedTrackGeometry;
     use crate::app::{AppShell, Nav, Screen, ShellSession};
     use egui::epaint::Primitive;
     use gp_core::geom::Point;
@@ -193,6 +194,7 @@ mod tests {
     )]
     fn tessellation_smoke() {
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
         let mut shell = AppShell::new(FIXED_CONFIG);
 
@@ -206,6 +208,7 @@ mod tests {
         let output = ctx.run_ui(input, |ui| {
             let session = ShellSession {
                 track: &track,
+                geometry: &geometry,
                 cars: &[],
                 reduced_motion: false,
                 active: 0,
@@ -262,6 +265,7 @@ mod tests {
 
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
         let mut shell = AppShell::new(FIXED_CONFIG);
 
@@ -279,6 +283,7 @@ mod tests {
                 }
                 let session = ShellSession {
                     track: &track,
+                    geometry: &geometry,
                     cars: &[],
                     reduced_motion: false,
                     active: 0,
@@ -329,6 +334,7 @@ mod tests {
 
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
         let mut shell = AppShell::new(FIXED_CONFIG);
         shell.apply(Nav::Generate);
@@ -348,6 +354,7 @@ mod tests {
                 }
                 let session = ShellSession {
                     track: &track,
+                    geometry: &geometry,
                     cars: &[],
                     reduced_motion: false,
                     active: 0,
@@ -400,6 +407,7 @@ mod tests {
 
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
         let trails: [[Point; 2]; 4] = [
             [Point::new(8, 3), Point::new(9, 3)],
@@ -431,6 +439,7 @@ mod tests {
                 }
                 let session = ShellSession {
                     track: &track,
+                    geometry: &geometry,
                     cars: &cars,
                     reduced_motion: false,
                     active: 0,
@@ -483,6 +492,7 @@ mod tests {
         let latest_rect_c = Rc::clone(&latest_rect);
 
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
         let mut shell = AppShell::new(FIXED_CONFIG);
 
@@ -497,6 +507,7 @@ mod tests {
                 }
                 let session = ShellSession {
                     track: &track,
+                    geometry: &geometry,
                     cars: &[],
                     reduced_motion: false,
                     active: 0,

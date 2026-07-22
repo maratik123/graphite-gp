@@ -9,6 +9,7 @@
 //! wgpu/`dlopen` Miri abort applies, hence the sole `#[cfg_attr(miri,
 //! ignore)]` guard below.
 
+use super::BakedTrackGeometry;
 use super::test_support::scene_track;
 use crate::{CarRender, Overlays};
 use egui::{Painter, Pos2, Rect};
@@ -66,11 +67,13 @@ fn draw_scene_with(painter: &Painter, rect: Rect, track: &TrackArtifact, overlay
             0.0,
         ),
     ];
+    let geometry = BakedTrackGeometry::new(track);
     crate::render_frame(
         painter,
         rect,
         crate::Scene {
             track,
+            geometry: &geometry,
             cars: &cars,
             reduced_motion: false,
             overlays,
