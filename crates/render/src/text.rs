@@ -23,10 +23,6 @@ use std::sync::Arc;
 /// has none) — static-color call sites.
 ///
 /// Returns the anchored rect, identical to `Painter::text`'s return.
-#[allow(
-    dead_code,
-    reason = "no production call site yet — subtask 1 of 10 (design 2026-07-22-reuse-galley-text-shaping); subtask 2 (telemetry) is the first caller, landing in the same PR"
-)]
 pub(crate) fn paint_galley(
     painter: &Painter,
     pos: Pos2,

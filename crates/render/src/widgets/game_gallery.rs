@@ -12,7 +12,7 @@
 
 use super::car_chip::{CarChip, CarKind};
 use super::lap_meter::LapMeter;
-use super::telemetry::{Align, Telemetry, Tone};
+use super::telemetry::{Align, Telemetry, Tone, telemetry_galleys};
 use egui::{Painter, Pos2, Rect};
 
 /// The gallery's fixed canvas: 640×420 logical points at
@@ -69,13 +69,12 @@ fn draw_hud_strip(painter: &Painter, x0: f32, y0: f32) -> f32 {
         egui::vec2(1.0, 1.0),
     );
     let speed_style = Telemetry::resolve(Tone::Accent, super::Size::Lg, true);
+    let speed_galleys = telemetry_galleys(painter, "SPEED", "3.61", None, &speed_style);
     Telemetry::paint(
         painter,
         speed_rect,
         &speed_style,
-        "SPEED",
-        "3.61",
-        None,
+        &speed_galleys,
         Align::Left,
     );
 
@@ -84,35 +83,28 @@ fn draw_hud_strip(painter: &Painter, x0: f32, y0: f32) -> f32 {
         egui::vec2(1.0, 1.0),
     );
     let v_style = Telemetry::resolve(Tone::Default, super::Size::Md, true);
-    Telemetry::paint(painter, v_rect, &v_style, "v", "(2, 3)", None, Align::Left);
+    let v_galleys = telemetry_galleys(painter, "v", "(2, 3)", None, &v_style);
+    Telemetry::paint(painter, v_rect, &v_style, &v_galleys, Align::Left);
 
     let pos_rect = Rect::from_min_size(
         Pos2::new(cells_x0 + cell_offsets[2], cell_y),
         egui::vec2(1.0, 1.0),
     );
     let pos_style = Telemetry::resolve(Tone::Default, super::Size::Md, true);
-    Telemetry::paint(
-        painter,
-        pos_rect,
-        &pos_style,
-        "POS",
-        "(41, 17)",
-        None,
-        Align::Left,
-    );
+    let pos_galleys = telemetry_galleys(painter, "POS", "(41, 17)", None, &pos_style);
+    Telemetry::paint(painter, pos_rect, &pos_style, &pos_galleys, Align::Left);
 
     let tempo_rect = Rect::from_min_size(
         Pos2::new(cells_x0 + cell_offsets[3], cell_y),
         egui::vec2(1.0, 1.0),
     );
     let tempo_style = Telemetry::resolve(Tone::Muted, super::Size::Md, true);
+    let tempo_galleys = telemetry_galleys(painter, "TEMPO", "0.87", Some("c/t"), &tempo_style);
     Telemetry::paint(
         painter,
         tempo_rect,
         &tempo_style,
-        "TEMPO",
-        "0.87",
-        Some("c/t"),
+        &tempo_galleys,
         Align::Left,
     );
 
