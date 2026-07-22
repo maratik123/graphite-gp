@@ -6,12 +6,14 @@
 //! Ф1–Ф7 and emits a [`TrackArtifact`].
 
 mod phase1;
+mod phase2;
 
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
 use rand_chacha::ChaCha8Rng;
 
 pub use phase1::*;
+pub use phase2::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]
