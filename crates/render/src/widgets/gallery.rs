@@ -72,7 +72,24 @@ fn draw_buttons(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
                 36.0,
             );
             let style = Button::resolve(variant, Size::Md, hovered, pressed);
-            Button::paint(painter, rect, &style, label, None, None, enabled, pressed);
+            let label_galley = painter.layout_no_wrap(
+                label.to_owned(),
+                FontId::new(
+                    style.font_size,
+                    FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
+                ),
+                style.fg,
+            );
+            Button::paint(
+                painter,
+                rect,
+                &style,
+                &label_galley,
+                None,
+                None,
+                enabled,
+                pressed,
+            );
         }
     }
     let size_row_y = y0 + cell_h * 4.0 + 10.0;
@@ -91,7 +108,24 @@ fn draw_buttons(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
             50.0,
         );
         let style = Button::resolve(ButtonVariant::Primary, size, false, false);
-        Button::paint(painter, rect, &style, label, None, None, true, false);
+        let label_galley = painter.layout_no_wrap(
+            label.to_owned(),
+            FontId::new(
+                style.font_size,
+                FontFamily::Name(crate::fonts::ONEST_SEMIBOLD.into()),
+            ),
+            style.fg,
+        );
+        Button::paint(
+            painter,
+            rect,
+            &style,
+            &label_galley,
+            None,
+            None,
+            true,
+            false,
+        );
     }
     size_row_y + 60.0
 }
