@@ -12,7 +12,7 @@ use super::badge::{Badge, Tone};
 use super::button::{Button, Variant as ButtonVariant};
 use super::card::{Card, Elevation};
 use super::icon_button::{IconButton, Variant as IconButtonVariant};
-use super::tag::Tag;
+use super::tag::{Tag, tag_label_galley};
 use crate::icons::{Icon, IconSet};
 use crate::tokens::typography;
 use egui::{FontFamily, FontId, Pos2, Rect};
@@ -173,44 +173,44 @@ fn draw_tags(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
     let cell_h = 40.0;
 
     let rest = cell(x0, y0, 0, 0, cell_w, cell_h, 110.0, 26.0);
-    Tag::paint(
-        painter,
-        rest,
-        &Tag::resolve(false),
-        "L3",
-        None,
-        false,
-        false,
-    );
+    let rest_style = Tag::resolve(false);
+    let rest_galley = tag_label_galley(painter, "L3", rest_style.fg);
+    Tag::paint(painter, rest, &rest_style, &rest_galley, None, false, false);
 
     let selected = cell(x0, y0, 1, 0, cell_w, cell_h, 110.0, 26.0);
+    let selected_style = Tag::resolve(true);
+    let selected_galley = tag_label_galley(painter, "SELECTED", selected_style.fg);
     Tag::paint(
         painter,
         selected,
-        &Tag::resolve(true),
-        "SELECTED",
+        &selected_style,
+        &selected_galley,
         None,
         false,
         false,
     );
 
     let with_dot = cell(x0, y0, 2, 0, cell_w, cell_h, 110.0, 26.0);
+    let with_dot_style = Tag::resolve(false);
+    let with_dot_galley = tag_label_galley(painter, "CAR-2", with_dot_style.fg);
     Tag::paint(
         painter,
         with_dot,
-        &Tag::resolve(false),
-        "CAR-2",
+        &with_dot_style,
+        &with_dot_galley,
         Some(crate::tokens::color::CAR_2),
         false,
         false,
     );
 
     let with_remove = cell(x0, y0, 3, 0, cell_w, cell_h, 110.0, 26.0);
+    let with_remove_style = Tag::resolve(false);
+    let with_remove_galley = tag_label_galley(painter, "REMOVE", with_remove_style.fg);
     Tag::paint(
         painter,
         with_remove,
-        &Tag::resolve(false),
-        "REMOVE",
+        &with_remove_style,
+        &with_remove_galley,
         None,
         true,
         false,

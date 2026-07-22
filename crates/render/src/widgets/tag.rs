@@ -3,9 +3,10 @@
 
 use crate::tokens::{color, spacing, typography};
 use egui::{
-    Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind,
-    Ui,
+    Align2, Color32, FontFamily, FontId, Galley, Painter, Pos2, Rect, Response, Sense, Stroke,
+    StrokeKind, Ui,
 };
+use std::sync::Arc;
 
 /// Tag height (`Tag.jsx`: `height: 26`) — not a `spacing` token (nearest
 /// are 24/32), so a local module const per the magic-number rule.
@@ -58,6 +59,22 @@ pub struct Tag<'a> {
     pub dot_color: Option<Color32>,
     /// Whether to draw the remove (×) affordance.
     pub show_remove: bool,
+}
+
+/// Builds the tag's label galley once, at `fg` (`TagStyle::fg`, always
+/// `TEXT_INK` — see `Tag::resolve`) — the single shaping pass shared by
+/// [`Tag::show`] and its direct `paint`-layer gallery-harness callers
+/// (`gallery.rs`, 4 sites), so `show`/the gallery/`paint` all agree by
+/// construction (AC3).
+pub(crate) fn tag_label_galley(painter: &Painter, label: &str, fg: Color32) -> Arc<Galley> {
+    painter.layout_no_wrap(
+        label.to_owned(),
+        FontId::new(
+            typography::FS_SM,
+            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+        ),
+        fg,
+    )
 }
 
 impl<'a> Tag<'a> {
@@ -132,7 +149,7 @@ impl<'a> Tag<'a> {
         painter: &Painter,
         rect: Rect,
         style: &TagStyle,
-        label: &str,
+        label_galley: &Arc<Galley>,
         dot_color: Option<Color32>,
         show_remove: bool,
         remove_hovered: bool,
@@ -159,14 +176,11 @@ impl<'a> Tag<'a> {
 
         let remove_left = rect.max.x - PAD_X - REMOVE_SIZE;
 
-        painter.text(
+        crate::text::paint_galley(
+            painter,
             Pos2::new(cursor_x, rect.center().y),
             Align2::LEFT_CENTER,
-            label,
-            FontId::new(
-                typography::FS_SM,
-                FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-            ),
+            label_galley.clone(),
             style.fg,
         );
 
@@ -201,17 +215,9 @@ impl<'a> Tag<'a> {
     /// See the private `paint` layer's panics.
     pub fn show(self, ui: &mut Ui) -> TagResponse {
         let style = Self::resolve(self.selected);
-        let font = FontId::new(
-            typography::FS_SM,
-            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
-        );
-        let text_width = ui
-            .painter()
-            .layout_no_wrap(self.label.to_owned(), font, style.fg)
-            .rect
-            .width();
+        let label_galley = tag_label_galley(ui.painter(), self.label, style.fg);
 
-        let mut content_width = text_width;
+        let mut content_width = label_galley.size().x;
         if self.dot_color.is_some() {
             content_width += DOT_DIAMETER + GAP;
         }
@@ -240,7 +246,7 @@ impl<'a> Tag<'a> {
                 ui.painter(),
                 rect,
                 &style,
-                self.label,
+                &label_galley,
                 self.dot_color,
                 self.show_remove,
                 remove_hovered,
