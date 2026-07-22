@@ -193,13 +193,8 @@ impl<'a> Telemetry<'a> {
             color::TEXT_MUTED
         };
         let value_color = match tone {
-            Tone::Default => {
-                if on_ink {
-                    color::PAPER_0
-                } else {
-                    color::TEXT_INK
-                }
-            }
+            Tone::Default if on_ink => color::PAPER_0,
+            Tone::Default => color::TEXT_INK,
             Tone::Accent => color::ACCENT,
             Tone::Ok => color::OK,
             Tone::Warn => color::WARN,

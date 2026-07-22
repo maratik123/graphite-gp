@@ -206,13 +206,11 @@ impl AppShell {
             // Results respectively) — one merged arm, not a duplicate.
             Nav::TestLap | Nav::Again => self.screen = Screen::Race,
             Nav::Menu => self.screen = Screen::Setup,
-            Nav::Regenerate => {}
             Nav::Finish => self.screen = Screen::Results,
-            Nav::JumpTo(target) => {
-                if self.can_nav(target) {
-                    self.screen = target;
-                }
-            }
+            Nav::JumpTo(target) if self.can_nav(target) => self.screen = target,
+            // No-ops: `Regenerate` stays on the current screen; a `JumpTo` to a
+            // not-yet-reachable screen is ignored.
+            Nav::Regenerate | Nav::JumpTo(_) => {}
         }
     }
 
