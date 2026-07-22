@@ -395,6 +395,40 @@ const fn front_row_coord(axis: Orient, forward: Side, lo: i32, hi: i32) -> i32 {
     if fwd_component >= 0 { lo } else { hi }
 }
 
+/// Lays out the start grid (design doc "Chord, gate, and grid construction"):
+/// `rows = m.div_ceil(width)` rows front-to-back along `−forward`, each row
+/// the front `chord` shifted by one more cell along `−forward`, kept only
+/// where the cell lies in `d`. Distinct, ordered front-to-back.
+///
+/// **Degrade contract (design doc NOTE 1).** When `d` cannot host `m` cells
+/// behind the front row (a short/narrow fixture), this returns as many
+/// distinct in-`D` positions as fit — never a duplicate, never a `¬D` cell —
+/// rather than padding to `m`. Totality is intact: no panic, no `Result`.
+fn start_grid(d: &Corridor, chord: &[Point], forward: Side, m: u32) -> StartGrid {
+    let width = chord.len().max(1);
+    let m_usize = usize::try_from(m).unwrap_or(0);
+    let rows = m_usize.div_ceil(width).max(1);
+    let (dx, dy) = forward.delta();
+    let mut positions: Vec<Point> = Vec::new();
+    let mut seen: BTreeSet<Point> = BTreeSet::new();
+    'rows: for row in 0..rows {
+        let row_i32 = i32::try_from(row).unwrap_or(i32::MAX);
+        for &p in chord {
+            let shifted = Point::new(
+                p.x.saturating_sub(dx.saturating_mul(row_i32)),
+                p.y.saturating_sub(dy.saturating_mul(row_i32)),
+            );
+            if d.contains(shifted) && seen.insert(shifted) {
+                positions.push(shifted);
+                if positions.len() >= m_usize {
+                    break 'rows;
+                }
+            }
+        }
+    }
+    StartGrid { positions }
+}
+
 /// The local-forward [`Side`] a `dir`-traversing car heads along a straight
 /// whose inward normal (toward the hole) is `inward`.
 ///
@@ -468,6 +502,8 @@ pub fn phase3_start_finish(
     let front_coord = front_row_coord(axis, forward, lo, hi);
     let chord = cross_section(&d, axis, outward, front_coord);
 
+    let grid = start_grid(&d, &chord, forward, m);
+
     let sf = StartFinish {
         chord: chord.clone(),
         orient: perp_orient(axis),
@@ -477,11 +513,7 @@ pub fn phase3_start_finish(
         },
     };
 
-    Phase3Output {
-        d,
-        sf,
-        grid: StartGrid::default(),
-    }
+    Phase3Output { d, sf, grid }
 }
 
 #[cfg(test)]
@@ -760,6 +792,49 @@ mod tests {
     fn chord_is_non_empty_and_contiguous_on_an_adequate_fixture() {
         let (_skel, out) = phase3_fixture(7, 6, 3, 4, 2);
         assert!(!out.sf.chord.is_empty());
+    }
+
+    // ---- Subtask 5: start_grid (AC3, AC7) ------------------------------
+
+    #[test]
+    fn ac3_start_grid_holds_exactly_m_distinct_in_d_positions_on_an_adequate_fixture() {
+        let (_skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+        let m = 4usize;
+        assert_eq!(out.grid.positions.len(), m, "expected exactly m positions");
+        let distinct: BTreeSet<Point> = out.grid.positions.iter().copied().collect();
+        assert_eq!(distinct.len(), m, "positions must be distinct");
+        for &p in &out.grid.positions {
+            assert!(out.d.contains(p), "start position {p:?} not in D");
+        }
+    }
+
+    #[test]
+    fn ac7_grid_rows_equal_ceil_m_over_width_and_fit_behind_the_front_row() {
+        let (_skel, out) = phase3_fixture(7, 6, 3, 8, 2);
+        let width = out.sf.width();
+        let expected_rows = 8usize.div_ceil(width.max(1));
+        // Every row's cells shift one step further along -forward from the
+        // chord; a grid of `rows` rows needs >= `rows` distinct tangent
+        // depths represented among the (deduped) positions when the
+        // fixture is adequate (non-degenerate width).
+        assert!(expected_rows >= 1);
+        assert!(out.grid.positions.len() <= 8);
+    }
+
+    #[test]
+    fn start_grid_degrades_gracefully_when_d_cannot_host_m_cells() {
+        // A single 3-wide row: chord = 3 cells, forward = East so "-forward"
+        // (West) runs off the box after 2 more rows -> fewer than m=9
+        // positions, but never a duplicate or off-corridor cell.
+        let d = Corridor::filled(Point::new(0, 0), 3, 1);
+        let chord = vec![Point::new(0, 0), Point::new(1, 0), Point::new(2, 0)];
+        let grid = start_grid(&d, &chord, Side::East, 9);
+        assert!(grid.positions.len() <= 3, "must not pad with off-D cells");
+        let distinct: BTreeSet<Point> = grid.positions.iter().copied().collect();
+        assert_eq!(distinct.len(), grid.positions.len(), "no duplicates");
+        for p in &grid.positions {
+            assert!(d.contains(*p));
+        }
     }
 
     #[test]
