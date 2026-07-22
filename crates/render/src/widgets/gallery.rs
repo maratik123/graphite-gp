@@ -14,7 +14,8 @@ use super::card::{Card, Elevation};
 use super::icon_button::{IconButton, Variant as IconButtonVariant};
 use super::tag::Tag;
 use crate::icons::{Icon, IconSet};
-use egui::{Pos2, Rect};
+use crate::tokens::typography;
+use egui::{FontFamily, FontId, Pos2, Rect};
 
 /// The gallery's fixed canvas: 1040×900 logical points at
 /// `pixels_per_point = 1.0`.
@@ -152,7 +153,15 @@ fn draw_badges(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
                 20.0,
             );
             let style = Badge::resolve(tone, solid);
-            Badge::paint(painter, rect, &style, label);
+            let label_galley = painter.layout_no_wrap(
+                label.to_owned(),
+                FontId::new(
+                    typography::FS_XS,
+                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_MEDIUM.into()),
+                ),
+                style.fg,
+            );
+            Badge::paint(painter, rect, &style, &label_galley);
         }
     }
     y0 + cell_h * 5.0 + 10.0

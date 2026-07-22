@@ -5,7 +5,10 @@
 //! for layout uniformity with the other widgets.
 
 use crate::tokens::{color, spacing, typography};
-use egui::{Align2, Color32, CornerRadius, FontFamily, FontId, Painter, Rect, Response, Sense, Ui};
+use egui::{
+    Align2, Color32, CornerRadius, FontFamily, FontId, Galley, Painter, Rect, Response, Sense, Ui,
+};
+use std::sync::Arc;
 
 /// Badge tone (`Badge.d.ts` `tone`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,7 +125,7 @@ impl<'a> Badge<'a> {
     /// Panics at layout time if the caller has not installed
     /// [`crate::fonts::definitions`] into the drawing [`egui::Context`]
     /// first — this draws through `FontFamily::Name(fonts::JETBRAINS_MONO_MEDIUM)`.
-    pub(crate) fn paint(painter: &Painter, rect: Rect, style: &BadgeStyle, label: &str) {
+    pub(crate) fn paint(painter: &Painter, rect: Rect, style: &BadgeStyle, label: &Arc<Galley>) {
         let corner_radius = CornerRadius::from(style.radius);
         painter.rect_filled(rect, corner_radius, style.bg);
         if style.border != Color32::TRANSPARENT {
@@ -133,14 +136,11 @@ impl<'a> Badge<'a> {
                 egui::StrokeKind::Inside,
             );
         }
-        painter.text(
+        crate::text::paint_galley(
+            painter,
             rect.center(),
             Align2::CENTER_CENTER,
-            label,
-            FontId::new(
-                typography::FS_XS,
-                FontFamily::Name(crate::fonts::JETBRAINS_MONO_MEDIUM.into()),
-            ),
+            label.clone(),
             style.fg,
         );
     }
@@ -157,22 +157,18 @@ impl<'a> Badge<'a> {
     /// private `paint` layer this delegates to).
     pub fn show(self, ui: &mut Ui) -> Response {
         let style = Self::resolve(self.tone, self.solid);
-        let text_width = ui
-            .painter()
-            .layout_no_wrap(
-                self.label.to_owned(),
-                FontId::new(
-                    typography::FS_XS,
-                    FontFamily::Name(crate::fonts::JETBRAINS_MONO_MEDIUM.into()),
-                ),
-                style.fg,
-            )
-            .rect
-            .width();
-        let desired = egui::vec2(PAD_X.mul_add(2.0, text_width), HEIGHT);
+        let label_galley = ui.painter().layout_no_wrap(
+            self.label.to_owned(),
+            FontId::new(
+                typography::FS_XS,
+                FontFamily::Name(crate::fonts::JETBRAINS_MONO_MEDIUM.into()),
+            ),
+            style.fg,
+        );
+        let desired = egui::vec2(PAD_X.mul_add(2.0, label_galley.size().x), HEIGHT);
         let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
         if ui.is_rect_visible(rect) {
-            Self::paint(ui.painter(), rect, &style, self.label);
+            Self::paint(ui.painter(), rect, &style, &label_galley);
         }
         response
     }
