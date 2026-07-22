@@ -1,0 +1,275 @@
+//! `AppShell` wgpu golden (AC3) + `egui_kittest` click-through smoke (AC4)
+//! (design § Test Design, subtask 4) — mirrors `screens::setup_gallery`'s
+//! frame-1-install / frame-2-draw dance and `Rc<Cell<..>>` click-rect-capture
+//! idiom. Drives the real [`AppShell::show`] inside a `Harness` — no
+//! separate manual-layout `paint` path to keep in sync.
+
+use crate::widgets::CarKind;
+use crate::{Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
+use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
+
+/// The golden/click-through's fixed canvas. Height fits `setup_gallery.rs`'s
+/// `SetupScreen` body (640×620) plus [`crate::app::TOP_BAR_H`] of top-bar
+/// band on top; confirmed at mint. Width is `race_gallery.rs::CANVAS_SIZE`'s
+/// 900 (not `setup_gallery.rs`'s narrower 640) — measured requirement: at
+/// 640, `RaceScreen`'s narrow toolbar column packs its 3 `Switch`es right up
+/// against the right-aligned "Finish →" button, and the overlapping hit
+/// regions swallow the button's hover/click in
+/// [`click_through_setup_to_menu`] (`RaceScreen`'s own gallery avoids this by
+/// always using the 900-wide canvas).
+const CANVAS_SIZE: egui::Vec2 = egui::Vec2::new(960.0, 680.0);
+
+/// The fixed config the golden/click-through render — the mock's startup
+/// default (design § Key decisions).
+const FIXED_CONFIG: RaceConfig = RaceConfig {
+    cars: 4,
+    laps: 5,
+    v_target: 7,
+    difficulty: Difficulty::Pro,
+};
+
+/// A minimal, hand-built `TrackArtifact` (a 3×3 ring) — mirrors
+/// `track::mod::tests::fixture_track` (private to that module tree, so
+/// redeclared here for this sibling top-level test suite).
+fn fixture_track() -> TrackArtifact {
+    let mut corridor = Corridor::new(Point::new(0, 0), 5, 5);
+    for &(x, y) in &[
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (1, 2),
+        (3, 2),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+    ] {
+        corridor.set(Point::new(x, y), true);
+    }
+    let walls = walls_from_boundary(&corridor);
+    TrackArtifact {
+        walls,
+        sf: StartFinish {
+            chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![],
+                forward: Side::East,
+            },
+        },
+        corridor,
+        race_dir: RaceDir::Cw,
+        s_field: gp_core::track::SField::default(),
+        start_grid: gp_core::track::StartGrid::default(),
+        centerline: gp_core::track::Centerline::default(),
+        metrics: gp_core::track::TrackMetrics::default(),
+        width_min: 1,
+    }
+}
+
+/// The fixed 4-car standings fixture (mirrors
+/// `screens::results_gallery::fixture_standings`).
+fn fixture_standings() -> [StandingEntry; 4] {
+    [
+        StandingEntry {
+            car_index: 0,
+            kind: CarKind::You,
+            rank: 1,
+            finish_time: 38.0,
+        },
+        StandingEntry {
+            car_index: 1,
+            kind: CarKind::Ai,
+            rank: 2,
+            finish_time: 39.6,
+        },
+        StandingEntry {
+            car_index: 2,
+            kind: CarKind::Ai,
+            rank: 3,
+            finish_time: 41.2,
+        },
+        StandingEntry {
+            car_index: 3,
+            kind: CarKind::Ai,
+            rank: 4,
+            finish_time: 42.8,
+        },
+    ]
+}
+
+/// The fixed race summary (mirrors
+/// `screens::results_gallery::FIXED_SUMMARY`).
+const FIXED_SUMMARY: RaceSummary = RaceSummary {
+    fastest_lap: 12.4,
+    tempo: 0.87,
+    crashes: 1,
+};
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, PhaseStatus, fixture_standings, fixture_track,
+    };
+    use crate::app::{AppShell, Screen, ShellSession};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// AC3 — one wgpu frame renders the composed shell (top bar + fresh
+    /// `SetupScreen` body) and matches the minted `app_shell.png` exactly
+    /// (flat regions; AA edges exempt via `threshold(1.0)` +
+    /// `failed_pixel_count_threshold(0)`, the text-bearing-frame setting,
+    /// `setup_gallery.rs`'s precedent). Fresh shell on `Setup`: `New race`
+    /// active, `Race`/`Track lab` disabled.
+    #[cfg_attr(
+        miri,
+        ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
+    )]
+    #[test]
+    fn app_shell_matches_golden() {
+        let render_state = egui_kittest::wgpu::create_render_state(
+            egui_kittest::wgpu::default_wgpu_setup(),
+            egui_wgpu::RendererOptions::PREDICTABLE,
+        );
+        assert_eq!(
+            render_state.adapter.get_info().device_type,
+            egui_wgpu::wgpu::DeviceType::Cpu,
+            "resolved wgpu adapter is not a CPU/software device — install a \
+             Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
+        );
+
+        let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
+        let track = fixture_track();
+        let standings = fixture_standings();
+        let mut shell = AppShell::new(FIXED_CONFIG);
+
+        let mut fonts_installed = false;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(CANVAS_SIZE)
+            .with_pixels_per_point(1.0)
+            .with_theme(egui::Theme::Light)
+            .renderer(renderer)
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
+                let session = ShellSession {
+                    track: &track,
+                    cars: &[],
+                    reduced_motion: false,
+                    active: 0,
+                    laps_done: 0,
+                    total_laps: 1,
+                    phases: [PhaseStatus::Ok; 7],
+                    valid: true,
+                    seed: 7,
+                    standings: &standings,
+                    summary: FIXED_SUMMARY,
+                };
+                let _ = shell.show(ui, session);
+            });
+
+        harness.run_steps(1);
+
+        let image = harness.render().expect("offscreen wgpu render failed");
+
+        let options = egui_kittest::SnapshotOptions::new()
+            .threshold(1.0)
+            .failed_pixel_count_threshold(0);
+        if let Err(err) = egui_kittest::try_image_snapshot_options(&image, "app_shell", &options) {
+            panic!("{err}");
+        }
+    }
+
+    /// AC4 — an `egui_kittest` click-through smoke test drives the full loop
+    /// Setup→Lab→Race→Results→Menu(Setup) by clicking each screen's forward
+    /// control (`AppShell::show`'s `advance_rect`) and asserts the shell
+    /// lands on the expected screen at each step. Default (non-wgpu)
+    /// harness, no `render()`.
+    ///
+    /// Miri-ignored: NOT for a golden's reason (no `render()` here) —
+    /// `Harness::builder()` itself aborts under Miri isolation via
+    /// `getcwd` (`egui_kittest`'s `kittest.toml` lookup), the same cause
+    /// `setup_gallery.rs`'s interaction test documents.
+    #[cfg_attr(
+        miri,
+        ignore = "Harness::builder() calls getcwd via egui_kittest's kittest.toml \
+                  lookup, unsupported under Miri isolation (not the golden's \
+                  Vulkan-dlopen cause, since this test never calls render())"
+    )]
+    #[test]
+    fn click_through_setup_to_menu() {
+        let latest_screen: Rc<Cell<Screen>> = Rc::new(Cell::new(Screen::Setup));
+        let latest_rect: Rc<Cell<Option<egui::Rect>>> = Rc::new(Cell::new(None));
+        let latest_screen_c = Rc::clone(&latest_screen);
+        let latest_rect_c = Rc::clone(&latest_rect);
+
+        let track = fixture_track();
+        let standings = fixture_standings();
+        let mut shell = AppShell::new(FIXED_CONFIG);
+
+        let mut fonts_installed = false;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(CANVAS_SIZE)
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
+                let session = ShellSession {
+                    track: &track,
+                    cars: &[],
+                    reduced_motion: false,
+                    active: 0,
+                    laps_done: 0,
+                    total_laps: 1,
+                    phases: [PhaseStatus::Ok; 7],
+                    valid: true,
+                    seed: 7,
+                    standings: &standings,
+                    summary: FIXED_SUMMARY,
+                };
+                let resp = shell.show(ui, session);
+                latest_screen_c.set(resp.screen);
+                latest_rect_c.set(Some(resp.advance_rect));
+            });
+
+        // One rest frame, then read the just-drawn screen's forward-control
+        // rect, then click it (hover/drag/drop, 3 `step()`s — the
+        // `race_gallery.rs` click idiom, no AccessKit label to query).
+        let advance = |harness: &mut egui_kittest::Harness<'_, _>| -> egui::Rect {
+            harness.run_steps(1);
+            latest_rect
+                .get()
+                .expect("rest frame captured the advance rect")
+        };
+        let click = |harness: &mut egui_kittest::Harness<'_, _>, rect: egui::Rect| {
+            let center = rect.center();
+            harness.hover_at(center);
+            harness.step();
+            harness.drag_at(center);
+            harness.step();
+            harness.drop_at(center);
+            harness.step();
+        };
+
+        let rect = advance(&mut harness);
+        click(&mut harness, rect);
+        assert_eq!(latest_screen.get(), Screen::Lab, "Generate -> Lab");
+
+        let rect = advance(&mut harness);
+        click(&mut harness, rect);
+        assert_eq!(latest_screen.get(), Screen::Race, "Test lap -> Race");
+
+        let rect = advance(&mut harness);
+        click(&mut harness, rect);
+        assert_eq!(latest_screen.get(), Screen::Results, "Finish -> Results");
+
+        let rect = advance(&mut harness);
+        click(&mut harness, rect);
+        assert_eq!(latest_screen.get(), Screen::Setup, "Menu -> Setup");
+    }
+}

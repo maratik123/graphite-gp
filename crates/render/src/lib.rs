@@ -13,6 +13,9 @@
 use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
 
+pub mod app;
+#[cfg(test)]
+mod app_gallery;
 pub mod fonts;
 pub mod icons;
 pub mod placeholder;
@@ -23,14 +26,15 @@ pub mod tokens;
 pub mod track;
 pub mod widgets;
 
+pub use app::{AppShell, Screen, ShellResponse, ShellSession};
 pub use screens::{
     Difficulty, LabInput, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceInput, RaceResponse,
-    RaceScreen,
+    RaceScreen, RaceSummary, ResultsInput, ResultsResponse, ResultsScreen, StandingEntry,
 };
 pub use track::CarRender;
 
 /// Optional analytics overlays (design doc §4).
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Overlays {
     /// Color the asphalt by `speed_heatmap`.
     pub speed_heatmap: bool,
