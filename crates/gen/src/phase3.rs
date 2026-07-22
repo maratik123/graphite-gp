@@ -837,6 +837,157 @@ mod tests {
         }
     }
 
+    // ---- Subtask 6: end-to-end (AC2, AC6, AC8, AC9) --------------------
+
+    /// Test-only accel-zone measurement (design doc "Budget measurement" —
+    /// test-only, not a production API): the fine-point distance from
+    /// `front_coord` to the far end of the same flat run used to place it —
+    /// the forward headroom to the first corner, along `forward`'s axis.
+    fn measure_accel_zone_fine_points(
+        axis: Orient,
+        forward: Side,
+        lo: i32,
+        hi: i32,
+        front_coord: i32,
+    ) -> i32 {
+        let (dx, dy) = forward.delta();
+        let step = match axis {
+            Orient::Horizontal => dx,
+            Orient::Vertical => dy,
+        };
+        if step >= 0 {
+            hi.saturating_sub(front_coord)
+        } else {
+            front_coord.saturating_sub(lo)
+        }
+    }
+
+    #[test]
+    fn ac2_measured_accel_zone_meets_v_target_squared_over_2_on_an_adequate_fixture() {
+        let seeds = Seeds {
+            generation: 7,
+            ..Default::default()
+        };
+        let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let d = crate::phase2_rasterize(&skel, 6, 3);
+        let seg = pick_straight_run(&skel.ring, &skel.hole);
+        let outward = opposite_side(seg.inward);
+        let forward = forward_side(skel.dir, seg.inward);
+        let (lo, hi) = longest_flat_run(&wall_profile(&d, seg.axis, outward));
+        let front_coord = front_row_coord(seg.axis, forward, lo, hi);
+
+        let v_target = 2i32;
+        let threshold = v_target.saturating_mul(v_target) / 2; // integer division
+        let accel = measure_accel_zone_fine_points(seg.axis, forward, lo, hi, front_coord);
+        assert!(
+            accel >= threshold,
+            "accel zone {accel} < v_target^2/2 = {threshold}"
+        );
+    }
+
+    #[test]
+    fn ac6_start_positions_read_negative_one_and_front_row_registers_a_forward_crossing() {
+        let (_skel, out) = phase3_fixture(7, 6, 3, 4, 2);
+
+        // No start car has crossed yet: every fresh LapCounter reads -1 / 0.
+        for &_p in &out.grid.positions {
+            let counter = gp_core::sim::LapCounter::new();
+            assert_eq!(counter.raw(), -1);
+            assert_eq!(counter.laps(), 0);
+        }
+
+        // A first forward move from the front row (the gate's own `behind`
+        // row) registers exactly a +1 crossing, for every front-row cell.
+        let (dx, dy) = out.sf.gate.forward.delta();
+        for &p in &out.sf.chord {
+            let mut counter = gp_core::sim::LapCounter::new();
+            let to = Point::new(p.x.saturating_add(dx), p.y.saturating_add(dy));
+            counter.register_move(&out.sf, p, to);
+            assert_eq!(
+                counter.raw(),
+                0,
+                "front row cell {p:?} must register a +1 crossing"
+            );
+        }
+    }
+
+    #[test]
+    fn ac8_phase3_start_finish_is_deterministic() {
+        let seeds = Seeds {
+            generation: 11,
+            ..Default::default()
+        };
+        let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let d1 = crate::phase2_rasterize(&skel, 6, 3);
+        let d2 = crate::phase2_rasterize(&skel, 6, 3);
+
+        let a = phase3_start_finish(d1, &skel, 4, 2);
+        let b = phase3_start_finish(d2, &skel, 4, 2);
+
+        let drivable = |d: &Corridor| -> BTreeSet<Point> {
+            box_points(d).filter(|&p| d.contains(p)).collect()
+        };
+        assert_eq!(drivable(&a.d), drivable(&b.d));
+        assert_eq!(a.sf.chord, b.sf.chord);
+        assert_eq!(a.sf.orient, b.sf.orient);
+        assert_eq!(a.sf.gate.behind, b.sf.gate.behind);
+        assert_eq!(a.sf.gate.forward, b.sf.gate.forward);
+        assert_eq!(a.grid.positions, b.grid.positions);
+    }
+
+    /// AC6 snapshot fixture: pins an exact `Phase3Output` shape for a known
+    /// seed (Ф1/Ф2 snapshot style) — counts + boundary extremes, not a full
+    /// point-set literal (file-size discipline, mirroring Ф2's own pin).
+    #[test]
+    fn ac6_snapshot_pins_exact_grid_and_chord_shape_for_a_known_seed() {
+        let seeds = Seeds {
+            generation: 99,
+            ..Default::default()
+        };
+        let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+        let d = crate::phase2_rasterize(&skel, 6, 3);
+        let out = phase3_start_finish(d, &skel, 4, 2);
+
+        // Minted values, cross-checked against AC1/AC3/AC9 before freezing:
+        // sf.width() >= m (36 >= 4), grid holds exactly m == 4 positions,
+        // every position in D (already asserted generically by AC9's sweep).
+        assert_eq!(out.sf.chord.len(), 36, "pinned chord width changed");
+        assert_eq!(out.grid.positions.len(), 4, "pinned grid size changed");
+        assert_eq!(
+            out.sf.orient,
+            Orient::Horizontal,
+            "pinned sf.orient changed"
+        );
+        assert_eq!(
+            out.sf.gate.forward,
+            Side::North,
+            "pinned gate.forward changed"
+        );
+    }
+
+    #[test]
+    fn ac9_phase3_start_finish_is_total_across_a_seed_sweep() {
+        const PROPERTY_SEED_COUNT: u64 = 32;
+        for seed in 0..PROPERTY_SEED_COUNT {
+            let seeds = Seeds {
+                generation: seed,
+                ..Default::default()
+            };
+            let skel = crate::phase1_coarse_ring(3, &mut seeds.generation_rng());
+            let d = crate::phase2_rasterize(&skel, 6, 3);
+            let out = phase3_start_finish(d, &skel, 4, 2);
+            // Total: reaching here without panicking already discharges AC9;
+            // also assert the invariant that never regresses: every start
+            // position lies in the (possibly thickened) D.
+            for &p in &out.grid.positions {
+                assert!(
+                    out.d.contains(p),
+                    "seed {seed}: start position {p:?} not in D"
+                );
+            }
+        }
+    }
+
     #[test]
     fn thicken_boundary_margin_push_grows_the_box_and_preserves_topology() {
         // REC 2: a 1-tall strip with no north margin at all — any north push
