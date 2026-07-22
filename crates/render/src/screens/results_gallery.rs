@@ -2,8 +2,7 @@
 //! mirrors `race_gallery.rs`'s frame-1-install / frame-2-draw dance and
 //! `Rc<Cell<..>>` click-rect-capture idiom (design § *Test Design*).
 
-use super::results::{RaceSummary, ResultsInput, ResultsScreen, StandingEntry};
-use crate::widgets::CarKind;
+use super::results::{ResultsInput, ResultsScreen};
 
 /// The golden's fixed canvas: wide enough for the 560 column + side margins
 /// (`setup_gallery.rs::CANVAS_SIZE`'s 640 width), and taller than
@@ -16,48 +15,10 @@ use crate::widgets::CarKind;
 /// element down through the action row with a small margin.
 const CANVAS_SIZE: egui::Vec2 = egui::Vec2::new(640.0, 610.0);
 
-/// The fixed 4-car standings fixture — the JSX exemplar (`Screens.jsx:216-219`
-/// `(38 + k * 1.6).toFixed(1)`), in the JSX's own `car_index == slice
-/// position` order (`k === 0` is `You`, `k > 0` is `Ai`).
-fn fixture_standings() -> [StandingEntry; 4] {
-    [
-        StandingEntry {
-            car_index: 0,
-            kind: CarKind::You,
-            rank: 1,
-            finish_time: 38.0,
-        },
-        StandingEntry {
-            car_index: 1,
-            kind: CarKind::Ai,
-            rank: 2,
-            finish_time: 39.6,
-        },
-        StandingEntry {
-            car_index: 2,
-            kind: CarKind::Ai,
-            rank: 3,
-            finish_time: 41.2,
-        },
-        StandingEntry {
-            car_index: 3,
-            kind: CarKind::Ai,
-            rank: 4,
-            finish_time: 42.8,
-        },
-    ]
-}
-
-/// The fixed summary — the JSX exemplar (`Screens.jsx:225-227`).
-const FIXED_SUMMARY: RaceSummary = RaceSummary {
-    fastest_lap: 12.4,
-    tempo: 0.87,
-    crashes: 1,
-};
-
 #[cfg(test)]
 mod tests {
-    use super::{CANVAS_SIZE, FIXED_SUMMARY, ResultsInput, ResultsScreen, fixture_standings};
+    use super::{CANVAS_SIZE, ResultsInput, ResultsScreen};
+    use crate::gallery_support::{FIXED_SUMMARY, click, fixture_standings};
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -174,20 +135,6 @@ mod tests {
 
         assert!(!saw_again.get(), "rest frame — no again click yet");
         assert!(!saw_menu.get(), "rest frame — no menu click yet");
-
-        let click = |harness: &mut egui_kittest::Harness<'_, _>,
-                     rect: &Cell<Option<egui::Rect>>| {
-            let center = rect
-                .get()
-                .expect("rest frame captured the button rect")
-                .center();
-            harness.hover_at(center);
-            harness.step();
-            harness.drag_at(center);
-            harness.step();
-            harness.drop_at(center);
-            harness.step();
-        };
 
         click(&mut harness, &again_rect);
         assert!(saw_again.get(), "AC5: Race again click emits again == true");

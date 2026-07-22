@@ -534,6 +534,24 @@ mod tests {
         points.iter().copied().collect()
     }
 
+    /// Asserts no triangle in `triangles` covers the L-shape's notch point
+    /// `(1, 2)` — i.e. the triangulation stays inside the concave polygon
+    /// (shared by the `Pos2`-space and lattice-space concave-L tests).
+    fn assert_no_triangle_covers_notch(triangles: &[[u32; 3]], loop_points: &[Pos2]) {
+        let notch = pos2(1.0, 2.0);
+        for &[a, b, c] in triangles {
+            assert!(
+                !super::point_in_triangle(
+                    notch,
+                    loop_points[a as usize],
+                    loop_points[b as usize],
+                    loop_points[c as usize],
+                ),
+                "triangle [{a},{b},{c}] covers the notch point, exiting the polygon"
+            );
+        }
+    }
+
     /// AC1 — the classified asphalt cell set equals `{p : corridor.contains(p)}`
     /// exactly, on a hand-built ring.
     #[test]
@@ -752,18 +770,7 @@ mod tests {
             "area_sum={area_sum} expected={expected}"
         );
 
-        let notch = pos2(1.0, 2.0);
-        for &[a, b, c] in &triangles {
-            assert!(
-                !super::point_in_triangle(
-                    notch,
-                    loop_points[a as usize],
-                    loop_points[b as usize],
-                    loop_points[c as usize],
-                ),
-                "triangle [{a},{b},{c}] covers the notch point, exiting the polygon"
-            );
-        }
+        assert_no_triangle_covers_notch(&triangles, &loop_points);
     }
 
     /// A2 (convex, lattice) — a lattice-space square loop triangulates to
@@ -807,18 +814,7 @@ mod tests {
             "area_sum={area_sum} expected={expected}"
         );
 
-        let notch = pos2(1.0, 2.0);
-        for &[a, b, c] in &triangles {
-            assert!(
-                !super::point_in_triangle(
-                    notch,
-                    loop_points[a as usize],
-                    loop_points[b as usize],
-                    loop_points[c as usize],
-                ),
-                "triangle [{a},{b},{c}] covers the notch point, exiting the polygon"
-            );
-        }
+        assert_no_triangle_covers_notch(&triangles, &loop_points);
     }
 
     /// A2 (fill order) — `fill` emits the outer loop as an `ASPHALT` mesh

@@ -162,9 +162,9 @@ mod tests {
     use super::{BakedTrackGeometry, Layer};
     use crate::{CarRender, Overlays};
     use egui::{Pos2, Rect, pos2};
-    use gp_core::geom::{Orient, Point, Side, walls_from_boundary};
+    use gp_core::geom::Point;
     use gp_core::sim::CarState;
-    use gp_core::track::{RaceDir, StartFinish, TimingGate, TrackArtifact};
+    use gp_core::track::TrackArtifact;
     use strum::IntoEnumIterator;
 
     /// AC5/AC9 — the documented back-to-front layer order is exactly (final,
@@ -198,29 +198,11 @@ mod tests {
         );
     }
 
-    /// A minimal, hand-built `TrackArtifact` (a 3×3 ring) — every field
-    /// `draw_frame` does not read stays at its cheapest valid default.
+    /// A minimal, hand-built `TrackArtifact` (a 3×3 ring) — delegates to the
+    /// single [`ring_track`](super::test_support::ring_track) definition in
+    /// `test_support`.
     fn fixture_track() -> TrackArtifact {
-        let corridor = super::test_support::ring_3x3();
-        let walls = walls_from_boundary(&corridor);
-        TrackArtifact {
-            walls,
-            sf: StartFinish {
-                chord: vec![Point::new(1, 1), Point::new(2, 1), Point::new(3, 1)],
-                orient: Orient::Horizontal,
-                gate: TimingGate {
-                    behind: vec![],
-                    forward: Side::East,
-                },
-            },
-            corridor,
-            race_dir: RaceDir::Cw,
-            s_field: gp_core::track::SField::default(),
-            start_grid: gp_core::track::StartGrid::default(),
-            centerline: gp_core::track::Centerline::default(),
-            metrics: gp_core::track::TrackMetrics::default(),
-            width_min: 1,
-        }
+        super::test_support::ring_track()
     }
 
     /// Renders `track`/`cars` once with a bare (fontless) `egui::Context` —

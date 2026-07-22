@@ -17,6 +17,8 @@ pub mod app;
 #[cfg(test)]
 mod app_gallery;
 pub mod fonts;
+#[cfg(test)]
+mod gallery_support;
 pub mod icons;
 pub mod screens;
 #[cfg(test)]

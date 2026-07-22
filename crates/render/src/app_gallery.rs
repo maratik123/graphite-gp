@@ -4,9 +4,10 @@
 //! idiom. Drives the real [`AppShell::show`] inside a `Harness` — no
 //! separate manual-layout `paint` path to keep in sync.
 
+use crate::app::{AppShell, ShellSession};
+use crate::gallery_support::{FIXED_SUMMARY, fixture_standings};
 use crate::track::test_support::scene_track_with_metrics;
-use crate::widgets::CarKind;
-use crate::{CarRender, Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
+use crate::{BakedTrackGeometry, CarRender, Difficulty, PhaseStatus, RaceConfig, StandingEntry};
 use gp_core::geom::Point;
 use gp_core::sim::CarState;
 use gp_core::track::TrackArtifact;
@@ -44,45 +45,6 @@ const FIXED_CONFIG: RaceConfig = RaceConfig {
 fn fixture_track() -> TrackArtifact {
     scene_track_with_metrics()
 }
-
-/// The fixed 4-car standings fixture (mirrors
-/// `screens::results_gallery::fixture_standings`).
-fn fixture_standings() -> [StandingEntry; 4] {
-    [
-        StandingEntry {
-            car_index: 0,
-            kind: CarKind::You,
-            rank: 1,
-            finish_time: 38.0,
-        },
-        StandingEntry {
-            car_index: 1,
-            kind: CarKind::Ai,
-            rank: 2,
-            finish_time: 39.6,
-        },
-        StandingEntry {
-            car_index: 2,
-            kind: CarKind::Ai,
-            rank: 3,
-            finish_time: 41.2,
-        },
-        StandingEntry {
-            car_index: 3,
-            kind: CarKind::Ai,
-            rank: 4,
-            finish_time: 42.8,
-        },
-    ]
-}
-
-/// The fixed race summary (mirrors
-/// `screens::results_gallery::FIXED_SUMMARY`).
-const FIXED_SUMMARY: RaceSummary = RaceSummary {
-    fastest_lap: 12.4,
-    tempo: 0.87,
-    crashes: 1,
-};
 
 /// A 4-car render fixture (player index 0 + 3 rivals, matching
 /// [`fixture_standings`]'s 4 entries), each with a non-zero velocity so the
@@ -150,14 +112,91 @@ fn fixture_race_cars(trails: &[[Point; 2]; 4]) -> [CarRender<'_>; 4] {
     ]
 }
 
+/// The fixed `ShellSession` the gallery renders, over `cars` (empty for the
+/// non-Race screens) — the single source of the session literal every test
+/// otherwise rebuilt verbatim.
+fn shell_session<'a>(
+    track: &'a TrackArtifact,
+    geometry: &'a BakedTrackGeometry,
+    cars: &'a [CarRender<'a>],
+    standings: &'a [StandingEntry],
+) -> ShellSession<'a> {
+    ShellSession {
+        track,
+        geometry,
+        cars,
+        reduced_motion: false,
+        active: 0,
+        laps_done: 0,
+        total_laps: 1,
+        phases: [PhaseStatus::Ok; 7],
+        valid: true,
+        seed: 7,
+        standings,
+        summary: FIXED_SUMMARY,
+    }
+}
+
+/// Renders `shell` (already driven to its target screen) for one wgpu frame
+/// over the fixed [`shell_session`] and asserts it matches the `snapshot_name`
+/// golden — the shared body of the `app_shell*` golden tests (flat regions;
+/// AA edges exempt via `threshold(1.0)` + `failed_pixel_count_threshold(0)`).
+fn render_shell_golden(
+    mut shell: AppShell,
+    track: &TrackArtifact,
+    geometry: &BakedTrackGeometry,
+    cars: &[CarRender<'_>],
+    standings: &[StandingEntry],
+    snapshot_name: &str,
+) {
+    let render_state = egui_kittest::wgpu::create_render_state(
+        egui_kittest::wgpu::default_wgpu_setup(),
+        egui_wgpu::RendererOptions::PREDICTABLE,
+    );
+    assert_eq!(
+        render_state.adapter.get_info().device_type,
+        egui_wgpu::wgpu::DeviceType::Cpu,
+        "resolved wgpu adapter is not a CPU/software device — install a \
+         Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
+    );
+
+    let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
+    let mut fonts_installed = false;
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(CANVAS_SIZE)
+        .with_pixels_per_point(1.0)
+        .with_theme(egui::Theme::Light)
+        .renderer(renderer)
+        .build_ui(move |ui| {
+            if !fonts_installed {
+                ui.ctx().set_fonts(crate::fonts::definitions());
+                fonts_installed = true;
+                return;
+            }
+            let session = shell_session(track, geometry, cars, standings);
+            let _ = shell.show(ui, session);
+        });
+
+    harness.run_steps(1);
+
+    let image = harness.render().expect("offscreen wgpu render failed");
+
+    let options = egui_kittest::SnapshotOptions::new()
+        .threshold(1.0)
+        .failed_pixel_count_threshold(0);
+    if let Err(err) = egui_kittest::try_image_snapshot_options(&image, snapshot_name, &options) {
+        panic!("{err}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, PhaseStatus, fixture_race_cars,
-        fixture_standings, fixture_track,
+        CANVAS_SIZE, FIXED_CONFIG, fixture_race_cars, fixture_standings, fixture_track,
+        render_shell_golden, shell_session,
     };
     use crate::BakedTrackGeometry;
-    use crate::app::{AppShell, Nav, Screen, ShellSession};
+    use crate::app::{AppShell, Nav, Screen};
     use egui::epaint::Primitive;
     use gp_core::geom::Point;
     use std::cell::Cell;
@@ -206,20 +245,7 @@ mod tests {
         };
 
         let output = ctx.run_ui(input, |ui| {
-            let session = ShellSession {
-                track: &track,
-                geometry: &geometry,
-                cars: &[],
-                reduced_motion: false,
-                active: 0,
-                laps_done: 0,
-                total_laps: 1,
-                phases: [PhaseStatus::Ok; 7],
-                valid: true,
-                seed: 7,
-                standings: &standings,
-                summary: FIXED_SUMMARY,
-            };
+            let session = shell_session(&track, &geometry, &[], &standings);
             let _ = shell.show(ui, session);
         });
         let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
@@ -252,62 +278,11 @@ mod tests {
     )]
     #[test]
     fn app_shell_matches_golden() {
-        let render_state = egui_kittest::wgpu::create_render_state(
-            egui_kittest::wgpu::default_wgpu_setup(),
-            egui_wgpu::RendererOptions::PREDICTABLE,
-        );
-        assert_eq!(
-            render_state.adapter.get_info().device_type,
-            egui_wgpu::wgpu::DeviceType::Cpu,
-            "resolved wgpu adapter is not a CPU/software device — install a \
-             Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
-        );
-
-        let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
-        let mut shell = AppShell::new(FIXED_CONFIG);
-
-        let mut fonts_installed = false;
-        let mut harness = egui_kittest::Harness::builder()
-            .with_size(CANVAS_SIZE)
-            .with_pixels_per_point(1.0)
-            .with_theme(egui::Theme::Light)
-            .renderer(renderer)
-            .build_ui(move |ui| {
-                if !fonts_installed {
-                    ui.ctx().set_fonts(crate::fonts::definitions());
-                    fonts_installed = true;
-                    return;
-                }
-                let session = ShellSession {
-                    track: &track,
-                    geometry: &geometry,
-                    cars: &[],
-                    reduced_motion: false,
-                    active: 0,
-                    laps_done: 0,
-                    total_laps: 1,
-                    phases: [PhaseStatus::Ok; 7],
-                    valid: true,
-                    seed: 7,
-                    standings: &standings,
-                    summary: FIXED_SUMMARY,
-                };
-                let _ = shell.show(ui, session);
-            });
-
-        harness.run_steps(1);
-
-        let image = harness.render().expect("offscreen wgpu render failed");
-
-        let options = egui_kittest::SnapshotOptions::new()
-            .threshold(1.0)
-            .failed_pixel_count_threshold(0);
-        if let Err(err) = egui_kittest::try_image_snapshot_options(&image, "app_shell", &options) {
-            panic!("{err}");
-        }
+        let shell = AppShell::new(FIXED_CONFIG);
+        render_shell_golden(shell, &track, &geometry, &[], &standings, "app_shell");
     }
 
     /// Reviewer follow-up (PR #118 round 1) — same harness/fixtures/options
@@ -321,66 +296,13 @@ mod tests {
     )]
     #[test]
     fn app_shell_lab_matches_golden() {
-        let render_state = egui_kittest::wgpu::create_render_state(
-            egui_kittest::wgpu::default_wgpu_setup(),
-            egui_wgpu::RendererOptions::PREDICTABLE,
-        );
-        assert_eq!(
-            render_state.adapter.get_info().device_type,
-            egui_wgpu::wgpu::DeviceType::Cpu,
-            "resolved wgpu adapter is not a CPU/software device — install a \
-             Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
-        );
-
-        let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
         let mut shell = AppShell::new(FIXED_CONFIG);
         shell.apply(Nav::Generate);
         assert_eq!(shell.screen(), Screen::Lab, "Generate -> Lab");
-
-        let mut fonts_installed = false;
-        let mut harness = egui_kittest::Harness::builder()
-            .with_size(CANVAS_SIZE)
-            .with_pixels_per_point(1.0)
-            .with_theme(egui::Theme::Light)
-            .renderer(renderer)
-            .build_ui(move |ui| {
-                if !fonts_installed {
-                    ui.ctx().set_fonts(crate::fonts::definitions());
-                    fonts_installed = true;
-                    return;
-                }
-                let session = ShellSession {
-                    track: &track,
-                    geometry: &geometry,
-                    cars: &[],
-                    reduced_motion: false,
-                    active: 0,
-                    laps_done: 0,
-                    total_laps: 1,
-                    phases: [PhaseStatus::Ok; 7],
-                    valid: true,
-                    seed: 7,
-                    standings: &standings,
-                    summary: FIXED_SUMMARY,
-                };
-                let _ = shell.show(ui, session);
-            });
-
-        harness.run_steps(1);
-
-        let image = harness.render().expect("offscreen wgpu render failed");
-
-        let options = egui_kittest::SnapshotOptions::new()
-            .threshold(1.0)
-            .failed_pixel_count_threshold(0);
-        if let Err(err) =
-            egui_kittest::try_image_snapshot_options(&image, "app_shell_lab", &options)
-        {
-            panic!("{err}");
-        }
+        render_shell_golden(shell, &track, &geometry, &[], &standings, "app_shell_lab");
     }
 
     /// Reviewer follow-up (PR #118 round 1) — same harness/fixtures/options
@@ -394,18 +316,6 @@ mod tests {
     )]
     #[test]
     fn app_shell_race_matches_golden() {
-        let render_state = egui_kittest::wgpu::create_render_state(
-            egui_kittest::wgpu::default_wgpu_setup(),
-            egui_wgpu::RendererOptions::PREDICTABLE,
-        );
-        assert_eq!(
-            render_state.adapter.get_info().device_type,
-            egui_wgpu::wgpu::DeviceType::Cpu,
-            "resolved wgpu adapter is not a CPU/software device — install a \
-             Vulkan software ICD (mesa-vulkan-drivers / lavapipe) to match CI"
-        );
-
-        let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
         let standings = fixture_standings();
@@ -424,48 +334,14 @@ mod tests {
             Screen::Race,
             "Generate -> Lab -> TestLap -> Race"
         );
-
-        let mut fonts_installed = false;
-        let mut harness = egui_kittest::Harness::builder()
-            .with_size(CANVAS_SIZE)
-            .with_pixels_per_point(1.0)
-            .with_theme(egui::Theme::Light)
-            .renderer(renderer)
-            .build_ui(move |ui| {
-                if !fonts_installed {
-                    ui.ctx().set_fonts(crate::fonts::definitions());
-                    fonts_installed = true;
-                    return;
-                }
-                let session = ShellSession {
-                    track: &track,
-                    geometry: &geometry,
-                    cars: &cars,
-                    reduced_motion: false,
-                    active: 0,
-                    laps_done: 0,
-                    total_laps: 1,
-                    phases: [PhaseStatus::Ok; 7],
-                    valid: true,
-                    seed: 7,
-                    standings: &standings,
-                    summary: FIXED_SUMMARY,
-                };
-                let _ = shell.show(ui, session);
-            });
-
-        harness.run_steps(1);
-
-        let image = harness.render().expect("offscreen wgpu render failed");
-
-        let options = egui_kittest::SnapshotOptions::new()
-            .threshold(1.0)
-            .failed_pixel_count_threshold(0);
-        if let Err(err) =
-            egui_kittest::try_image_snapshot_options(&image, "app_shell_race", &options)
-        {
-            panic!("{err}");
-        }
+        render_shell_golden(
+            shell,
+            &track,
+            &geometry,
+            &cars,
+            &standings,
+            "app_shell_race",
+        );
     }
 
     /// AC4 — an `egui_kittest` click-through smoke test drives the full loop
@@ -505,20 +381,7 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let session = ShellSession {
-                    track: &track,
-                    geometry: &geometry,
-                    cars: &[],
-                    reduced_motion: false,
-                    active: 0,
-                    laps_done: 0,
-                    total_laps: 1,
-                    phases: [PhaseStatus::Ok; 7],
-                    valid: true,
-                    seed: 7,
-                    standings: &standings,
-                    summary: FIXED_SUMMARY,
-                };
+                let session = shell_session(&track, &geometry, &[], &standings);
                 let resp = shell.show(ui, session);
                 latest_screen_c.set(resp.screen);
                 latest_rect_c.set(Some(resp.advance_rect));

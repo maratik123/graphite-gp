@@ -2,13 +2,11 @@
 //! mirrors `lab_gallery.rs`'s frame-1-install / frame-2-draw dance and
 //! Rc<Cell> click-rect-capture idiom (design § *Test Design*).
 
-use super::race::{CAR_NAMES, RaceInput, RaceScreen};
-use crate::{CarRender, Overlays, Scene};
-use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
+use super::race::{CAR_NAMES, RaceInput, RaceResponse, RaceScreen};
+use crate::{BakedTrackGeometry, CarRender, Overlays, Scene};
+use gp_core::geom::Point;
 use gp_core::sim::CarState;
-use gp_core::track::{
-    Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackArtifact, TrackMetrics,
-};
+use gp_core::track::TrackArtifact;
 
 /// The golden's fixed canvas: wide enough to fit the two-column layout
 /// (a comfortable left column + `COL_GAP` + `COL_RIGHT_W` right column) with
@@ -32,43 +30,11 @@ const FIXED_LAPS_DONE: i32 = 2;
 /// The fixed total-laps the golden/interaction tests render.
 const FIXED_TOTAL_LAPS: i32 = 5;
 
-/// A hand-built `TrackArtifact` fixture: a chunky rounded-rect ring (mirrors
-/// `lab_gallery.rs::fixture_track`'s pattern).
+/// A hand-built `TrackArtifact` fixture: the shared chunky rounded-rect ring
+/// with default (empty) metrics — the single [`scene_track`] definition in
+/// `track::test_support`.
 fn fixture_track() -> TrackArtifact {
-    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if !in_hole {
-                corridor.set(Point::new(x, y), true);
-            }
-        }
-    }
-    let walls = walls_from_boundary(&corridor);
-
-    TrackArtifact {
-        walls,
-        sf: StartFinish {
-            chord: vec![
-                Point::new(7, 2),
-                Point::new(7, 3),
-                Point::new(7, 4),
-                Point::new(7, 5),
-            ],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![],
-                forward: Side::East,
-            },
-        },
-        corridor,
-        race_dir: RaceDir::Cw,
-        s_field: SField::default(),
-        start_grid: StartGrid::default(),
-        centerline: Centerline::default(),
-        metrics: TrackMetrics::default(),
-        width_min: 3,
-    }
+    crate::track::test_support::scene_track()
 }
 
 /// The fixed 3-car render slice (player index 0 + 2 rivals), each with a
@@ -119,12 +85,43 @@ fn fixture_cars(trails: &[[Point; 2]; 3]) -> [CarRender<'_>; 3] {
     ]
 }
 
+/// The fixed 3-car trail slice — one prior cell per car so the trail dots
+/// render (shared by the golden and interaction tests).
+fn fixture_trails() -> [[Point; 2]; 3] {
+    [
+        [Point::new(3, 7), Point::new(4, 7)],
+        [Point::new(8, 2), Point::new(8, 3)],
+        [Point::new(6, 10), Point::new(5, 10)],
+    ]
+}
+
+/// Builds the fixed `RaceScreen` over `track`/`geometry`/`cars` and shows it
+/// in `ui`, returning its response — the shared frame-2 draw body of the
+/// golden and interaction tests.
+fn show_race(
+    ui: &mut egui::Ui,
+    track: &TrackArtifact,
+    geometry: &BakedTrackGeometry,
+    cars: &[CarRender<'_>],
+) -> RaceResponse {
+    RaceScreen::new(RaceInput {
+        scene: Scene {
+            track,
+            geometry,
+            cars,
+            reduced_motion: false,
+            overlays: FIXED_OVERLAYS,
+        },
+        active: FIXED_ACTIVE,
+        laps_done: FIXED_LAPS_DONE,
+        total_laps: FIXED_TOTAL_LAPS,
+    })
+    .show(ui)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        CANVAS_SIZE, CAR_NAMES, FIXED_ACTIVE, FIXED_LAPS_DONE, FIXED_OVERLAYS, FIXED_TOTAL_LAPS,
-        RaceInput, RaceScreen, Scene, fixture_cars, fixture_track,
-    };
+    use super::{CANVAS_SIZE, CAR_NAMES, fixture_cars, fixture_track, fixture_trails, show_race};
     use crate::BakedTrackGeometry;
     use gp_core::geom::Point;
     use std::cell::Cell;
@@ -158,11 +155,7 @@ mod tests {
         let renderer = egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state);
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
-        let trails: [[Point; 2]; 3] = [
-            [Point::new(3, 7), Point::new(4, 7)],
-            [Point::new(8, 2), Point::new(8, 3)],
-            [Point::new(6, 10), Point::new(5, 10)],
-        ];
+        let trails = fixture_trails();
         let cars = fixture_cars(&trails);
 
         let mut fonts_installed = false;
@@ -177,19 +170,7 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let _ = RaceScreen::new(RaceInput {
-                    scene: Scene {
-                        track: &track,
-                        geometry: &geometry,
-                        cars: &cars,
-                        reduced_motion: false,
-                        overlays: FIXED_OVERLAYS,
-                    },
-                    active: FIXED_ACTIVE,
-                    laps_done: FIXED_LAPS_DONE,
-                    total_laps: FIXED_TOTAL_LAPS,
-                })
-                .show(ui);
+                let _ = show_race(ui, &track, &geometry, &cars);
             });
 
         harness.run_steps(1);
@@ -233,11 +214,7 @@ mod tests {
 
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
-        let trails: [[Point; 2]; 3] = [
-            [Point::new(3, 7), Point::new(4, 7)],
-            [Point::new(8, 2), Point::new(8, 3)],
-            [Point::new(6, 10), Point::new(5, 10)],
-        ];
+        let trails = fixture_trails();
         let cars = fixture_cars(&trails);
 
         let mut fonts_installed = false;
@@ -249,19 +226,7 @@ mod tests {
                     fonts_installed = true;
                     return;
                 }
-                let resp = RaceScreen::new(RaceInput {
-                    scene: Scene {
-                        track: &track,
-                        geometry: &geometry,
-                        cars: &cars,
-                        reduced_motion: false,
-                        overlays: FIXED_OVERLAYS,
-                    },
-                    active: FIXED_ACTIVE,
-                    laps_done: FIXED_LAPS_DONE,
-                    total_laps: FIXED_TOTAL_LAPS,
-                })
-                .show(ui);
+                let resp = show_race(ui, &track, &geometry, &cars);
                 if let Some(action) = resp.action {
                     saw_action_c.set(Some(action));
                 }
