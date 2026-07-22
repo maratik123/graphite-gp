@@ -411,35 +411,22 @@ pub(crate) fn paint_mesh(painter: &Painter, verts: &[Pos2], indices: &[[u32; 3]]
     painter.add(Shape::mesh(mesh));
 }
 
-/// Triangulates `loop_points` and draws it as one solid-`color` [`Mesh`] —
-/// composes [`triangulated_loop`] + [`paint_mesh`] for the common one-shot
-/// case (a loop drawn in exactly one color, never reused).
-fn paint_loop_mesh(
-    painter: &Painter,
-    transform: &TrackTransform,
-    loop_points: &[(f32, f32)],
-    color: Color32,
-) {
-    let (verts, indices) = triangulated_loop(transform, loop_points);
-    paint_mesh(painter, &verts, &indices, color);
-}
-
-/// Re-cuts each `roles.holes` loop as a solid-`color` mesh on top of whatever
-/// was drawn before it (mirrors `fill`'s own asphalt-then-infield-on-top
-/// structure) — shared by both [`fill`] and `heatmap::paint`'s post-per-cell
-/// infield re-cut (design § Key decisions 1). `loops` and `roles` must come
-/// from the same `classify_loops` call; an out-of-range role index is
-/// skipped rather than panicking.
+/// Re-cuts each `roles.holes` loop as a solid-`color` mesh, from the shared
+/// precomputed `triangulated` pair, on top of whatever was drawn before it
+/// (mirrors `fill`'s own asphalt-then-infield-on-top structure) — shared by
+/// both [`fill`] and `heatmap::paint`'s post-per-cell infield re-cut (design
+/// § Key decisions 1). `triangulated` and `roles` must come from the same
+/// `classify_loops`/build call (design `2026-07-22-cache-track-geometry`); an
+/// out-of-range role index is skipped rather than panicking.
 pub(crate) fn paint_infield_holes(
     painter: &Painter,
-    transform: &TrackTransform,
-    loops: &[Vec<(f32, f32)>],
+    triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
     roles: &LoopRoles,
     color: Color32,
 ) {
     for &idx in &roles.holes {
-        if let Some(loop_points) = loops.get(idx) {
-            paint_loop_mesh(painter, transform, loop_points, color);
+        if let Some((verts, indices)) = triangulated.get(idx) {
+            paint_mesh(painter, verts, indices, color);
         }
     }
 }
@@ -451,30 +438,30 @@ pub(crate) fn paint_infield_holes(
 /// mesh(es), then the hole loop(s) as `SURFACE_INFIELD` mesh(es) drawn on top
 /// — asphalt and infield never overlap (disjoint by the annulus invariant),
 /// so their relative draw order is visually inert; this order is the one AC9
-/// pins. `loops` and `roles` must come from the same `classify_loops` call —
-/// an out-of-range role index is skipped rather than panicking.
+/// pins. `triangulated` and `roles` must come from the same cached-build call
+/// (design `2026-07-22-cache-track-geometry`, replacing the former per-frame
+/// `triangulated_loop` call) — an out-of-range role index is skipped rather
+/// than panicking.
 pub(crate) fn fill(
     painter: &Painter,
     rect: Rect,
-    transform: &TrackTransform,
-    loops: &[Vec<(f32, f32)>],
+    triangulated: &[(Vec<Pos2>, Vec<[u32; 3]>)],
     roles: &LoopRoles,
 ) {
     painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);
     for &idx in &roles.outer {
-        if let Some(loop_points) = loops.get(idx) {
-            paint_loop_mesh(
+        if let Some((verts, indices)) = triangulated.get(idx) {
+            paint_mesh(
                 painter,
-                transform,
-                loop_points,
+                verts,
+                indices,
                 crate::tokens::color::SURFACE_ASPHALT,
             );
         }
     }
     paint_infield_holes(
         painter,
-        transform,
-        loops,
+        triangulated,
         roles,
         crate::tokens::color::SURFACE_INFIELD,
     );
@@ -731,6 +718,10 @@ mod tests {
         let d = ring_3x3();
         let rect = Rect::from_min_max(Pos2::ZERO, pos2(200.0, 200.0));
         let transform = TrackTransform::new(&d, rect);
+        let triangulated: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = loops
+            .iter()
+            .map(|loop_points| super::triangulated_loop(&transform, loop_points))
+            .collect();
 
         let ctx = egui::Context::default();
         let input = egui::RawInput {
@@ -739,7 +730,7 @@ mod tests {
         };
         let output = ctx.run_ui(input, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
-            fill(&painter, rect, &transform, &loops, &roles);
+            fill(&painter, rect, &triangulated, &roles);
         });
 
         let meshes = crate::track::test_support::captured_meshes(&output.shapes);

@@ -93,7 +93,15 @@ pub(crate) fn draw_frame(
     // same smoothed loops, so they cannot disagree at a corner by
     // construction (design § Decision, "Boundary reuse").
     let loop_roles = regions::classify_loops(&smoothed_loops);
-    regions::fill(painter, rect, &transform, &smoothed_loops, &loop_roles);
+    // Temporary per-frame triangulation (design
+    // `2026-07-22-cache-track-geometry` subtask 2/3 stepping stone) —
+    // replaced by `TrackGeometryCache::get_or_build`'s cached
+    // `triangulated` field in subtask 4.
+    let triangulated: Vec<(Vec<egui::Pos2>, Vec<[u32; 3]>)> = smoothed_loops
+        .iter()
+        .map(|loop_points| regions::triangulated_loop(&transform, loop_points))
+        .collect();
+    regions::fill(painter, rect, &triangulated, &loop_roles);
 
     if overlays.speed_heatmap {
         heatmap::paint(

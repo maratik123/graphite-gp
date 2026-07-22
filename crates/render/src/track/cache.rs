@@ -15,11 +15,11 @@ use egui::{Pos2, Rect};
 use gp_core::track::TrackArtifact;
 
 /// The cached, rect-keyed screen-space geometry for one track (design §
-/// *The cache type*): the Chaikin-smoothed wall loops, their outer/hole role
-/// split, and each loop's triangulated `(verts, indices)` mesh, all built
-/// once per distinct `(track, rect)` and reused every frame the rect stays
-/// unchanged.
+/// *The cache type*).
 ///
+/// Holds the Chaikin-smoothed wall loops, their outer/hole role split, and
+/// each loop's triangulated `(verts, indices)` mesh, all built once per
+/// distinct `(track, rect)` and reused every frame the rect stays unchanged.
 /// Every field is `pub(crate)` — readable by in-crate draw code and tests,
 /// not part of the public API (the opaque type name is the only public
 /// surface, per design § *The cache type*).

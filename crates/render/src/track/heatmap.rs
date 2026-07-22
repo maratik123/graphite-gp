@@ -166,10 +166,14 @@ pub(crate) fn paint(
         return;
     };
 
-    let outer_meshes: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = roles
-        .outer
+    // Temporary per-frame triangulation of every loop (design
+    // `2026-07-22-cache-track-geometry` subtask 2 stepping stone, ahead of
+    // subtask 3's full `triangulated`-consuming signature) — needed so
+    // `paint_infield_holes`'s new precomputed-mesh signature can be called
+    // for the hole loops too, not just the outer ones this fn already
+    // triangulated.
+    let triangulated: Vec<(Vec<Pos2>, Vec<[u32; 3]>)> = loops
         .iter()
-        .filter_map(|&idx| loops.get(idx))
         .map(|loop_points| regions::triangulated_loop(transform, loop_points))
         .collect();
 
@@ -177,15 +181,16 @@ pub(crate) fn paint(
         let t = normalize(speed, min, max);
         let color = ramp_color(t).gamma_multiply(HEATMAP_ALPHA);
         let clip = painter.with_clip_rect(cell_rect(transform, point));
-        for (verts, indices) in &outer_meshes {
-            regions::paint_mesh(&clip, verts, indices, color);
+        for &idx in &roles.outer {
+            if let Some((verts, indices)) = triangulated.get(idx) {
+                regions::paint_mesh(&clip, verts, indices, color);
+            }
         }
     }
 
     regions::paint_infield_holes(
         painter,
-        transform,
-        loops,
+        &triangulated,
         roles,
         crate::tokens::color::SURFACE_INFIELD,
     );
