@@ -28,7 +28,7 @@ use gp_core::track::{
 };
 use gp_render::screens::{Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
 use gp_render::widgets::CarKind;
-use gp_render::{AppShell, CarRender, ShellSession};
+use gp_render::{AppShell, BakedTrackGeometry, CarRender, ShellSession};
 
 /// The mock's startup config default (`App.jsx`'s `useState` seed —
 /// `docs/design-system/ui_kits/game/App.jsx`).
@@ -54,6 +54,12 @@ struct GraphiteGpApp {
     /// The hand-built fixture track (a wide chunky rounded-rect loop),
     /// shared by the Lab canvas and the Race canvas.
     track: TrackArtifact,
+    /// The baked geometry for `track` (design
+    /// `2026-07-22-cache-track-geometry`), built once in [`Self::new`]. The
+    /// fixture `track` never swaps at runtime, so a build-once suffices —
+    /// a future real `track` swap (block 1's generator) would need to
+    /// rebuild this alongside it.
+    geometry: BakedTrackGeometry,
     /// Each fixture car's current state, in `CAR_NAMES` order.
     car_states: Vec<CarState>,
     /// Each fixture car's trail (prior cells), parallel to `car_states`.
@@ -70,12 +76,14 @@ impl GraphiteGpApp {
     /// Builds the app shell over the hand-built fixture session data.
     fn new() -> Self {
         let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
         let (car_states, trails) = fixture_cars();
         let standings = fixture_standings();
 
         Self {
             shell: AppShell::new(STARTUP_CONFIG),
             track,
+            geometry,
             car_states,
             trails,
             phases: [PhaseStatus::Ok; 7],
@@ -103,6 +111,7 @@ impl eframe::App for GraphiteGpApp {
 
         let session = ShellSession {
             track: &self.track,
+            geometry: &self.geometry,
             cars: &cars,
             reduced_motion: false,
             active: 0,
