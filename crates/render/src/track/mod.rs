@@ -152,7 +152,10 @@ pub(crate) fn draw_frame(
                     car::paint(painter, &transform, render, render.progress, reduced_motion);
                 }
             }
-            _ => {}
+            // Each overlay layer draws nothing when its gate is off. Listing
+            // the variants explicitly (not `_`) makes a new `Layer` variant a
+            // compile error here rather than a silently-skipped layer.
+            Layer::Heatmap | Layer::Grid | Layer::FastestLap => {}
         }
     }
 }
