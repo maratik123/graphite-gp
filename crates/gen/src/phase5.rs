@@ -370,50 +370,22 @@ mod tests {
     // ---- oracle_liveness_v1 (subtask 4) ----
 
     #[test]
-    fn oracle_liveness_v1_ac4_valid_ring_finding_raw_never_exceeds_zero() {
-        // DISCOVERED FINDING (flagged to the orchestrator as a Spec/Design
-        // Amendment candidate for AC4 — not a fixable test-fixture issue):
+    fn oracle_liveness_v1_ac4_valid_ring_is_lappable() {
+        // AC4: a valid closed ring is lappable at V=1.
         //
-        // `LapCounter::register_move`'s crossing test (`gate_coord`) is a
-        // GLOBAL half-plane test along `sf.gate.forward`'s axis alone (it
-        // ignores the perpendicular coordinate) — see `gp_core::sim`'s
-        // `gate_coord`/`crossing_event`. For ANY simple closed-loop corridor
-        // that encircles a hole (a genuine racetrack topology), the loop's
-        // cells straddle that half-plane on BOTH sides beyond the local gate
-        // pair, so traversing the WHOLE loop once crosses the gate's line an
-        // EVEN number of times, and consecutive crossings of a binary
-        // (behind/ahead) partition MUST strictly alternate direction
-        // (forward, reverse, forward, reverse, ...). This bounds
-        // `LapCounter::raw()` to `{-1, 0}` for any physically-continuous
-        // drive around a closed loop: reaching `raw() >= 1` requires TWO
-        // forward crossings with NO intervening reverse, which is
-        // topologically impossible once "behind"/"ahead" is a pure function
-        // of position (not path history).
-        //
-        // Confirmed two ways: (1) derivation above; (2) exhaustively, by
-        // instrumenting this exact augmented flood over `ring_corridor()`'s
-        // 48-state reachable set — `raw()` never exceeded `0` on ANY of the
-        // ~150 legal transitions explored (verified via a temporary
-        // diagnostic build during this implementation).
-        //
-        // `gp_core::sim::LapCounter`'s own existing unit test
-        // (`register_move_ac6_scripted_telescoping_and_parallel_move`)
-        // reaches `raw() == 1` only by calling `register_move` TWICE with the
-        // IDENTICAL `(1,1) -> (2,1)` pair back-to-back — an arithmetic
-        // exercise of the counter in isolation, not a physically continuous
-        // car path (the car cannot be at `(1,1)` twice in a row without an
-        // intervening move away from it).
-        //
-        // This function still implements the design's augmented-flood
-        // approach faithfully (AC3: `legal_move`/`register_move` reused
-        // unchanged, no reimplementation) — the blocker is in the reused
-        // primitive's semantics, out of Group A's scope (design: "Any change
-        // to core (gp-core) legal_move / LapCounter / crossing logic — the
-        // substrate consumes them unchanged").
+        // `LapCounter::register_move` now bounds the crossing test to the
+        // gate's along-chord extent (`gp_core::sim`'s `lat_coord`/
+        // `crossing_within_span`, the S/F bounded-chord fix — design doc §3),
+        // not the gate's infinite supporting line. On this ring the far-wall
+        // crossing (the supporting line's *other* intersection with the
+        // annulus, on the opposite straight) falls outside the gate's
+        // along-chord span (`behind = [(2, 0)]`, so the span is `y = 0` only)
+        // and is excluded, so a full CCW loop nets a real `+1` and the
+        // augmented flood reaches `raw() >= 1` (a lap), not `{-1, 0}`.
         let d = ring_corridor();
         let sf = ring_sf();
         let grid = ring_grid();
-        assert!(!oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw));
+        assert!(oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw));
     }
 
     #[test]
@@ -468,19 +440,20 @@ mod tests {
     fn ac3_oracle_crossing_matches_direct_lap_counter_register_move() {
         // Pin the shared crossing path: the oracle's first S/F crossing
         // (race start, -1 -> 0) must agree with a direct LapCounter call on
-        // the identical `from -> to`, and a lone crossing is not itself a lap
-        // (see the adjacent `_finding_raw_never_exceeds_zero` test for why
-        // `raw()` cannot reach `1` via a physically-continuous drive at all).
+        // the identical `from -> to`, and a lone crossing is not itself a
+        // lap.
         let sf = ring_sf();
         let mut counter = LapCounter::new();
         counter.register_move(&sf, Point::new(2, 0), Point::new(3, 0));
         assert_eq!(counter.raw(), 0); // race start only, not yet a lap
 
-        // oracle_liveness_v1 runs the identical register_move path (AC3), so
-        // it too must classify this single crossing as "not yet a lap".
+        // oracle_liveness_v1 runs the identical register_move path (AC3): the
+        // shared path scores this single crossing as race start (raw() 0)
+        // and, threaded through the full flood on the valid ring, also
+        // reaches a lap (see `oracle_liveness_v1_ac4_valid_ring_is_lappable`).
         let d = ring_corridor();
         let grid = ring_grid();
-        assert!(!oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw));
+        assert!(oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw));
     }
 
     #[test]
