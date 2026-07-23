@@ -617,6 +617,74 @@ mod tests {
         assert!(p0_boundary_walls(&d, &p0).is_empty());
     }
 
+    #[test]
+    fn wall_neighbor_returns_none_when_the_step_overflows_i32() {
+        // The `checked_add` guard the `const fn` + `let-else` shape exists
+        // for: at the coordinate extremes the neighbor does not exist, and
+        // must be reported as absent rather than wrapping into a bogus
+        // in-range `Point` (the hazard `walls_from_boundary` documents).
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(i32::MAX, 0),
+                side: Side::East,
+            }),
+            None
+        );
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(i32::MIN, 0),
+                side: Side::West,
+            }),
+            None
+        );
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(0, i32::MAX),
+                side: Side::North,
+            }),
+            None
+        );
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(0, i32::MIN),
+                side: Side::South,
+            }),
+            None
+        );
+        // Non-overflowing steps still resolve.
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(i32::MAX - 1, 0),
+                side: Side::East,
+            }),
+            Some(Point::new(i32::MAX, 0))
+        );
+    }
+
+    #[test]
+    fn p0_boundary_walls_emits_a_wall_when_the_neighbor_overflows() {
+        // Exercises `is_none_or`'s `None` arm: a `p0` cell at the eastern
+        // `i32` extreme has no East neighbor at all, which counts as
+        // "not in `d`" and must still emit the wall — the alternative
+        // (silently dropping it) would hide a genuine boundary from Ф6.
+        let d = Corridor::filled(Point::new(0, 0), 3, 3);
+        let extreme = Point::new(i32::MAX, 0);
+        let p0 = HashSet::from([extreme]);
+
+        let walls = p0_boundary_walls(&d, &p0);
+
+        let east = Wall {
+            cell: extreme,
+            side: Side::East,
+        };
+        assert!(
+            walls.contains(&east),
+            "the overflowing East side must still be emitted, got {walls:?}"
+        );
+        // Pins *why* it was emitted: via the `None` arm, not a `!contains`.
+        assert_eq!(wall_neighbor(east), None);
+    }
+
     // ---- fastest_lap_through_live (subtask 5) ----
 
     #[test]

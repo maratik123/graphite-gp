@@ -115,7 +115,7 @@ pub enum RepairCandidate {
     NoCandidate,
 }
 
-/// Map a Ф5b stall diagnostic to a verified-progress repair edit (design §
+/// Maps a Ф5b stall diagnostic to a verified-progress repair edit (design §
 /// Approach (2)).
 ///
 /// A **total, deterministic, non-panicking** function that only ever
@@ -375,7 +375,7 @@ mod tests {
         let base = p0_at_v1(&d, &grid, &sf).len();
         let mut d_severed = d.clone();
         d_severed.set(severed_neighbor, true);
-        let severed_growth = p0_at_v1(&d_severed, &grid, &sf).len() - base;
+        let severed_growth = p0_at_v1(&d_severed, &grid, &sf).len().saturating_sub(base);
 
         let mut d_lesser = d.clone();
         d_lesser.set(lesser_neighbor, true);
