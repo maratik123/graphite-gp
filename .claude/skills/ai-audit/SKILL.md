@@ -69,9 +69,9 @@ Spawn the embedded `claude-code-guide` Subagent via the `Agent` Tool. One spawn 
 Agent(subagent_type="claude-code-guide", prompt="
   Return the verbatim canonical shape contracts from these three Claude Code documentation pages:
 
-  - https://code.claude.com/docs/en/skills           — skill frontmatter schema (which fields are required vs optional; allowed-tools shape; argument-hint; disable-model-invocation)
-  - https://code.claude.com/docs/en/sub-agents       — Subagent file structure (frontmatter `name` / `description` / `tools` line; body conventions; when Subagents fire)
-  - https://code.claude.com/docs/en/hooks-guide      — Hook event names, matchers, JSON I/O contract, exit-code semantics
+  - https://code.claude.com/docs/en/skills.md         — skill frontmatter schema (which fields are required vs optional; allowed-tools shape; argument-hint; disable-model-invocation)
+  - https://code.claude.com/docs/en/sub-agents.md     — Subagent file structure (frontmatter `name` / `description` / `tools` line; body conventions; when Subagents fire)
+  - https://code.claude.com/docs/en/hooks-guide.md    — Hook event names, matchers, JSON I/O contract, exit-code semantics
 
   For each page, extract the verbatim schema text — not a paraphrase. Cite the URL alongside each block so the orchestrator can re-quote it during the audit.
 ")
