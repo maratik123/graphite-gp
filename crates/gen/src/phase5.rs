@@ -433,4 +433,101 @@ mod tests {
         let (d, sf, grid) = dead_end_corridor();
         assert!(!oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw));
     }
+
+    // ---- Cross-cutting AC tests (subtask 5) ----
+
+    #[test]
+    fn ac3_forward_flood_admits_successor_iff_legal_move() {
+        let mut d = Corridor::new(Point::new(0, 0), 4, 4);
+        d.set(Point::new(0, 0), true);
+        d.set(Point::new(1, 0), true);
+        d.set(Point::new(2, 0), true);
+        d.set(Point::new(1, 1), true);
+        // (0, 1) deliberately off-D, reproducing the wall-clip shape.
+
+        let seed = car(0, 0, 0, 1);
+        let set = forward_reachable(&d, &[seed], 1);
+
+        for &s in &set {
+            for a in Action::iter() {
+                let expects_edge = legal_move(&d, s, a);
+                if expects_edge {
+                    let s2 = step(s, a);
+                    if within_v_ceil(s2, 1) {
+                        assert!(
+                            set.contains(&s2),
+                            "legal_move({s:?}, {a:?}) holds but {s2:?} is absent from the flood"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ac3_oracle_crossing_matches_direct_lap_counter_register_move() {
+        // Pin the shared crossing path: the oracle's first S/F crossing
+        // (race start, -1 -> 0) must agree with a direct LapCounter call on
+        // the identical `from -> to`, and a lone crossing is not itself a lap
+        // (see the adjacent `_finding_raw_never_exceeds_zero` test for why
+        // `raw()` cannot reach `1` via a physically-continuous drive at all).
+        let sf = ring_sf();
+        let mut counter = LapCounter::new();
+        counter.register_move(&sf, Point::new(2, 0), Point::new(3, 0));
+        assert_eq!(counter.raw(), 0); // race start only, not yet a lap
+
+        // oracle_liveness_v1 runs the identical register_move path (AC3), so
+        // it too must classify this single crossing as "not yet a lap".
+        let d = ring_corridor();
+        let grid = ring_grid();
+        assert!(!oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw));
+    }
+
+    #[test]
+    fn ac5_all_three_functions_deterministic_on_ring_fixture() {
+        let d = ring_corridor();
+        let sf = ring_sf();
+        let grid = ring_grid();
+        let seeds: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let goal = [car(3, 0, 1, 0)];
+
+        assert_eq!(
+            forward_reachable(&d, &seeds, 1),
+            forward_reachable(&d, &seeds, 1)
+        );
+        assert_eq!(
+            backward_reachable(&d, &goal, 1),
+            backward_reachable(&d, &goal, 1)
+        );
+        assert_eq!(
+            oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw),
+            oracle_liveness_v1(&d, &grid, &sf, RaceDir::Ccw)
+        );
+    }
+
+    #[test]
+    fn ac6_forward_and_backward_reachable_intersect_on_known_state() {
+        // The post-gate East-crossing state at (3, 0) is directly reachable
+        // forward from the grid seed (one East move) and is itself the
+        // backward flood's goal seed — a minimal, hand-verifiable witness
+        // that the two substrates compose over the same state space.
+        let d = ring_corridor();
+        let grid = ring_grid();
+        let seeds: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let witness = car(3, 0, 1, 0);
+        let goal = [witness];
+
+        let forward = forward_reachable(&d, &seeds, 1);
+        let backward = backward_reachable(&d, &goal, 1);
+        assert!(forward.contains(&witness));
+        assert!(backward.contains(&witness));
+    }
 }
