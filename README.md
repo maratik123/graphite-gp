@@ -48,8 +48,13 @@ AI-inference; `phase1_coarse_ring` builds the deterministic coarse annulus;
 walls to a supercover-safe 45° ramp, and absorbs any pocket the taper seals;
 `phase3_start_finish` thickens a straight coarse run and lays the start grid + the
 half-grid timing gate — all deterministic, no-RNG, zero-panic), closing issues #24,
-#25, #26, and #49 and discharging #50 (deterministic-order collections). The
-remaining pipeline is Ф4–Ф7 (#27–#34). Block 2 (`gp-render`) is **complete** — see below.
+#25, #26, and #49 and discharging #50 (deterministic-order collections). **Ф4
+(static validation)** has now landed too (#27): the four static checks — emitting
+typed `Issue`s (`Disconnected` / `BadTopology` / `Narrow` / `NarrowSf` /
+`LostHairpin`) for the future Ф6 repair phase — built on new reusable integer
+**distance-transform + medial-axis** primitives in `gp-core` `geom` that Ф7's
+centerline will consume. The remaining pipeline is Ф5–Ф7 (#28–#34). Block 2
+(`gp-render`) is **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
 `block:render` issue is closed. The backend is **eframe/egui 0.35**: `gp-game`
@@ -108,7 +113,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 346 workspace tests green (100 gp-core; 242 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 2 gp-gen; 2 doc-tests)
+cargo test             # 464 workspace tests green (116 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 98 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
