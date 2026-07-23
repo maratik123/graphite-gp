@@ -27,11 +27,6 @@ use strum::IntoEnumIterator;
 /// `i32`'s range. This yields a pure *candidate* only — legality
 /// (`legal_move(d, s, a)`, which also proves `step(s, a) == s2`) is the
 /// caller's job.
-#[allow(
-    dead_code,
-    reason = "wired into backward_reachable in subtask 3; unused until then \
-              per this design's leaf-helpers-first skeleton decomposition"
-)]
 const fn predecessor(s2: CarState, a: Action) -> Option<CarState> {
     let (ax, ay) = a.accel();
     let Some(vx) = s2.vx.checked_sub(ax) else {
@@ -94,7 +89,7 @@ pub fn forward_reachable(d: &Corridor, seeds: &[CarState], v_ceil: i32) -> HashS
     visited
 }
 
-/// Backward flood over the *reversed* `legal_move` edges from `goals`,
+/// Backward flood over the *reversed* [`legal_move`] edges from `goals`,
 /// bounded to the L∞ box `|vx|, |vy| ≤ v_ceil` (AC2).
 ///
 /// A candidate predecessor `s` of `s2` under `a` (from `predecessor`) is
@@ -104,8 +99,24 @@ pub fn forward_reachable(d: &Corridor, seeds: &[CarState], v_ceil: i32) -> HashS
 /// reverse (AC3): no parallel legality rule. Deterministic membership (AC5)
 /// for the same reason as `forward_reachable`.
 pub fn backward_reachable(d: &Corridor, goals: &[CarState], v_ceil: i32) -> HashSet<CarState> {
-    let _ = (d, goals, v_ceil);
-    todo!("subtask 3: backward flood over reversed legal_move edges")
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    for &s in goals {
+        if within_v_ceil(s, v_ceil) && visited.insert(s) {
+            queue.push_back(s);
+        }
+    }
+    while let Some(s2) = queue.pop_front() {
+        for a in Action::iter() {
+            let Some(s) = predecessor(s2, a) else {
+                continue;
+            };
+            if within_v_ceil(s, v_ceil) && legal_move(d, s, a) && visited.insert(s) {
+                queue.push_back(s);
+            }
+        }
+    }
+    visited
 }
 
 /// Binary "a driveable closed lap exists at `|v| ≤ 1`" oracle (AC4).
@@ -217,6 +228,46 @@ mod tests {
         assert_eq!(
             forward_reachable(&d, &seeds, 1),
             forward_reachable(&d, &seeds, 1)
+        );
+    }
+
+    // ---- backward_reachable (subtask 3) ----
+
+    #[test]
+    fn backward_reachable_ac2_known_predecessor_is_member() {
+        let d = Corridor::filled(Point::new(0, 0), 5, 5);
+        let goal = car(3, 2, 1, 0);
+        let set = backward_reachable(&d, &[goal], 1);
+
+        // predecessor(goal, Coast) = (2, 2, 1, 0); legal_move confirms
+        // step((2,2,1,0), Coast) == goal.
+        let pred = car(2, 2, 1, 0);
+        assert!(legal_move(&d, pred, Action::Coast));
+        assert_eq!(step(pred, Action::Coast), goal);
+        assert!(set.contains(&pred));
+        assert!(set.contains(&goal));
+    }
+
+    #[test]
+    fn backward_reachable_ac5_total_on_extreme_goal() {
+        // goal.vx == 1 combined with goal.x == i32::MIN makes every
+        // predecessor's `x = s2.x - s2.vx` underflow -> checked_sub returns
+        // None for every action, so the search returns promptly with no
+        // predecessors (just the goal itself), never panicking.
+        let d = Corridor::filled(Point::new(0, 0), 5, 5);
+        let goal = car(i32::MIN, 0, 1, 0);
+        let set = backward_reachable(&d, &[goal], 1);
+        assert_eq!(set.len(), 1);
+        assert!(set.contains(&goal));
+    }
+
+    #[test]
+    fn backward_reachable_ac5_deterministic() {
+        let d = Corridor::filled(Point::new(0, 0), 5, 5);
+        let goals = [car(3, 2, 1, 0)];
+        assert_eq!(
+            backward_reachable(&d, &goals, 1),
+            backward_reachable(&d, &goals, 1)
         );
     }
 }
