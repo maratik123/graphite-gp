@@ -10,6 +10,9 @@ mod phase2;
 mod phase3;
 mod phase4;
 mod phase5;
+mod phase5b;
+#[cfg(test)]
+mod testfix;
 
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
@@ -20,6 +23,7 @@ pub use phase2::*;
 pub use phase3::*;
 pub use phase4::*;
 pub use phase5::*;
+pub use phase5b::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]
