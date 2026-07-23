@@ -206,7 +206,7 @@ Interpret user phrasing literally and conservatively. When uncertain — ask, do
 
 ## Patterns
 
-### 1. Verify a reviewer's retractions and suggestions as skeptically as its findings
+### 1. Verify an intermediary's claims — findings, retractions, premises, wave-throughs — as skeptically as each other
 
 *Default to* verifying a reviewer's *retraction*, *salvage suggestion*, and
 *"leave it / harmless / follow-up"* call with the same command you would run
@@ -220,9 +220,18 @@ agreeing costs nothing in the moment. *Prefer* overriding a reviewer only in the
 direction of **more** verification: declining a suggested fix because you tested
 it and it fails is sound; accepting one because it sounds right is not.
 
-Validated by [`ai-docs/learnings.md`](ai-docs/learnings.md) 2026-07-16 —
-*treating a reviewer's retractions and suggestions as skeptically as its
-findings*.
+**Not only reviewers — any intermediary.** The same posture applies to a
+*delegate's* claims. *Default to* verifying a delegate's design-blocking STOP
+("this primitive can't satisfy its AC") with a command — compile a reduced
+repro, read the cited code — before triggering a Design Amendment; it is a real
+finding, but a finding, not a fact. And *Prefer* checking a delegate's "this AC
+clause is untestable on the fixture I used, so I generalized/skipped it": build
+the missing coverage (a purpose-built fixture) rather than accepting a PARTIAL.
+
+Validated by [`ai-docs/learnings.md`](ai-docs/learnings.md) 2026-07-16 (reviewer
+retractions/suggestions) and 2026-07-23 (verifying a delegate's design-blocking
+premise before amending; /task Step-9 per-AC sweep catching a delegate's
+"untestable" wave-through) — one posture across reviewer and delegate.
 
 ## Agent Docs
 
