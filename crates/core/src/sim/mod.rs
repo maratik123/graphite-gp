@@ -207,13 +207,47 @@ impl LapCounter {
     ///
     /// No-op (does not panic) when `sf.gate.behind` is empty — a degenerate gate
     /// has no supporting line to cross.
+    ///
+    /// The S/F is a **bounded** chord (design doc §3): a crossing of the gate's
+    /// infinite supporting line only counts when the crossing point's
+    /// along-chord coordinate falls within the `sf.gate.behind` cross-section's
+    /// extent (`lat_coord`/`crossing_within_span`). This is what
+    /// excludes a ring's far-wall crossing — the supporting line's *other*
+    /// intersection with the annulus — from scoring, so `raw()` nets a real
+    /// `+1`/lap instead of telescoping to `0`.
     pub fn register_move(&mut self, sf: &StartFinish, from: Point, to: Point) {
         let Some(&r) = sf.gate.behind.first() else {
             return;
         };
-        let from_c = gate_coord(from, r, sf.gate.forward);
-        let to_c = gate_coord(to, r, sf.gate.forward);
-        self.counter = self.counter.saturating_add(crossing_event(from_c, to_c));
+        let fwd = sf.gate.forward;
+        let from_c = gate_coord(from, r, fwd);
+        let to_c = gate_coord(to, r, fwd);
+        let ev = crossing_event(from_c, to_c);
+        if ev == 0 {
+            return;
+        }
+        // Along-chord span over the whole behind cross-section (fold, no
+        // unwrap/panic path): seeded at `lat_coord(r, r, fwd) == 0`.
+        let (lo, hi) = sf.gate.behind.iter().fold((0, 0), |(lo, hi), &b| {
+            let l = lat_coord(b, r, fwd);
+            (lo.min(l), hi.max(l))
+        });
+        // Orient endpoints: behind is the strictly-`<GATE_LINE` side, ahead the
+        // `>=GATE_LINE` side, regardless of `from`/`to` order.
+        let ((bp, bl), (ap, al)) = if ev > 0 {
+            (
+                (from_c, lat_coord(from, r, fwd)),
+                (to_c, lat_coord(to, r, fwd)),
+            )
+        } else {
+            (
+                (to_c, lat_coord(to, r, fwd)),
+                (from_c, lat_coord(from, r, fwd)),
+            )
+        };
+        if crossing_within_span(bp, bl, ap, al, lo, hi) {
+            self.counter = self.counter.saturating_add(ev);
+        }
     }
 }
 
@@ -264,6 +298,75 @@ const fn crossing_event(from_c: i32, to_c: i32) -> i32 {
     } else {
         0
     }
+}
+
+/// The along-chord (perpendicular-to-`forward`) coordinate of `p` relative to
+/// the gate's reference cell `r`, using the in-plane perpendicular of
+/// `forward.delta() = (dx, dy)`: `(p.x − r.x)·(−dy) + (p.y − r.y)·dx`.
+///
+/// For `forward = East (1,0)` this is `p.y − r.y`; for `North (0,1)` it is
+/// `−(p.x − r.x)`. Sign is not meaningful on its own — only used for a min/max
+/// span (see [`LapCounter::register_move`]) and a symmetric containment test
+/// ([`crossing_within_span`]). Not doubled: it is combined with the doubled
+/// [`gate_coord`] only inside `crossing_within_span`'s widened `i64`
+/// interpolation, which normalizes the difference in scale.
+///
+/// **Precondition:** same grid-realistic, allocatable-corridor domain as
+/// [`gate_coord`] — the subtraction and product stay within `i32`.
+#[inline]
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "in-D precondition documented above: p/r are grid-realistic, \
+              allocatable-corridor coordinates (matching gate_coord's domain), \
+              so the subtraction and product stay within i32"
+)]
+const fn lat_coord(p: Point, r: Point, forward: Side) -> i32 {
+    let (dx, dy) = forward.delta();
+    (p.x - r.x) * -dy + (p.y - r.y) * dx
+}
+
+/// Whether a chord's crossing of the gate's supporting line falls within the
+/// along-chord extent `[lo, hi]`.
+///
+/// `B = (b_perp, b_lat)` is the behind endpoint (`gate_coord`/[`lat_coord`]
+/// pair, strictly `< GATE_LINE`), `A = (a_perp, a_lat)` the ahead endpoint
+/// (`>= GATE_LINE`). The segment meets the gate line `perp = GATE_LINE` at
+/// parameter `t* = (GATE_LINE − b_perp) / d`, `d = a_perp − b_perp > 0`
+/// (guaranteed by the caller's orientation and `crossing_event`'s strict
+/// inequalities — both endpoints are even, straddling the odd `GATE_LINE`, so
+/// `d >= 2`). The crossing's along-chord coordinate is
+/// `lat* = b_lat + t*·(a_lat − b_lat)`; in-extent iff `lo <= lat* <= hi`.
+///
+/// Cleared of the division by multiplying through by `d > 0` (direction
+/// preserved), computed in `i64` to avoid overflow: `num = d·lat*`, tested as
+/// `d·lo <= num <= d·hi`.
+///
+/// **Precondition:** same grid-realistic domain as [`gate_coord`]/
+/// [`lat_coord`] — the widened `i64` products stay in range.
+///
+/// Not `const fn`: `i64::from(i32)` is not yet const-stable
+/// (`missing_const_for_fn` cannot be satisfied here — see rust-lang/rust
+/// issue #143874).
+#[inline]
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "bounded-chord precondition inherited from gate_coord/lat_coord's \
+              documented domain: |coord| << 1.5e9, so the i64 products \
+              d*b_lat, (GATE_LINE - b_perp)*(a_lat - b_lat), d*lo, d*hi cannot \
+              overflow within the documented domain"
+)]
+fn crossing_within_span(
+    b_perp: i32,
+    b_lat: i32,
+    a_perp: i32,
+    a_lat: i32,
+    lo: i32,
+    hi: i32,
+) -> bool {
+    let d = i64::from(a_perp) - i64::from(b_perp);
+    let num = d * i64::from(b_lat)
+        + (i64::from(GATE_LINE) - i64::from(b_perp)) * (i64::from(a_lat) - i64::from(b_lat));
+    d * i64::from(lo) <= num && num <= d * i64::from(hi)
 }
 
 /// The result of resolving a crash (design doc §3, `[D4]`/`[N5]`).
@@ -755,7 +858,12 @@ mod tests {
     fn register_move_ac4_init_and_laps() {
         // AC4: -1 at construction; laps() == 0 until the raw count is
         // positive; first forward cross -> raw 0 / laps 0 (race start); second
-        // -> raw 1 / laps 1.
+        // -> raw 1 / laps 1. This exercises the signed-crossing counter
+        // arithmetic with a scripted, repeated on-chord `(1,1) -> (2,1)` pair
+        // (both endpoints at y=1, the chord line, so lat* = 0 is always in
+        // span) — NOT a physically-continuous lap (the same chord is driven
+        // twice in place). See `register_move_ac6_physical_lap_reaches_raw_ge_one`
+        // for a real continuous-drive lap.
         let lap = LapCounter::new();
         assert_eq!(lap.raw(), -1);
         assert_eq!(lap.laps(), 0);
@@ -815,7 +923,11 @@ mod tests {
     fn register_move_ac6_scripted_telescoping_and_parallel_move() {
         // AC6: a scripted sequence asserts exact counter/laps values,
         // including a back-and-forth pair telescoping to net 0 and a parallel
-        // (tangent) move leaving the counter unchanged.
+        // (tangent) move leaving the counter unchanged. This is a unit test of
+        // the signed-crossing arithmetic with scripted on-chord (`y=1`) and
+        // tangent (constant gate_coord) inputs — NOT a physically-continuous
+        // lap. See `register_move_ac6_physical_lap_reaches_raw_ge_one` for a
+        // real continuous-drive lap.
         let sf = sf_east_gate();
         let mut lap = LapCounter::new();
         assert_eq!(lap.raw(), -1);
@@ -844,6 +956,124 @@ mod tests {
         let before = lap.raw();
         lap.register_move(&sf, Point::new(2, 0), Point::new(2, 3));
         assert_eq!(lap.raw(), before);
+    }
+
+    #[test]
+    fn register_move_ac6_off_chord_crossing_is_a_no_op() {
+        // AC6: a crossing of the gate's supporting line OUTSIDE the chord's
+        // along-chord extent must not change the counter — this is exactly
+        // the far-wall/off-chord case the bounded-chord fix excludes.
+        let sf = sf_east_gate(); // behind = [(1,1)]: along-chord span is y=1 only.
+
+        // Off-chord: (0,3) -> (2,3) crosses the infinite supporting line
+        // (fp = -2 < GATE_LINE <= tp = 2) but at lat* = 2, outside [0, 0].
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(0, 3), Point::new(2, 3));
+        assert_eq!(lap.raw(), -1); // unchanged: excluded by the span guard
+
+        // Contrast row: the same perpendicular crossing on-chord (y = 1) DOES
+        // count, pinning that the guard excludes only the off-chord case.
+        let mut lap = LapCounter::new();
+        lap.register_move(&sf, Point::new(0, 1), Point::new(2, 1));
+        assert_eq!(lap.raw(), 0); // -1 init + 1 forward event
+    }
+
+    #[test]
+    fn register_move_ac6_physical_lap_reaches_raw_ge_one() {
+        // AC6/AC7: a physically-continuous V<=1 crawl around a width-1 ring
+        // reaches raw() >= 1 (a real lap), with every move gated on
+        // legal_move first (one code path), and the far-wall reverse
+        // crossing (opposite side of the ring) must NOT decrement the
+        // counter (it is off-chord under the bounded-chord fix).
+        //
+        // Ring: border of a 5x5 box (drivable iff x in {0,4} or y in {0,4}).
+        // Gate: behind = [(2,0)], forward = East (ahead (3,0)) -- along-chord
+        // span (lat = p.y - 0) is y = 0 only.
+        let mut d = Corridor::new(Point::new(0, 0), 5, 5);
+        for x in 0..5 {
+            for y in 0..5 {
+                if x == 0 || x == 4 || y == 0 || y == 4 {
+                    d.set(Point::new(x, y), true);
+                }
+            }
+        }
+        let sf = StartFinish {
+            chord: vec![Point::new(2, 0), Point::new(3, 0)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![Point::new(2, 0)],
+                forward: Side::East,
+            },
+        };
+
+        // Crawl CCW from the gate: East to (4,0), North to (4,4), West to
+        // (0,4) (passing the far-wall reverse crossing at y=4), South to
+        // (0,0), East back past the gate a second time. Each accelerate step
+        // is immediately followed by a brake-to-rest step (design doc §3:
+        // "on v=1 the braking distance is zero -- turn in almost any cell").
+        let script = [
+            Action::East,
+            Action::West,
+            Action::East,
+            Action::West,
+            Action::North,
+            Action::South,
+            Action::North,
+            Action::South,
+            Action::North,
+            Action::South,
+            Action::North,
+            Action::South,
+            Action::West,
+            Action::East,
+            Action::West,
+            Action::East,
+            Action::West,
+            Action::East,
+            Action::West,
+            Action::East,
+            Action::South,
+            Action::North,
+            Action::South,
+            Action::North,
+            Action::South,
+            Action::North,
+            Action::South,
+            Action::North,
+            Action::East,
+            Action::West,
+            Action::East,
+            Action::West,
+            Action::East,
+        ];
+
+        let mut lap = LapCounter::new();
+        let mut s = car(2, 0, 0, 0);
+        let mut race_started = false;
+        for a in script {
+            assert!(
+                legal_move(&d, s, a),
+                "illegal move {a:?} from {s:?} (physical continuity broken)"
+            );
+            let next = step(s, a);
+            lap.register_move(&sf, s.pos(), next.pos());
+            s = next;
+            if race_started {
+                // Race started: raw() must never dip back below 0 -- the
+                // far-wall reverse crossing (west leg, y = 4) must be
+                // excluded as off-chord, not scored as a decrement.
+                assert!(lap.raw() >= 0, "raw() dropped below 0 after race start");
+            }
+            race_started |= lap.raw() >= 0;
+        }
+
+        assert_eq!(s.pos(), Point::new(3, 0)); // closed the loop past the gate
+        assert!(
+            lap.raw() >= 1,
+            "expected a completed lap, got raw() = {}",
+            lap.raw()
+        );
+        assert!(lap.laps() >= 1);
     }
 
     #[test]
