@@ -9,7 +9,8 @@
 //! reimplements the flood edge (core's `legal_move`) or the crossing test
 //! (core's `LapCounter::register_move`) (design § Approach; AC5).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use gp_core::geom::{Corridor, Point};
 use gp_core::sim::{Action, CarState, LapCounter, legal_move, step};
@@ -186,6 +187,99 @@ pub(crate) fn frontier_gap(r_cells: &HashSet<Point>, p0_cells: &HashSet<Point>) 
     frontier
 }
 
+/// Confined augmented `(CarState, LapCounter)` BFS from `seeds` (start-grid
+/// positions, expanded at rest, `v = (0, 0)`) through `live`, returning the
+/// fewest-move path to the first lap-close (`raw() >= 1`) transition —
+/// `None` if no lap exists — together with the phase-0 reachable cell set
+/// `P0` (design § Approach (1)/(3)): `P0 = { s.pos() : a visited augmented
+/// state (s, φ) has φ == 0 }`, the post-race-start, pre-lap-close region
+/// `frontier_gap` consumes (subtask 6).
+///
+/// Reuses the identical `legal_move` / `step` / [`LapCounter::register_move`]
+/// triple `oracle_liveness_v1` (`phase5.rs`) uses (AC5) — this is a distinct
+/// product-graph traversal, not a reimplementation of `forward_reachable`.
+/// Expansion is confined to successors `s2 ∈ live`: a real lap-close path is
+/// never dropped by this confinement, since every state on it is reachable
+/// from a seed (`∈ R`) and can reach a forward crossing (`∈ B`), hence `∈
+/// live` (design § Approach (1)).
+///
+/// The visited key clamps the counter to `{-1, 0}` (mirroring
+/// `oracle_liveness_v1`) — the only values reachable before the `>= 1`
+/// short-circuit, since every seed starts strictly behind a full-chord gate.
+/// BFS (FIFO) order guarantees the first `raw() >= 1` transition found is a
+/// fewest-move path.
+#[allow(
+    dead_code,
+    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
+              directly by this subtask's own tests in the interim"
+)]
+pub(crate) fn fastest_lap_through_live(
+    d: &Corridor,
+    seeds: &[Point],
+    sf: &StartFinish,
+    live: &HashSet<CarState>,
+    v_ceil: i32,
+) -> (Option<Vec<Point>>, HashSet<Point>) {
+    type Key = (CarState, i32);
+
+    let mut parent: HashMap<Key, Option<Key>> = HashMap::new();
+    let mut queue: VecDeque<(CarState, LapCounter)> = VecDeque::new();
+    let mut p0: HashSet<Point> = HashSet::new();
+
+    for &p in seeds {
+        let s = CarState {
+            x: p.x,
+            y: p.y,
+            vx: 0,
+            vy: 0,
+        };
+        if !within_v_ceil(s, v_ceil) {
+            continue;
+        }
+        let counter = LapCounter::new();
+        let key: Key = (s, counter.raw().clamp(-1, 0));
+        if let Entry::Vacant(e) = parent.entry(key) {
+            e.insert(None);
+            queue.push_back((s, counter));
+        }
+    }
+
+    while let Some((s, counter)) = queue.pop_front() {
+        let s_key: Key = (s, counter.raw().clamp(-1, 0));
+        for a in Action::iter() {
+            if !legal_move(d, s, a) {
+                continue;
+            }
+            let s2 = step(s, a);
+            if !within_v_ceil(s2, v_ceil) || !live.contains(&s2) {
+                continue;
+            }
+            let mut counter2 = counter;
+            counter2.register_move(sf, s.pos(), s2.pos());
+            if counter2.raw() >= 1 {
+                let mut path = vec![s2.pos()];
+                let mut cur = Some(s_key);
+                while let Some(key) = cur {
+                    path.push(key.0.pos());
+                    cur = parent.get(&key).copied().flatten();
+                }
+                path.reverse();
+                return (Some(path), p0);
+            }
+            let key2: Key = (s2, counter2.raw().clamp(-1, 0));
+            if let Entry::Vacant(e) = parent.entry(key2) {
+                e.insert(Some(s_key));
+                if key2.1 == 0 {
+                    p0.insert(s2.pos());
+                }
+                queue.push_back((s2, counter2));
+            }
+        }
+    }
+
+    (None, p0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +453,94 @@ mod tests {
         let p0: HashSet<Point> = HashSet::new();
 
         assert!(frontier_gap(&r, &p0).is_empty());
+    }
+
+    // ---- fastest_lap_through_live (subtask 5) ----
+
+    /// Computes `live = R ∩ B` the way the driver (subtask 6) will, for a
+    /// test fixture: `forward_reachable` from `seeds`, `lap_close_goals`
+    /// over `R`, `backward_reachable` from those goals, intersected with `R`.
+    fn live_for(
+        d: &Corridor,
+        sf: &StartFinish,
+        seeds: &[CarState],
+        v_ceil: i32,
+    ) -> HashSet<CarState> {
+        let r = crate::forward_reachable(d, seeds, v_ceil);
+        let goals = lap_close_goals(d, sf, &r, v_ceil);
+        let b = crate::backward_reachable(d, &goals, v_ceil);
+        r.intersection(&b).copied().collect()
+    }
+
+    #[test]
+    fn fastest_lap_through_live_finds_the_fewest_move_lap_on_a_valid_ring() {
+        let d = ring_corridor();
+        let sf = ring_sf();
+        let grid = ring_grid();
+        let seed_states: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let live = live_for(&d, &sf, &seed_states, 1);
+
+        let (path, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
+
+        let path = path.expect("a valid ring has a closed lap at V=1");
+        // Starts at the start-grid seed, ends at the lap-close crossing (the
+        // gate's ahead cell, reached a second time after the full loop).
+        assert_eq!(path.first(), Some(&Point::new(2, 0)));
+        assert_eq!(path.last(), Some(&Point::new(3, 0)));
+        assert!(path.len() > 1);
+        assert!(!p0.is_empty());
+        // NOT asserted here (design § Approach (3) step 2, scoped to
+        // non-loopable topologies only): a full loop re-enters (2, 0) at
+        // phase 0 via the bounded-chord far-wall exclusion, so the
+        // behind-gate-seed-excluded-from-P0 invariant is FALSE on this
+        // fixture -- see the broken-ring / dead-end tests below instead.
+    }
+
+    #[test]
+    fn fastest_lap_through_live_returns_none_on_the_broken_ring() {
+        let mut d = ring_corridor();
+        d.set(Point::new(4, 2), false); // Ф5a's broken-ring fixture.
+        let sf = ring_sf();
+        let grid = ring_grid();
+        let seed_states: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let live = live_for(&d, &sf, &seed_states, 1);
+
+        let (path, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
+
+        assert!(path.is_none());
+        assert!(!p0.is_empty());
+        // Non-loopable topology: no re-crossing loops back to the
+        // behind-gate seed cell at phase 0 (design § Approach (3) step 2).
+        assert!(!p0.contains(&Point::new(2, 0)));
+        // The phase-0 arc reaches at least the immediate post-crossing cell.
+        assert!(p0.contains(&Point::new(3, 0)));
+    }
+
+    #[test]
+    fn fastest_lap_through_live_returns_none_on_a_lone_race_start_dead_end() {
+        // A lone race-start (-1 -> 0) crossing must not be mistaken for a
+        // lap: the fixture dead-ends right after it, no return path.
+        let (d, sf, grid) = dead_end_corridor();
+        let seed_states: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let live = live_for(&d, &sf, &seed_states, 1);
+
+        let (path, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
+
+        assert!(path.is_none());
+        assert!(!p0.is_empty());
+        assert!(!p0.contains(&Point::new(2, 0))); // non-loopable, § Approach (3) step 2
+        assert!(p0.contains(&Point::new(3, 0)));
     }
 }
