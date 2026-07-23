@@ -125,6 +125,11 @@ pub(crate) const fn wall_neighbor(w: Wall) -> Option<Point> {
 /// `D` itself.
 ///
 /// Sorted by [`wall_sort_key`] for deterministic output (R3).
+///
+/// **Precondition:** `d` is non-empty (see [`OracleResult::NotLappable`]'s
+/// module-level precondition note) — on a degenerate empty `d` this
+/// returns `[]` regardless of `p0_cells`, which the caller's tier-2
+/// fallback does not rescue either (design § Approach (1) → *edge case*).
 pub(crate) fn p0_boundary_walls(d: &Corridor, p0_cells: &HashSet<Point>) -> Vec<Wall> {
     let mut walls: Vec<Wall> = Vec::new();
     for &cell in p0_cells {

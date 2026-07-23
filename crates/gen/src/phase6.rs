@@ -7,6 +7,64 @@
 //! and [`map_frontier_gap_to_edge`] (subtask 5 onward) — a total,
 //! deterministic, non-panicking mapping from a Ф5b stall diagnostic to a
 //! verified-progress repair edit.
+//!
+//! # `[N3]` convergence risk
+//!
+//! This is the design's single riskiest, explicitly-unproven step
+//! (`docs/design.md` §2 `[N3]`): whether the "almost-valid by construction +
+//! oracle certifies + local repair" scheme converges rather than falling
+//! back to a full reseed. The prototype-first spike here validates one edge
+//! on a hand-built almost-valid track (the broken-ring fixture: `|P0|` grows
+//! `3 → 16` and `phase5_full_oracle` flips `NotLappable → Lappable` off a
+//! *single* dual-edge shift), but the general question is open: **does one
+//! edge ever suffice?** On a multi-cell sever the honest answer may be "one
+//! edge per iteration, `N` iterations" — this module's contract (AC5, strict
+//! progress) is satisfiable either way, but full closure in one call is not
+//! guaranteed and is not asserted beyond the one fixture where it provably
+//! holds.
+//!
+//! # Outcome meaning (AC8 Branch A — two variants)
+//!
+//! [`RepairCandidate::Edge`] is a **verified**, not merely plausible, repair:
+//! the caller may apply it to `D` and re-run the Ф5b oracle expecting
+//! `|P0|` to have strictly grown (AC5), though not necessarily a closed lap
+//! in one step (see the convergence risk above). [`RepairCandidate::NoCandidate`]
+//! means no boundary edge derived from the diagnostic grows `P0` — this is a
+//! genuine, reachable outcome on a box-filling corridor (`dead_end_corridor`,
+//! `crash_pocket_fixture`: every off-`D` neighbor of every boundary wall lies
+//! outside the bounding box, where [`gp_core::geom::Corridor::set`] is a
+//! documented no-op), **not** a swallowed error to "fix" by relaxing the
+//! growth check.
+//!
+//! **Why only two outcomes, not three.** The design phase executed the AC7
+//! monotonicity proof gate (`phase6::tests::ac7_v1_liveness_is_equivalent_to_full_oracle_lappability`,
+//! subtask 2) *before* `RepairCandidate`'s shape was locked (spec KD4). The
+//! dynamic-only stall class — V=1 lappable, but the full-`Vmax` oracle is
+//! not — **is empty**, not merely unobserved: `live` is monotone in
+//! `V_ceil` (`within_v_ceil` admits a strict superset of states as `V_ceil`
+//! grows, so `R`, the lap-close goal set, `B`, and `live = R ∩ B` all grow
+//! too), so `phase5_full_oracle`'s `let Some(fastest) = fastest else` arm
+//! (`phase5b.rs`) can only fire on its **first** iteration, at `V_ceil = 1`
+//! — exactly what `oracle_liveness_v1` already reports. The AC7 test pins
+//! that structural property against a future edit to the `V_ceil` loop; it
+//! is **not** "no counterexample was found" (an empirical survey claim) but
+//! a regression guard on a proven theorem.
+//!
+//! # Reseed fallback (`[N4]`)
+//!
+//! A [`RepairCandidate::NoCandidate`] result burns one repair-budget step
+//! (out of scope here — the Ф6 repair loop's job); budget exhaustion
+//! returns to Ф1 with a new seed (design §2 `generate()`'s
+//! `if D == FAILED: break`, `[N4]` seed budget).
+//!
+//! # Tie-break refinement left un-adopted
+//!
+//! The mapper's max-growth-then-`wall_sort_key` tie-break was considered
+//! against a "prefer the edge nearest the medial axis" quality refinement
+//! (spec § Open questions). Not adopted: it would need a
+//! [`gp_core::geom::DistanceTransform`] computed per candidate, for a
+//! benefit this spike has no evidence for — left as a note for a future
+//! quality pass, not a correctness gap.
 
 use std::collections::HashSet;
 
