@@ -27,11 +27,12 @@ When the input is a **fixed, known set** — an array literal, a known-length tu
 | `HashSet::from_iter([a, b, c])` | `HashSet::from([a, b, c])` |
 | `[a, b, c].into_iter().collect()` | `HashSet::from([a, b, c])` |
 | `std::iter::once(x).collect()` | `HashSet::from([x])` |
+| `[a, b, c].to_vec()` | `vec![a, b, c]` |
 | `arr.into_iter().map(f).collect()` | `HashSet::from(arr.map(f))` — mind the `[T; N]::map` caveat below |
 | `once(a).chain(once(b))` | `<[T; 2]>::from(pair).into_iter()` — a 2-tuple `From`-converts to `[T; 2]` |
 | hand-listing every variant `[V::A, V::B, V::C].into_iter()` | derive `strum::EnumIter`, iterate `V::iter()` |
 
-**When NOT to.** The target must be a fixed input. Keep `.collect()` / `from_iter` when the source is a genuine iterator of unknown length, a filtered/lazy stream, or a generic context where the concrete array type isn't known.
+**When NOT to.** The target must be a fixed input. Keep `.collect()` / `from_iter` when the source is a genuine iterator of unknown length, a filtered/lazy stream, or a generic context where the concrete array type isn't known. The `vec![…]` rule targets only an **array literal** `.to_vec()` (`[a, b, c].to_vec()`) — calling `.to_vec()` to clone an existing slice or `Vec` into an owned one (`slice.to_vec()`, `layer.to_vec()`) is the correct, idiomatic use and is unaffected.
 
 **`[T; N]::map` caveat.** In `HashSet::from(arr.map(f))` the `arr.map(f)` is the *sanctioned* use — `From` genuinely wants an array, and std says "if you're doing a one-step `map` and really want an array as the result, then absolutely use this method." But `array::map` is **eager** (it evaluates `f` all `N` times up front) and can carry **high stack usage** for long arrays, complex mapping closures, or debug builds — see std `[T; N]::map` → *"Note on performance and stack usage."* Short, simple arrays (a handful of tuples/`Point`s, `[u8; 3]`, `[f32; 4]`) are fine; when the array is long or the closure heavy, keep `arr.into_iter().map(f).collect()` — a lazy iterator that never materializes the intermediate array.
 
