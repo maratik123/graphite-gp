@@ -46,6 +46,15 @@ When a render layers a **fill** and a **stroke** for the *same* boundary, both M
 - **Rule:** fill the region by recolouring the **shared** smoothed mesh — triangulate the boundary once, then tint / clip per-cell against that mesh — never draw independent unit-square `rect_filled` cells beneath a smoothed stroke of the same boundary.
 - A design's § Risks flagging "convex-corner bleed" is **not** a substitute: the second occurrence shipped *with* that note. The geometry must be shared in the code, not merely risk-annotated.
 
+## Golden setup fidelity — fixture & harness must match the real thing
+
+A golden can PASS `image-check`, exact/measured compare, `self-review`, AND CI while the *real* output is broken — whenever the golden's **setup** (its fixture, or the harness conditions it forces) diverges from what an owner already approved or from what the binary actually does. Two occurrences, both 2026-07-22:
+
+- **Reuse an established, owner-approved fixture — do not hand-roll a fresh one.** When a new golden/gallery test needs a domain fixture (a track, a scene) that an earlier PR already built *and had owner-approved by eye*, reuse it — share it via a `pub(crate)` `#[cfg(test)]` move, keeping the prior golden byte-identical — rather than deriving a new fixture from the nearest unit-test fixture. A hand-rolled fixture can silently reproduce a defect a prior review already fixed; `image-check`/`self-review` pass it because the golden correctly matches the drawing code — they never flag that the *fixture* is the pre-fix shape. Before hand-building a fixture for a visual golden, grep for an existing `scene_*` / gallery fixture of the same kind and prefer it. Corollary: when a reviewer cites a specific earlier commit/PR as "already fixed", read that commit first and apply *its* approach — do not re-derive a fix from scratch.
+- **The golden harness must render under the binary's real conditions.** A golden that forces runtime conditions the binary does not set — a theme via `.with_theme(...)`, a window size, a visuals palette — can pass while the binary is visibly broken, because it tests the draw code under harness-chosen conditions, not the binary's real ones. Prefer making the draw code **self-sufficient**: a composition-root / full-screen widget paints its OWN background and uses its OWN palette tokens rather than the host's ambient `Visuals`, so golden == binary regardless of theme. Pin the binary's palette explicitly (e.g. `set_visuals(...)`) rather than inheriting the framework's system-following default. When a reviewer says "we need goldens here," first check whether a golden already exists but is passing under harness conditions that hide the real-runtime bug.
+
+See `ai-docs/learnings.md` 2026-07-22 (fixture-reuse and forced-theme entries).
+
 ## Error types
 `thiserror` for new error enum/struct; hand-rolled `Display`/`Error` only where the derive cannot express it.
 
