@@ -7,11 +7,15 @@
 //! other two are built on the [`DistanceTransform`](gp_core::geom::DistanceTransform)
 //! / [`medial_axis`](gp_core::geom::medial_axis) primitives.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use gp_core::geom::{
     Coord, Corridor, DistanceTransform, Orient, Point, bounded_complement_components,
     component_count,
 };
 use gp_core::track::StartFinish;
+
+use crate::CoarseSkeleton;
 
 /// One statically-detected defect of the fine corridor `D` (design doc §2, Ф4).
 ///
@@ -204,6 +208,93 @@ fn check_narrow_sf(sf: &StartFinish, m: u32) -> Option<Issue> {
         axis: sf.orient,
         width: u32::try_from(len).unwrap_or(u32::MAX),
     })
+}
+
+/// The 4-connected degree of coarse hole cell `c` within `hole` — its count
+/// of 4-neighbors also in `hole`.
+fn hole_degree(hole: &BTreeSet<Point>, c: Point) -> usize {
+    c.neighbors4()
+        .into_iter()
+        .filter(|n| hole.contains(n))
+        .count()
+}
+
+/// The finger chain starting at coarse tip `tip` — the tip cell plus every
+/// subsequent degree-`≤2` hole cell along the walk, stopping *before* the
+/// first degree-`≥3` branch cell (design doc §2 Ф4 Finger liveness).
+fn walk_finger(hole: &BTreeSet<Point>, tip: Point) -> Vec<Point> {
+    let mut chain = vec![tip];
+    let mut prev = None;
+    let mut current = tip;
+    loop {
+        let next_candidates: Vec<Point> = current
+            .neighbors4()
+            .into_iter()
+            .filter(|&n| hole.contains(&n) && Some(n) != prev)
+            .collect();
+        let [next] = next_candidates.as_slice() else {
+            break;
+        };
+        if hole_degree(hole, *next) >= 3 {
+            break;
+        }
+        chain.push(*next);
+        prev = Some(current);
+        current = *next;
+    }
+    chain
+}
+
+/// The infield peninsulas of the coarse hole `P` (`skel.hole`), keyed by
+/// their tip `Point` (design doc §2 Ф4 Finger liveness).
+///
+/// A hole cell with exactly one 4-connected neighbor in `P` is a finger tip;
+/// its finger is the chain of degree-`≤2` hole cells from that tip up to (but
+/// excluding) the first degree-`≥3` branch cell.
+#[allow(
+    dead_code,
+    reason = "wired into phase4_static_checks by subtask 6 of this same file \
+              (design doc decomposition Task 5 → Task 6); dead outside tests \
+              until then"
+)]
+fn infield_fingers(skel: &CoarseSkeleton) -> BTreeMap<Point, Vec<Point>> {
+    skel.hole
+        .iter()
+        .copied()
+        .filter(|&c| hole_degree(&skel.hole, c) == 1)
+        .map(|tip| (tip, walk_finger(&skel.hole, tip)))
+        .collect()
+}
+
+/// The fine-point origin of coarse block `c`'s `k×k` patch — mirrors Ф2's
+/// private `block_origin` (`crates/gen/src/phase2.rs`).
+const fn block_origin(c: Point, k: i32) -> Point {
+    Point::new(c.x.saturating_mul(k), c.y.saturating_mul(k))
+}
+
+/// Every fine point of coarse block `c`'s `k×k` patch, row-major — mirrors
+/// Ф2's private `block_points`.
+fn block_points(c: Point, k: i32) -> impl Iterator<Item = Point> {
+    let origin = block_origin(c, k);
+    (0..k).flat_map(move |dy| {
+        (0..k).map(move |dx| Point::new(origin.x.saturating_add(dx), origin.y.saturating_add(dy)))
+    })
+}
+
+/// Whether `finger`'s fine footprint (the `×k` block expansion of each coarse
+/// cell) is **entirely** drivable in `d` — the separating infield strip is
+/// fully filled, so the finger's two flanking arms have merged (design doc §1
+/// line 24).
+#[allow(
+    dead_code,
+    reason = "wired into phase4_static_checks by subtask 6 of this same file \
+              (design doc decomposition Task 5 → Task 6); dead outside tests \
+              until then"
+)]
+fn absorbed(finger: &[Point], d: &Corridor, k: i32) -> bool {
+    finger
+        .iter()
+        .all(|&c| block_points(c, k).all(|p| d.contains(p)))
 }
 
 #[cfg(test)]
@@ -417,5 +508,55 @@ mod tests {
         let sf = sf_fixture(&[(3, 5), (4, 5), (5, 5)], Orient::Horizontal);
         assert_eq!(check_narrow_sf(&sf, 3), None);
         assert_eq!(check_narrow_sf(&sf, 2), None);
+    }
+
+    /// A coarse hole `P`: a 2x2 blob `{(0,0),(1,0),(0,1),(1,1)}` (all
+    /// degree-2, no branch) with a one-cell spur `(2,0)` attached to
+    /// `(1,0)` — `(1,0)` becomes the sole degree-3 branch cell and `(2,0)`
+    /// the sole finger tip.
+    fn skeleton_with_one_cell_peninsula() -> CoarseSkeleton {
+        CoarseSkeleton {
+            ring: BTreeSet::new(),
+            hole: BTreeSet::from([
+                Point::new(0, 0),
+                Point::new(1, 0),
+                Point::new(0, 1),
+                Point::new(1, 1),
+                Point::new(2, 0),
+            ]),
+            dir: gp_core::track::RaceDir::Cw,
+        }
+    }
+
+    #[test]
+    fn infield_fingers_finds_the_one_cell_peninsula_keyed_by_its_tip() {
+        let skel = skeleton_with_one_cell_peninsula();
+        let fingers = infield_fingers(&skel);
+        assert_eq!(fingers.len(), 1);
+        assert_eq!(
+            fingers.get(&Point::new(2, 0)),
+            Some(&vec![Point::new(2, 0)])
+        );
+    }
+
+    #[test]
+    fn finger_alive_when_footprint_not_drivable() {
+        let skel = skeleton_with_one_cell_peninsula();
+        let finger = &infield_fingers(&skel)[&Point::new(2, 0)];
+        // The k=3 fine footprint of coarse cell (2,0) is x:6..9, y:0..3 — an
+        // empty D leaves it entirely ¬D, so the finger survives.
+        let d = Corridor::new(Point::new(0, 0), 12, 6);
+        assert!(!absorbed(finger, &d, 3));
+    }
+
+    #[test]
+    fn finger_absorbed_when_footprint_fully_drivable() {
+        let skel = skeleton_with_one_cell_peninsula();
+        let finger = &infield_fingers(&skel)[&Point::new(2, 0)];
+        let mut d = Corridor::new(Point::new(0, 0), 12, 6);
+        for p in block_points(Point::new(2, 0), 3) {
+            d.set(p, true);
+        }
+        assert!(absorbed(finger, &d, 3));
     }
 }
