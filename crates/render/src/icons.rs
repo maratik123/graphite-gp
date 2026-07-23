@@ -425,15 +425,15 @@ mod tests {
             .iter()
             .map(|v| (v.uv.x.to_bits(), v.uv.y.to_bits()))
             .collect();
-        let expected_corners: HashSet<(u32, u32)> = [
-            (FULL_UV.min.x, FULL_UV.min.y),
-            (FULL_UV.min.x, FULL_UV.max.y),
-            (FULL_UV.max.x, FULL_UV.min.y),
-            (FULL_UV.max.x, FULL_UV.max.y),
-        ]
-        .into_iter()
-        .map(|(x, y)| (x.to_bits(), y.to_bits()))
-        .collect();
+        let expected_corners = HashSet::from_iter(
+            [
+                (FULL_UV.min.x, FULL_UV.min.y),
+                (FULL_UV.min.x, FULL_UV.max.y),
+                (FULL_UV.max.x, FULL_UV.min.y),
+                (FULL_UV.max.x, FULL_UV.max.y),
+            ]
+            .map(|(x, y)| (x.to_bits(), y.to_bits())),
+        );
         assert_eq!(
             uv_corners, expected_corners,
             "mesh UV corners did not match FULL_UV"

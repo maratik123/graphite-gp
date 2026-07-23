@@ -4,7 +4,7 @@
 //! Consumes the fine corridor `D`, the width floors, and the S/F chord; runs
 //! four checks in a fixed order and returns a `Vec<Issue>` (empty ⟺ statically
 //! valid). Two checks reuse the merged `gp_core::geom` helpers verbatim; the
-//! other two are built on the [`DistanceTransform`](gp_core::geom::DistanceTransform)
+//! other two are built on the [`DistanceTransform`](DistanceTransform)
 //! / [`medial_axis`](gp_core::geom::medial_axis) primitives.
 
 use std::collections::{BTreeMap, BTreeSet};

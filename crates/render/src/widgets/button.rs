@@ -234,7 +234,8 @@ impl<'a> Button<'a> {
     /// `FontFamily::Name(fonts::ONEST_SEMIBOLD)`.
     #[allow(
         clippy::too_many_arguments,
-        reason = "paint layer takes every resolved input explicitly, per the design's 3-layer split; splitting further would fragment one cohesive draw call"
+        reason = "paint layer takes every resolved input explicitly, \
+        per the design's 3-layer split; splitting further would fragment one cohesive draw call"
     )]
     pub(crate) fn paint(
         painter: &Painter,
@@ -450,7 +451,8 @@ mod tests {
             let hover_intensity = color::PAPER_0.blend(hover_bg).intensity();
             assert!(
                 press_intensity < hover_intensity,
-                "{variant:?}: press intensity {press_intensity} should be darker than hover intensity {hover_intensity}"
+                "{variant:?}: press intensity {press_intensity} should be darker \
+                than hover intensity {hover_intensity}"
             );
         }
     }

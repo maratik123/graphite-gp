@@ -610,7 +610,7 @@ mod tests {
     /// flush-to-edge fixture).
     #[test]
     fn flush_to_edge_ring_still_has_bounded_hole() {
-        let cells: Vec<(i32, i32)> = [
+        let cells = vec![
             (0, 0),
             (1, 0),
             (2, 0),
@@ -619,8 +619,7 @@ mod tests {
             (0, 2),
             (1, 2),
             (2, 2),
-        ]
-        .to_vec();
+        ];
         let d = corridor((0, 0), 3, 3, &cells);
         let regions = classify(&d);
         assert_eq!(set(&regions.infield), set(&[Point::new(1, 1)]));

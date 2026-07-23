@@ -303,7 +303,8 @@ mod tests {
             let hover_intensity = color::PAPER_0.blend(hover_bg).intensity();
             assert!(
                 press_intensity < hover_intensity,
-                "{variant:?}: press intensity {press_intensity} should be darker than hover intensity {hover_intensity}"
+                "{variant:?}: press intensity {press_intensity} should be darker \
+                than hover intensity {hover_intensity}"
             );
         }
     }
