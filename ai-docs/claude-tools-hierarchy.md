@@ -13,11 +13,12 @@ Project-defined harness surfaces. When adding a new project-defined name, grep t
 | `self-review` | `/task` Step 10, `/project-review`, CI/PR skills, `/bugfix` | Skeptical pre-push reviewer (REJECT gates) |
 | `review-findings` | `/project-review` | Whole-codebase review variant |
 | `self-improve` | `/improve` | Escalates learnings → rules/hooks |
+| `self-reflect` | `/reflect` | End-of-work good/bad retrospective; routes each finding to learnings / ticket / none; assembles-and-yields (no `AskUserQuestion`, no project-side write) — parent `/reflect` surfaces consent |
 | `learnings-escalation-audit` | `/ai-audit` Phase 1 | Verifies `Escalated?` accuracy; flags stale validations |
 | `triage-runner` | `/triage` | Batch-promotes deferred rows to gh issues |
 
 ## Skills (`.claude/skills/`)
-`/task`, `/interview`, `/next`, `/improve`, `/ai-audit`, `/project-review`, `/bugfix`, `/verify-change`, `/context-reset`, `/triage`, `/pr-commented`, `/pr-ci-failed`, `/main-ci-failed`, `/pr-merged`, `/dependabot-pr`.
+`/task`, `/interview`, `/next`, `/improve`, `/reflect`, `/ai-audit`, `/project-review`, `/bugfix`, `/verify-change`, `/context-reset`, `/triage`, `/pr-commented`, `/pr-ci-failed`, `/main-ci-failed`, `/pr-merged`, `/dependabot-pr`.
 
 ## Hooks (`.claude/settings.json`)
 | Event | Purpose |

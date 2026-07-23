@@ -63,12 +63,12 @@ For each selected feedback memory, decide whether it **names a workflow primitiv
 Slash commands:
   /task, /improve, /pr-commented, /bugfix, /interview, /context-reset,
   /project-review, /ai-audit, /triage, /main-ci-failed, /pr-ci-failed, /pr-merged,
-  /next, /dependabot-pr, /verify-change
+  /next, /dependabot-pr, /verify-change, /reflect
 
 Agent stems (file stems under .claude/agents/):
   self-improve, design, design-review, review-findings, self-review,
   spec-writer, learnings-escalation-audit, triage-runner,
-  code-writer, image-check
+  code-writer, image-check, self-reflect
 
 AGENTS.md section headings:
   ## Workflow, ## Propagation Rule, ## Learning Log, ## Code Style
