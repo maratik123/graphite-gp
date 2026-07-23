@@ -155,7 +155,7 @@ When adding or editing dependencies in `Cargo.toml`:
 > APPROVE = push. REJECT = fix on the same branch and re-run; after 3 REJECTs in a row, surface and stop without pushing.
 
 > **AXIOM — `ai-docs/deferred/_inbox.jsonl` is written ONLY by `/task` Step 12 and `/triage`.**
-> Hand-edits defeat the propagation contract — they hide rows from the parser and conflict with future Step-12 appends; the JSONL line-per-object format is hand-edit-hostile (one malformed line breaks the whole `jq` read).
+> Hand-edits defeat the propagation contract — they hide rows from the parser and conflict with future Step-12 appends; the JSONL line-per-object format is hand-edit-hostile (one malformed line breaks the whole `jq` read). Row shape for the two writers: [`ai-docs/templates/inbox-row.md`](ai-docs/templates/inbox-row.md).
 >
 > | If you see... | Action |
 > |---|---|
@@ -243,6 +243,8 @@ findings*.
 | `ai-docs/claude-tools-hierarchy.md` | Project Tool/Subagent/Skill/Hook inventory |
 | `ai-docs/templates/progress-format.md` | Canonical `.progress.md` format spec |
 | `ai-docs/templates/improve-eval-reproducer.md` | `/improve` Step 6 eval reproducer template — read on demand |
+| `ai-docs/templates/learnings-entry.md` | Canonical `learnings.md` entry skeleton + example — consult instead of the live log |
+| `ai-docs/templates/inbox-row.md` | Canonical `_inbox.jsonl` row shape + example — consult instead of the live file |
 | `ai-docs/plans/INDEX.md` | Plan index — statuses and dependency order |
 | `ai-docs/plans/*.spec.md` | Active task spec + acceptance criteria |
 | `ai-docs/plans/*.design.md` | Active task design documents |
@@ -291,14 +293,7 @@ On **ANY** instruction violation, of any kind, write a new entry to `ai-docs/lea
 
 ### Entry format
 
-```
-### YYYY-MM-DD — [category] — [short description]
-**What happened:** [quote or paraphrase]
-**Rule:** [what to do instead, or what to keep doing]
-**Kind:** correction | validation    (optional; defaults to `correction` when omitted)
-**Escalated?** no | AGENTS.md | skill:[name] | hook | settings | agent:[name] | rules:[name] | doc-convention | code-style (comma-separate multiple)
-**Superseded by:** [ref] — [one-line reason]    (optional; omitted when not applicable)
-```
+**Copyable skeleton + a filled example: [`ai-docs/templates/learnings-entry.md`](ai-docs/templates/learnings-entry.md) — consult that template to inspect the format, NOT the live log.** For orientation, an entry is a `### YYYY-MM-DD — [category] — [short description]` heading followed by `**What happened:**`, `**Rule:**`, optional `**Kind:**`, `**Escalated?**`, and optional `**Superseded by:**`.
 
 `Kind:` defaults to `correction` when omitted. Write `Kind: validation` for entries that document a working protocol/pattern to keep doing (carrot signal); `Kind: correction` (or omit) for a violation to stop doing (stick signal). `Escalated?` records **project-level** persistence only — user-local auto-memory and `settings.local.json` do **not** count → stay `no`.
 

@@ -71,7 +71,7 @@ Per-source candidate rules:
 | Source | Candidate rule (baked-in `jq`) | Notes |
 |---|---|---|
 | thematic files | `jq -c 'select(.tracked=="—")' <theme>.jsonl` (each `*.jsonl` under `ai-docs/deferred/` except `_inbox.jsonl`) | Thematic rows carry no `kind` key. JSONL keys are read directly — no prose-substring leak. |
-| `_inbox.jsonl` | `jq -c 'select(.tracked=="—")' _inbox.jsonl` | Each line is a `{item, source_label, source_path, section, tracked}` object. |
+| `_inbox.jsonl` | `jq -c 'select(.tracked=="—")' _inbox.jsonl` | Each line is a `{item, source_label, source_path, section, tracked}` object ([`ai-docs/templates/inbox-row.md`](../../ai-docs/templates/inbox-row.md)). |
 
 `_inbox.jsonl` candidates are tagged for the **drain phase (Phase 7)**, NOT the cell-iteration sweep — drain is canonical to avoid double-handling.
 

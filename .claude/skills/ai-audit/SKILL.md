@@ -135,7 +135,7 @@ Show the user a numbered list of findings with proposed fixes (concrete diffs fo
 - `blocker` / `major`: ask user to confirm before applying.
 - `minor` / `nit`: may apply autonomously if the fix is mechanical and obvious; otherwise ask.
 
-Apply approved fixes via `Edit` / `Write`. Update `ai-docs/learnings.md` with a new entry per AGENTS.md "Learning Log" format **only if** the audit revealed a *new* class of mistake worth tracking — do not log routine cleanup.
+Apply approved fixes via `Edit` / `Write`. Update `ai-docs/learnings.md` with a new entry per AGENTS.md "Learning Log" format (copyable skeleton: [`ai-docs/templates/learnings-entry.md`](../../../ai-docs/templates/learnings-entry.md)) **only if** the audit revealed a *new* class of mistake worth tracking — do not log routine cleanup.
 
 ### Step 2.6: Verify
 
