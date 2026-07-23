@@ -3,10 +3,127 @@
 //! `ai-docs/plans/2026-07-24-gp-gen-frontier-gap-mapping.spec.md`, design
 //! `ai-docs/plans/2026-07-24-gp-gen-frontier-gap-mapping.design.md`).
 //!
-//! This module currently holds only the **AC7 monotonicity proof gate**
-//! (subtask 2): an executable test that decides AC8's outcome-shape arity
-//! before `RepairCandidate` and `map_frontier_gap_to_edge` are written
-//! (subtask 5 onward).
+//! Holds the AC7 monotonicity proof gate (subtask 2, `#[cfg(test)]` only)
+//! and [`map_frontier_gap_to_edge`] (subtask 5 onward) — a total,
+//! deterministic, non-panicking mapping from a Ф5b stall diagnostic to a
+//! verified-progress repair edit.
+
+use std::collections::HashSet;
+
+use gp_core::geom::{Corridor, Point, Wall};
+use gp_core::sim::CarState;
+use gp_core::track::{RaceDir, StartFinish, StartGrid};
+
+use crate::phase5::ORACLE_V1_CEIL;
+use crate::phase5b::{fastest_lap_through_live, live_at, wall_neighbor, wall_sort_key};
+
+/// The progress metric (spec § Progress metric): the phase-0 reachable
+/// **cell** set `P0` at the fixed `V_ceil = 1` ceiling, post-race-start,
+/// pre-lap-close — the same `P0` `fastest_lap_through_live` emits, and the
+/// same set `p0_boundary_walls`'s diagnostic is keyed on. Reuses `live_at`
+/// together with `ORACLE_V1_CEIL` (widened from `phase5.rs`) rather than
+/// re-declaring the `1` literal.
+pub(crate) fn p0_at_v1(d: &Corridor, grid: &StartGrid, sf: &StartFinish) -> HashSet<Point> {
+    let seeds: Vec<CarState> = grid
+        .positions
+        .iter()
+        .map(|&p| CarState {
+            x: p.x,
+            y: p.y,
+            vx: 0,
+            vy: 0,
+        })
+        .collect();
+    let live = live_at(d, &seeds, sf, ORACLE_V1_CEIL);
+    let (_, p0) = fastest_lap_through_live(d, &grid.positions, sf, &live, ORACLE_V1_CEIL);
+    p0
+}
+
+/// The outcome of mapping a Ф5b stall diagnostic to a repair edit
+/// (design `[N3]`, `docs/design.md` §2 Ф6 `DYNAMICALLY_DISCONNECTED`).
+///
+/// Two variants, per the executed AC7 proof gate (design § AC7 proof
+/// gate → Consequence — AC8 Branch A): the dynamic-only stall class (V=1
+/// lappable, but the full-`Vmax` oracle is not) is empty, so no `Declined`
+/// arm is written.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RepairCandidate {
+    /// The dual edge to shift outward: making the cell across `side`
+    /// drivable is verified to strictly grow `|P0|` at `V_ceil = 1`.
+    Edge(Wall),
+    /// No boundary edge derived from the diagnostic grows `P0` — the
+    /// caller burns a repair-budget step (`[N4]` reseed fallback), never a
+    /// sentinel `Wall`.
+    NoCandidate,
+}
+
+/// Map a Ф5b stall diagnostic to a verified-progress repair edit (design §
+/// Approach (2)).
+///
+/// A **total, deterministic, non-panicking** function that only ever
+/// returns an edge it has *proved* grows the progress metric: for each
+/// `w` in `stall_walls`, re-validates that `w` is a genuine boundary edge
+/// of `d` (never trusting the diagnostic — AC10), scratch-applies the
+/// corresponding add-edit, and keeps the candidate only if it **strictly**
+/// grows `|P0|` at `V_ceil = 1`. Among surviving candidates, picks the one
+/// with **max growth**, ties broken by **min `wall_sort_key`** — a
+/// function of the candidate *set*, not the input slice's order, so the
+/// result is order-independent (AC11) even for an unsorted or shuffled
+/// `stall_walls`. No surviving candidate yields
+/// [`RepairCandidate::NoCandidate`] (AC9), never a sentinel `Wall`.
+///
+/// `race_dir` is accepted for signature fidelity and discarded, the same
+/// convention `oracle_liveness_v1` (`phase5.rs`) and `phase5_full_oracle`
+/// (`phase5b.rs`) already use.
+pub fn map_frontier_gap_to_edge(
+    d: &Corridor,
+    grid: &StartGrid,
+    sf: &StartFinish,
+    race_dir: RaceDir,
+    stall_walls: &[Wall],
+) -> RepairCandidate {
+    let _ = race_dir;
+
+    let base = p0_at_v1(d, grid, sf).len();
+
+    let mut best: Option<(usize, Wall)> = None;
+    for &w in stall_walls {
+        if !d.contains(w.cell) {
+            continue;
+        }
+        let Some(q) = wall_neighbor(w) else {
+            continue;
+        };
+        if d.contains(q) {
+            continue;
+        }
+
+        let mut d2 = d.clone();
+        d2.set(q, true);
+        let grown = p0_at_v1(&d2, grid, sf).len();
+        if grown <= base {
+            continue;
+        }
+
+        best = Some(match best {
+            None => (grown, w),
+            Some((best_grown, best_w)) => {
+                if grown > best_grown
+                    || (grown == best_grown && wall_sort_key(w) < wall_sort_key(best_w))
+                {
+                    (grown, w)
+                } else {
+                    (best_grown, best_w)
+                }
+            }
+        });
+    }
+
+    match best {
+        Some((_, w)) => RepairCandidate::Edge(w),
+        None => RepairCandidate::NoCandidate,
+    }
+}
 
 #[cfg(test)]
 mod tests {

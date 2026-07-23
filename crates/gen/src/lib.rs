@@ -25,6 +25,7 @@ pub use phase3::*;
 pub use phase4::*;
 pub use phase5::*;
 pub use phase5b::*;
+pub use phase6::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]
