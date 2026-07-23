@@ -47,7 +47,7 @@ The subagent walks the thematic files — every `*.jsonl` under `ai-docs/deferre
 
 ## `_inbox.jsonl` drain
 
-`_inbox.jsonl` rows are handled per-entry — **not** routed through the cell-iteration sweep above (drain is canonical to avoid double-handling). Read inbox rows via `jq -c '.' _inbox.jsonl`; each line is one `{item, source_label, source_path, section, tracked}` object.
+`_inbox.jsonl` rows are handled per-entry — **not** routed through the cell-iteration sweep above (drain is canonical to avoid double-handling). Read inbox rows via `jq -c '.' _inbox.jsonl`; each line is one `{item, source_label, source_path, section, tracked}` object (row shape + thematic-variant reference: [`ai-docs/templates/inbox-row.md`](../../../ai-docs/templates/inbox-row.md)).
 
 One prompt per row, four actions:
 

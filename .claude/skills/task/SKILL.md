@@ -174,7 +174,7 @@ Run the full 11-step verify list in `reference.md` § Step 9 — verify list (fu
 
 ### Step 9.5: Update documentation
 
-Update content files only — **do not move spec/design to `done/` yet** (that happens at Step 12). Touch `ai-docs/context.md` (open questions / Plans list / Key Decisions) and `README.md` (status table for newly implemented crates). Full detail: `reference.md` § Step 9.5 — documentation update (detail).
+Update content files only — **do not move spec/design to `done/` yet** (that happens at Step 12). Append this task's per-issue implementation-status entry to `ai-docs/context-status.md` (the detailed log), bump the affected block's summary bullet + resolve open questions in `ai-docs/context.md` (thin orientation page — keep it under the size cap), and update `README.md` (status table for newly implemented crates). Full detail: `reference.md` § Step 9.5 — documentation update (detail).
 
 **Write progress at this step boundary** before further tool calls: rewrite `**current_step:**` to `Step 9.5 — docs updated`; append a `## Decisions log` bullet recording any open questions resolved in `context.md` (one line, prefixed `Step 9.5:`; omit if none).
 
@@ -220,9 +220,9 @@ After all findings are resolved, run gates (`cargo build`, `cargo test`, `cargo 
    - Change the plan row status to `✅ implemented (N tests)`
    - Move spec/design files to `ai-docs/plans/done/`
    - Update dependency tree and **Suggested next steps**
-5. **Inbox propagation — parse the just-finalised spec (and its design if present) and append one JSON line per item to `ai-docs/deferred/_inbox.jsonl`.** Apply the file-level dedupe rule against the thematic `.jsonl` files in `ai-docs/deferred/` (the `*.jsonl` siblings of `_inbox.jsonl`; dedupe over `.source_path` via `jq`); emit a `WARN:` line on unrecognised body shapes and continue. Full per-shape parser + dedupe rules in `reference.md` § Step 12 — inbox propagation (detail) and in [`inbox-propagation.md`](inbox-propagation.md). The Step 12 commit (sub-step 7 below) stages `_inbox.jsonl` alongside the existing artefacts.
+5. **Inbox propagation — parse the just-finalised spec (and its design if present) and append one JSON line per item to `ai-docs/deferred/_inbox.jsonl`** (row shape: [`ai-docs/templates/inbox-row.md`](../../../ai-docs/templates/inbox-row.md)). Apply the file-level dedupe rule against the thematic `.jsonl` files in `ai-docs/deferred/` (the `*.jsonl` siblings of `_inbox.jsonl`; dedupe over `.source_path` via `jq`); emit a `WARN:` line on unrecognised body shapes and continue. Full per-shape parser + dedupe rules in `reference.md` § Step 12 — inbox propagation (detail) and in [`inbox-propagation.md`](inbox-propagation.md). The Step 12 commit (sub-step 7 below) stages `_inbox.jsonl` alongside the existing artefacts.
 6. `cargo build` — ensures `Cargo.lock` is refreshed and included if changed.
-7. Stage all changed files: implementation files from `## Files touched`, `context.md`, `README.md`, `ai-docs/learnings.md` (if modified), updated `INDEX.md`, `ai-docs/deferred/_inbox.jsonl` (rows appended in sub-step 5), and spec/design now in `done/`.
+7. Stage all changed files: implementation files from `## Files touched`, `context-status.md` (+ `context.md` if its summary changed), `README.md`, `ai-docs/learnings.md` (if modified), updated `INDEX.md`, `ai-docs/deferred/_inbox.jsonl` (rows appended in sub-step 5), and spec/design now in `done/`.
 8. Commit `feat(<crate>): <imperative summary>` with a 1–3 line body and `N new tests; all M tests green.`
 9. `git push -u origin <branch>`
 10. `gh pr create` with title + body — body must include **Summary** / **Tracking** (`Closes #N` for full-resolve or `Refs #N` for partial; omit if `Tracked in: none`) / **Test plan** (one line per AC + clippy/build). Full body template: `reference.md` § Step 12 — PR-body template (detail).

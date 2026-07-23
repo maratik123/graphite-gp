@@ -22,11 +22,7 @@ WARN: <spec-path> :: <section heading> — unrecognised body shape, no rows emit
 
 Step 12 continues normally; `_inbox.jsonl` is unchanged for that section.
 
-**Per-row mapping.** Each parsed item becomes one JSON object appended as a single line to `ai-docs/deferred/_inbox.jsonl` (one object per line; the `_inbox` row shape carries `section`, not `status` — see the design § Approach (c) key set):
-
-```
-{"item": <Item>, "source_label": <source-label>, "source_path": <source-path>, "section": <section-key>, "tracked": "—"}
-```
+**Per-row mapping.** Each parsed item becomes one JSON object appended as a single line to `ai-docs/deferred/_inbox.jsonl`. The canonical row shape + field key + example live in [`ai-docs/templates/inbox-row.md`](../../../ai-docs/templates/inbox-row.md) (the `_inbox` row carries `section`, not `status` — see the design § Approach (c) key set). The `/task`-specific per-field derivation:
 
 - **`item`** — value produced by the matched shape rule, stored verbatim as a JSON string. A literal `|` is stored as the raw byte `|` (JSON has no pipe-escaping; the `\|` markdown-table escaping is NOT applied here — that was a markdown-table artefact, gone with the table sink).
 - **`source_label`** — derived from the source filename: strip the `YYYY-MM-DD-` date prefix and the `.spec.md` / `.design.md` suffix; append ` spec` or ` design` accordingly. Examples: `2026-05-09-paint-style.spec.md` → `paint-style spec`; `2026-05-01-auto-connection.design.md` → `auto-connection design`.

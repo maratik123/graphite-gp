@@ -155,7 +155,7 @@ When adding or editing dependencies in `Cargo.toml`:
 > APPROVE = push. REJECT = fix on the same branch and re-run; after 3 REJECTs in a row, surface and stop without pushing.
 
 > **AXIOM — `ai-docs/deferred/_inbox.jsonl` is written ONLY by `/task` Step 12 and `/triage`.**
-> Hand-edits defeat the propagation contract — they hide rows from the parser and conflict with future Step-12 appends; the JSONL line-per-object format is hand-edit-hostile (one malformed line breaks the whole `jq` read).
+> Hand-edits defeat the propagation contract — they hide rows from the parser and conflict with future Step-12 appends; the JSONL line-per-object format is hand-edit-hostile (one malformed line breaks the whole `jq` read). Row shape for the two writers: [`ai-docs/templates/inbox-row.md`](ai-docs/templates/inbox-row.md).
 >
 > | If you see... | Action |
 > |---|---|
@@ -228,18 +228,23 @@ findings*.
 
 | Path | Purpose |
 |------|---------|
-| `ai-docs/context.md` | Project context — read on demand |
+| `ai-docs/context.md` | Project context (orientation) — read on demand |
+| `ai-docs/context-status.md` | Per-issue implementation status log — read on demand |
 | `ai-docs/code-style.md` | Workspace code-style reference — read on demand |
 | `ai-docs/doc-convention.md` | rustdoc conventions — read on demand |
 | `ai-docs/corrections-log.md` | Learning-Log carve-outs + field glossary |
 | `ai-docs/key-decisions.md` | Key design-decision detail bodies |
 | `ai-docs/api-naming.md` | `_unchecked` AXIOM + naming rules |
 | `ai-docs/dependency-versions.md` | Live Cargo / GitHub Action version lookup recipes |
+| `ai-docs/miri-gate.md` | Miri-gate mechanics + the two mechanical gp-render gate triggers — read on demand |
 | `ai-docs/agent-writing-style.md` | Binary-rule writing style for dual-model readability |
 | `ai-docs/agent-docs-index.md` | Verbose bodies of `§ Agent Docs` rows — read on demand |
 | `ai-docs/instruction-file-validation.md` | Dual-model instruction-file-clarity test methodology |
 | `ai-docs/claude-tools-hierarchy.md` | Project Tool/Subagent/Skill/Hook inventory |
 | `ai-docs/templates/progress-format.md` | Canonical `.progress.md` format spec |
+| `ai-docs/templates/improve-eval-reproducer.md` | `/improve` Step 6 eval reproducer template — read on demand |
+| `ai-docs/templates/learnings-entry.md` | Canonical `learnings.md` entry skeleton + example — consult instead of the live log |
+| `ai-docs/templates/inbox-row.md` | Canonical `_inbox.jsonl` row shape + example — consult instead of the live file |
 | `ai-docs/plans/INDEX.md` | Plan index — statuses and dependency order |
 | `ai-docs/plans/*.spec.md` | Active task spec + acceptance criteria |
 | `ai-docs/plans/*.design.md` | Active task design documents |
@@ -288,14 +293,7 @@ On **ANY** instruction violation, of any kind, write a new entry to `ai-docs/lea
 
 ### Entry format
 
-```
-### YYYY-MM-DD — [category] — [short description]
-**What happened:** [quote or paraphrase]
-**Rule:** [what to do instead, or what to keep doing]
-**Kind:** correction | validation    (optional; defaults to `correction` when omitted)
-**Escalated?** no | AGENTS.md | skill:[name] | hook | settings | agent:[name] | rules:[name] | doc-convention | code-style (comma-separate multiple)
-**Superseded by:** [ref] — [one-line reason]    (optional; omitted when not applicable)
-```
+**Copyable skeleton + a filled example: [`ai-docs/templates/learnings-entry.md`](ai-docs/templates/learnings-entry.md) — consult that template to inspect the format, NOT the live log.** For orientation, an entry is a `### YYYY-MM-DD — [category] — [short description]` heading followed by `**What happened:**`, `**Rule:**`, optional `**Kind:**`, `**Escalated?**`, and optional `**Superseded by:**`.
 
 `Kind:` defaults to `correction` when omitted. Write `Kind: validation` for entries that document a working protocol/pattern to keep doing (carrot signal); `Kind: correction` (or omit) for a violation to stop doing (stick signal). `Escalated?` records **project-level** persistence only — user-local auto-memory and `settings.local.json` do **not** count → stay `no`.
 
@@ -307,9 +305,7 @@ Run `/improve` when **≥3 unescalated correction entries**, **≥2 unescalated 
 
 ## Rust Test Conventions
 
-- **Miri aborts on the FIRST unsupported operation**, and cargo's fail-fast then drops every phase queued behind it — the offending crate's whole test binary plus the doc-test phase. Gate any test that can abort Miri with `#[cfg_attr(miri, ignore = "<why>")]` **in the same commit**. Per-test, **never** a crate-level `--exclude` (that also drops the crate's Miri-clean tests). The trigger is **"aborts under Miri", NOT "is FFI"** — the two in-tree gates have unrelated causes: a **wgpu golden** (e.g. `app_shell_matches_golden`, `crates/render/src/app_gallery.rs`) drives wgpu and `dlopen`s the Vulkan ICD (FFI), while `tessellation_smoke` (the sibling in the same file) has **no FFI** and aborts because drawing text runs `vello_cpu`'s checked `u8`→`u32` pixmap cast, which panics under Miri's 1-byte allocator alignment. Write the reason for **that test's own** abort; do not copy a sibling's — a wrong reason is a false justification for a different failure. Reproduce with the **workspace** command CI runs (`ci.yml:176`+`:188` → `MIRIFLAGS=-Zmiri-tree-borrows cargo miri test --workspace`; locally add `+nightly` to select the toolchain that has `miri`), never a narrower `-p` run. **A red Miri BLOCKS merge** ([#76](https://github.com/maratik123/graphite-gp/issues/76), resolved 2026-07-18). Miri is a required branch-protection gate: `main-protection` requires the **`Miri`** context, produced by the `miri-pass` aggregator (`ci.yml`, `if: always()`, mirrors `build-pass`); the raw `miri` job's `continue-on-error` was **removed**, so a red Miri now fails the job → workflow run → aggregator. Because the run itself goes red, `gh run list` **does** reflect a red Miri now (the earlier *"`gh run list` is blind to a red Miri"* caveat no longer holds). A path-filtered `skipped` Miri (a non-Rust PR) still passes the aggregator. Treat a red Miri as a **regression to fix** — it blocks merge until green, or until the aborting test is `#[cfg_attr(miri, ignore)]`d per the rule above. Check it after any PR adding a new dependency class.
-- **gp-render Context/painter unit tests carry the Miri gate — mechanical trigger.** Any `gp-render` unit test that constructs an `egui::Context` (`Context::default()`) or drives a painter (`run_ui`/`layer_painter`), directly OR through a shared capture helper (`render_shapes`, `painted_shape_count`, `painted_meshes`), MUST carry `#[cfg_attr(miri, ignore = "<why>")]`, mirroring the wgpu-golden gate above. The trigger is *constructs a Context/painter* — grep-checkable (`rg -Un 'egui::Context::default' crates/render/src`, then confirm each enclosing `#[test]` is gated), NOT "is slow": these are interpreted wall-clock **cost**, not abort. Give one honest reason per helper-group — same-helper siblings share **one** cause and MAY share a reason; the "don't copy a sibling" rule above is about *different* causes, not same-cause tests.
-- **gp-render zero-production-UB-signal token/helper tests carry the Miri gate — mechanical trigger.** Any `gp-render` unit test whose body asserts ONLY **(a)** constant/data parity against a static source (the `include_str!`'d design-system CSS consts — `tokens::{color,spacing,typography,effects}` + `mod inventory`) **or (b)** `#[cfg(test)]`-only helper machinery never linked into the game binary (the `pub(crate) mod css` parser, the `mod test_util` `assert_f32`/`assert_f32_slice` helpers) MUST carry `#[cfg_attr(miri, ignore = "<why>")]`. Its Miri UB coverage is worthless (pure safe-Rust parity, or test-only scaffolding), so gate it — grep-checkable (`rg -Un '#\[test\]' crates/render/src/tokens crates/render/src/test_util.rs`, then confirm each enclosing `#[test]` is gated), NOT "is slow": like the Context/painter gate these are interpreted wall-clock **cost**, not abort — the reason must make **no abort claim**. One honest reason per cause-group (constant-parity / css-parser / test_util); same-cause siblings MAY share it.
+- **Miri gate — a red Miri BLOCKS merge** ([#76](https://github.com/maratik123/graphite-gp/issues/76), resolved 2026-07-18): a required branch-protection context produced by the `miri-pass` aggregator (mirrors `build-pass`; a path-filtered `skipped` Miri still passes it). Miri **aborts on the FIRST unsupported operation** and cargo's fail-fast then drops every phase queued behind it (the offending crate's whole test binary + the doc-test phase), so gate every test that can **abort** Miri — OR is a zero-production-UB-signal **cost** test — with `#[cfg_attr(miri, ignore = "<why>")]` **in the same commit**; per-test, **never** a crate-level `--exclude` (that also drops the crate's Miri-clean tests). The trigger is **"aborts (or costs) under Miri", NOT "is FFI"**, and the reason must describe **that test's own** cause — never a sibling's (a wrong reason is a false justification for a different failure). Reproduce with the **workspace** command CI runs (`MIRIFLAGS=-Zmiri-tree-borrows cargo miri test --workspace`; locally add `+nightly`), never a narrower `-p` run. Treat a red Miri as a **regression to fix** — it blocks merge until green or until the aborting test is gated. **Full gate mechanics + the two mechanical `gp-render` triggers (Context/painter tests; zero-production-UB-signal token/helper tests) live in [`ai-docs/miri-gate.md`](ai-docs/miri-gate.md).** Check Miri after any PR adding a new dependency class.
 - Unit tests in the same file under a `#[cfg(test)]` module. Integration tests in `tests/`.
 - Use `rstest` for parameterized tests when useful; `mockall` for mocking traits; `pretty_assertions` encouraged for diffs.
 - Assert with `assert_eq!` / `assert_matches!`. **`assert_matches!` formats the scrutinee with `{:?}` on mismatch, so its type MUST impl `Debug`** (`Result` needs both `T` + `E`; `Box<dyn Trait>` needs a `Debug` supertrait) — `assert!(matches!(...))` imposes no such bound. If the scrutinee is non-`Debug`, leave `assert!(matches!(...))` as-is — do NOT add a production `#[derive(Debug)]` to satisfy a test-only assertion. Counting `assert!(matches!)` sites for a migration: the multi-line message form is invisible to single-line `rg 'assert!\(matches!'` — use `rg -U`. The same false negative hits ANY multi-line Rust construct (a rustfmt-split `#[cfg_attr(\n    miri, …)]` attribute, a wrapped macro call): a single-line `grep` / `rg` miss on a construct that SHOULD exist is a search-method failure first, code-absence second — use `rg -U` (multiline) or read the region before concluding the construct is absent.

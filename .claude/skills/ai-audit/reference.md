@@ -55,7 +55,7 @@ Per the official docs:
 ## Checklist H — Documentation conformance pointers
 
 - `ai-docs/doc-convention.md` is referenced by `review-findings.md` and `self-review.md`. Confirm the relative paths resolve.
-- The canonical section order listed in AGENTS.md "Documentation Conventions" matches `doc-convention.md` exactly.
+- The canonical rustdoc section order is `ai-docs/doc-convention.md § DOC-2 — Section order (strict)` (its sole authoritative home — AGENTS.md carries no duplicate order list). Confirm any file that restates the order agrees with DOC-2 exactly.
 
 ## Checklist I — File-size & structure (instruction files)
 
