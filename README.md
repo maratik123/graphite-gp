@@ -40,14 +40,16 @@ block 1, state + legal mask onto 3a).
 closed. Per the §6 build order (`3a → (1 ∥ 2) → 4`), **block 1 (`gp-gen`) has now
 started**: the first generator phases **Ф1 (coarse-block ring, infield-first) + the
 grouped seeded-RNG config**, then **Ф2 (rasterize the coarse ring to the fine
-corridor `D` with an additive width taper)**, are landed (`gp_core::rng::Seeds` groups
+corridor `D` with an additive width taper)**, and **Ф3 (start/finish, accel zone,
+start grid, timing gate)** are landed (`gp_core::rng::Seeds` groups
 four independently-seeded `ChaCha8Rng` sources — collision / generation / AI-learning /
 AI-inference; `phase1_coarse_ring` builds the deterministic coarse annulus;
 `phase2_rasterize` expands each coarse cell to a `k×k` fine block, tapers outfield
-walls to a supercover-safe 45° ramp, and absorbs any pocket the taper seals — a
-deterministic, no-RNG, zero-panic corridor builder), closing issues #24, #25, and #49
-and discharging #50 (deterministic-order collections). The remaining pipeline is
-Ф3–Ф7 (#26–#34). Block 2 (`gp-render`) is **complete** — see below.
+walls to a supercover-safe 45° ramp, and absorbs any pocket the taper seals;
+`phase3_start_finish` thickens a straight coarse run and lays the start grid + the
+half-grid timing gate — all deterministic, no-RNG, zero-panic), closing issues #24,
+#25, #26, and #49 and discharging #50 (deterministic-order collections). The
+remaining pipeline is Ф4–Ф7 (#27–#34). Block 2 (`gp-render`) is **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
 `block:render` issue is closed. The backend is **eframe/egui 0.35**: `gp-game`
