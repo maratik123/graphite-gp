@@ -1,21 +1,29 @@
 //! Grouped seeded-RNG configuration (issue #49) — one place to configure every
-//! independently-seeded [`ChaCha8Rng`] source the game uses.
+//! independently-seeded RNG source the game uses.
 //!
 //! [`Seeds`] holds four `u64` seeds (never a live RNG) and materializes a fresh
-//! `ChaCha8Rng` per source on demand, mirroring the existing
+//! RNG per source on demand, mirroring the existing
 //! `GenParams::rng()`/`generation_rng()` pattern (`crates/gen/src/lib.rs`). This
 //! is the shared home for all four sources — car collision (`gp-core`
 //! `sim::collision`), track generation (`gp-gen`), and the two AI sources
 //! (`gp-ai`, a stub today) — because `gp-core` is the one crate every consumer
 //! already depends on.
+//!
+//! Each source materializes a **purpose-fit** engine (issue #139):
+//! [`Xoshiro256PlusPlus`] for track generation, collision, and AI inference —
+//! fast and statistically sufficient for those uses — and [`ChaCha8Rng`] for AI
+//! learning, whose training benefits from `ChaCha8`'s ideal statistics and long
+//! period. Both engines are seedable and deterministic, so replay determinism
+//! (`docs/design.md` §Ф1, §N4) holds on every source.
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use rand_xoshiro::Xoshiro256PlusPlus;
 
-/// Four independently-seeded [`ChaCha8Rng`] sources, grouped for one-place UI
+/// Four independently-seeded RNG sources, grouped for one-place UI
 /// configuration (AC7).
 ///
-/// Each field is a plain `u64` seed, not a live RNG — a fresh `ChaCha8Rng` is
+/// Each field is a plain `u64` seed, not a live RNG — a fresh RNG is
 /// materialized per source on demand via the `*_rng()` accessors, so the same
 /// `Seeds` value can be reused to replay any source's stream from the start.
 /// `Default` is all-zero seeds, a valid (if unexciting) UI starting point.
@@ -35,33 +43,38 @@ pub struct Seeds {
 
 impl Seeds {
     /// A fresh, replay-deterministic RNG for car-collision resolution, seeded
-    /// from `self.collision`.
+    /// from `self.collision`. Uses [`Xoshiro256PlusPlus`] — fast and
+    /// statistically sufficient for game-logic tie-breaks (issue #139).
     #[inline]
-    pub fn collision_rng(&self) -> ChaCha8Rng {
-        ChaCha8Rng::seed_from_u64(self.collision)
+    pub fn collision_rng(&self) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(self.collision)
     }
 
     /// A fresh, replay-deterministic RNG for the track-generation pipeline,
-    /// seeded from `self.generation`.
+    /// seeded from `self.generation`. Uses [`Xoshiro256PlusPlus`] — fast and
+    /// statistically sufficient for procedural track generation (issue #139).
     #[inline]
-    pub fn generation_rng(&self) -> ChaCha8Rng {
-        ChaCha8Rng::seed_from_u64(self.generation)
+    pub fn generation_rng(&self) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(self.generation)
     }
 
     /// A fresh, replay-deterministic RNG for AI learning, seeded from
-    /// `self.ai_learning`. Constructible/reachable today with no consumer
-    /// (AC9) — `gp-ai` is a stub.
+    /// `self.ai_learning`. Uses [`ChaCha8Rng`] — its ideal statistics and long
+    /// period best fit FNN training (issue #139). Constructible/reachable today
+    /// with no consumer (AC9) — `gp-ai` is a stub.
     #[inline]
     pub fn ai_learning_rng(&self) -> ChaCha8Rng {
         ChaCha8Rng::seed_from_u64(self.ai_learning)
     }
 
     /// A fresh, replay-deterministic RNG for AI inference, seeded from
-    /// `self.ai_inference`. Constructible/reachable today with no consumer
-    /// (AC9) — `gp-ai` is a stub.
+    /// `self.ai_inference`. Uses [`Xoshiro256PlusPlus`] — fast and
+    /// statistically sufficient for sampling over a handful of logits (issue
+    /// #139). Constructible/reachable today with no consumer (AC9) — `gp-ai` is
+    /// a stub.
     #[inline]
-    pub fn ai_inference_rng(&self) -> ChaCha8Rng {
-        ChaCha8Rng::seed_from_u64(self.ai_inference)
+    pub fn ai_inference_rng(&self) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(self.ai_inference)
     }
 }
 
@@ -80,7 +93,7 @@ mod tests {
         }
     }
 
-    fn stream(mut rng: ChaCha8Rng) -> Vec<u64> {
+    fn stream(mut rng: impl Rng) -> Vec<u64> {
         (0..8).map(|_| rng.next_u64()).collect()
     }
 

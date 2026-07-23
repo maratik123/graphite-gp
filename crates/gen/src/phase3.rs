@@ -1060,7 +1060,7 @@ mod tests {
         );
         assert_eq!(
             out.sf.gate.forward,
-            Side::North,
+            Side::South,
             "pinned gate.forward changed"
         );
     }
