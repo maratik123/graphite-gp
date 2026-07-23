@@ -344,10 +344,10 @@ mod tests {
     use gp_core::geom::{Orient, bounded_complement_components, component_count, supercover};
     use gp_core::track::RaceDir;
     use rand::SeedableRng;
-    use rand_chacha::ChaCha8Rng;
+    use rand_xoshiro::Xoshiro256PlusPlus;
 
-    fn rng(seed: u64) -> ChaCha8Rng {
-        ChaCha8Rng::seed_from_u64(seed)
+    fn rng(seed: u64) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(seed)
     }
 
     /// The block-size the fixture uses (`k ≥ n`).
@@ -861,12 +861,12 @@ mod tests {
 
     /// The exact, minted [`Corridor::origin`] for [`SNAPSHOT_SEED`] (AC6).
     fn snapshot_origin() -> Point {
-        Point::new(-37, -13)
+        Point::new(-61, -19)
     }
 
     /// The exact, minted [`Corridor::width`] for [`SNAPSHOT_SEED`] (AC6).
     fn snapshot_width() -> usize {
-        80
+        116
     }
 
     /// The exact, minted [`Corridor::height`] for [`SNAPSHOT_SEED`] (AC6).
@@ -876,26 +876,26 @@ mod tests {
 
     /// The exact, minted drivable-point count for [`SNAPSHOT_SEED`] (AC6).
     fn snapshot_point_count() -> usize {
-        3996
+        6087
     }
 
     /// The first point of [`drivable_points`]'s row-major traversal for
     /// [`SNAPSHOT_SEED`] (AC6) — mirrors Ф1's `ring[0]` boundary-literal
     /// cross-check style.
     fn snapshot_first_point() -> Point {
-        Point::new(-18, -12)
+        Point::new(-24, -18)
     }
 
     /// The last point of [`drivable_points`]'s row-major traversal for
     /// [`SNAPSHOT_SEED`] (AC6).
     fn snapshot_last_point() -> Point {
-        Point::new(17, 77)
+        Point::new(11, 71)
     }
 
     /// The exact, minted [`fnv1a_hash_points`] digest for [`SNAPSHOT_SEED`]
     /// (AC6).
     fn snapshot_points_hash() -> u64 {
-        4_966_517_991_610_592_536
+        668_417_556_869_487_235
     }
 
     /// A fixed (non-randomized) FNV-1a 64-bit hash of `pts`'s content, in

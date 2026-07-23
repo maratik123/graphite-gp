@@ -5,7 +5,7 @@ use crate::geom::{Corridor, CorridorScratch, Point};
 use crate::sim::CarState;
 use rand::RngExt;
 use rand::seq::SliceRandom;
-use rand_chacha::ChaCha8Rng;
+use rand_xoshiro::Xoshiro256PlusPlus;
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
@@ -57,7 +57,7 @@ use std::ops::ControlFlow;
 /// The tie index is drawn as `u32` (matching `rand`'s own slice-index
 /// policy for `shuffle`), so the pick is reproducible across 32-/64-bit
 /// targets.
-pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut ChaCha8Rng) {
+pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut Xoshiro256PlusPlus) {
     let mut buckets: HashMap<Point, Vec<usize>> = HashMap::new();
     for (i, car) in cars.iter().enumerate() {
         buckets.entry(car.pos()).or_default().push(i);
@@ -128,8 +128,8 @@ mod tests {
     }
 
     /// A collision RNG seeded via [`Seeds::collision_rng`] (AC11) — the
-    /// grouped-config path, not a bare `ChaCha8Rng::seed_from_u64`.
-    fn collision_rng(seed: u64) -> ChaCha8Rng {
+    /// grouped-config path, not a bare `Xoshiro256PlusPlus::seed_from_u64`.
+    fn collision_rng(seed: u64) -> Xoshiro256PlusPlus {
         Seeds {
             collision: seed,
             ..Default::default()
@@ -256,9 +256,9 @@ mod tests {
         let mut cars = [car(2, 2, 0, 0), car(2, 2, 0, 0)];
         let mut rng = collision_rng(42);
         resolve_collisions(&d, &mut cars, &mut rng);
-        // Seed 42 deterministically picks (2,3) among the equidistant free
+        // Seed 42 deterministically picks (1,2) among the equidistant free
         // ring cells {(1,2), (3,2), (2,1), (2,3)}.
-        assert_eq!(cars, [car(2, 2, 0, 0), car(2, 3, 0, 0)]);
+        assert_eq!(cars, [car(2, 2, 0, 0), car(1, 2, 0, 0)]);
 
         // A second independent run with the same seed reproduces exactly.
         let mut cars2 = [car(2, 2, 0, 0), car(2, 2, 0, 0)];

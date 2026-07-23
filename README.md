@@ -42,8 +42,11 @@ started**: the first generator phases **Ф1 (coarse-block ring, infield-first) +
 grouped seeded-RNG config**, then **Ф2 (rasterize the coarse ring to the fine
 corridor `D` with an additive width taper)**, and **Ф3 (start/finish, accel zone,
 start grid, timing gate)** are landed (`gp_core::rng::Seeds` groups
-four independently-seeded `ChaCha8Rng` sources — collision / generation / AI-learning /
-AI-inference; `phase1_coarse_ring` builds the deterministic coarse annulus;
+four independently-seeded RNG sources — collision / generation / AI-learning /
+AI-inference; each materializes a purpose-fit engine (issue #139) — the fast
+`Xoshiro256PlusPlus` for generation, collision, and AI-inference, and
+`ChaCha8Rng` for AI-learning, whose FNN training earns ChaCha8's stronger
+statistics; `phase1_coarse_ring` builds the deterministic coarse annulus;
 `phase2_rasterize` expands each coarse cell to a `k×k` fine block, tapers outfield
 walls to a supercover-safe 45° ramp, and absorbs any pocket the taper seals;
 `phase3_start_finish` thickens a straight coarse run and lays the start grid + the
@@ -95,16 +98,18 @@ cell in `D`, normal→0 / tangential→`⌊t/2⌋`, one forced-`Coast` scrub tic
 `L∈D`-guarded whole-vector-halving fail-safe that never yields a penalty-free
 `v=0`) — returns a `CrashOutcome` with `action_mask` / `consume_scrub` (issue #9).
 `sim::resolve_collisions` — **same-final-cell** collision resolution (issues #10 +
-#49): a caller-owned `rand_chacha` ChaCha8 RNG handle (`&mut ChaCha8Rng`,
+#49): a caller-owned `rand_xoshiro` RNG handle (`&mut Xoshiro256PlusPlus`,
 cross-arch-reproducible) picks the winner and displacement order for cars sharing
 a final cell; losers teleport to the nearest free cell via geodesic BFS, velocity
 retained. Per product-owner amendments (2026-07-16) the predicate is
 same-final-cell only (swap/pass-through detection dropped, so crossings ending on
 distinct cells are allowed), and the RNG is a shared per-domain stream handle
 (physics / track-gen / AI) rather than a per-call seed. The
-`rand` + `rand_chacha` (`0.10`, `default-features = false` → no `getrandom`) stack
-is adopted in both `gp-core` and `gp-gen`, with a seeded `GenParams::rng()`; the
-core still carries **zero production panics**. The remaining algorithms (generation
+`rand` (`0.10`, `default-features = false` → no `getrandom`) stack is adopted in
+both `gp-core` and `gp-gen`, with a seeded `GenParams::generation_rng()`; the
+per-source engine split (issue #139) keeps `rand_chacha` in `gp-core` for
+AI-learning and adds `rand_xoshiro` for the three Xoshiro sources (`gp-gen` now
+carries only `rand_xoshiro`). The core still carries **zero production panics**. The remaining algorithms (generation
 pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 `TODO(<block>)` markers.
 

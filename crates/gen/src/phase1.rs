@@ -12,7 +12,7 @@ use gp_core::geom::{
 };
 use gp_core::track::RaceDir;
 use rand::RngExt;
-use rand_chacha::ChaCha8Rng;
+use rand_xoshiro::Xoshiro256PlusPlus;
 use strum::IntoEnumIterator;
 
 /// Documented supported domain floor for `l_min` (design doc, reviewer NOTE
@@ -62,7 +62,7 @@ pub struct CoarseSkeleton {
 ///
 /// Infallible: a bounded same-stream retry plus a guaranteed-terminating
 /// rectangular fallback make this a total function — no `Result`, no panic.
-pub fn phase1_coarse_ring(l_min: i32, rng: &mut ChaCha8Rng) -> CoarseSkeleton {
+pub fn phase1_coarse_ring(l_min: i32, rng: &mut Xoshiro256PlusPlus) -> CoarseSkeleton {
     phase1_coarse_ring_attempts(l_min, rng, MAX_ATTEMPTS).0
 }
 
@@ -78,7 +78,7 @@ pub fn phase1_coarse_ring(l_min: i32, rng: &mut ChaCha8Rng) -> CoarseSkeleton {
 )]
 fn phase1_coarse_ring_attempts(
     l_min: i32,
-    rng: &mut ChaCha8Rng,
+    rng: &mut Xoshiro256PlusPlus,
     max_attempts: u32,
 ) -> (CoarseSkeleton, bool) {
     let l_eff = clamp_l_min(l_min);
@@ -145,7 +145,7 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
     reason = "ring/rng are established, unambiguous domain vocabulary here \
               (the annulus, the RNG stream) — no realistic confusion risk"
 )]
-fn widen(ring: &BTreeSet<Point>, rng: &mut ChaCha8Rng) -> BTreeSet<Point> {
+fn widen(ring: &BTreeSet<Point>, rng: &mut Xoshiro256PlusPlus) -> BTreeSet<Point> {
     let mut ring = ring.clone();
     for side in Side::iter() {
         let amount = rng.random_range(0..=WIDEN_MAX);
@@ -251,7 +251,7 @@ fn rectangular_fallback(l_eff: i32) -> (BTreeSet<Point>, BTreeSet<Point>) {
 
 /// Draws the fixed traversal orientation — one `u32` pick after the loop
 /// settles (success or fallback), so `dir` is seeded on every path (AC4).
-fn choose_dir(rng: &mut ChaCha8Rng) -> RaceDir {
+fn choose_dir(rng: &mut Xoshiro256PlusPlus) -> RaceDir {
     if rng.random_range(0u32..2) == 0 {
         RaceDir::Cw
     } else {
@@ -305,7 +305,7 @@ fn block_frontier(blocks: &BTreeSet<(i32, i32)>) -> BTreeSet<(i32, i32)> {
 /// frontier (`y ≥ 2` keep-out) until `target` blocks are reached or the
 /// frontier is exhausted. Each pick draws a fixed-width `u32` index into the
 /// frontier enumerated as a sorted `Vec` (AC5 determinism).
-fn grow_blocks(blocks: &mut BTreeSet<(i32, i32)>, target: usize, rng: &mut ChaCha8Rng) {
+fn grow_blocks(blocks: &mut BTreeSet<(i32, i32)>, target: usize, rng: &mut Xoshiro256PlusPlus) {
     while blocks.len() < target {
         let frontier: Vec<(i32, i32)> = block_frontier(blocks).into_iter().collect();
         let Ok(n) = u32::try_from(frontier.len()) else {
@@ -459,7 +459,7 @@ fn debug_assert_base_south_edge_intact(p: &BTreeSet<Point>, base_w: i32) {
 /// base strip, even-sublattice growth restricted to `y ≥ 2`, then
 /// pre-dilation hole-fill. Returns `(P, l_eff, base_w)` — callers need
 /// `l_eff` for the later run-length check and `base_w` only for tests/debug.
-fn build_p(l_min: i32, rng: &mut ChaCha8Rng) -> (BTreeSet<Point>, i32, i32) {
+fn build_p(l_min: i32, rng: &mut Xoshiro256PlusPlus) -> (BTreeSet<Point>, i32, i32) {
     let l_eff = clamp_l_min(l_min);
     let base_w = base_width(l_eff);
     #[allow(
@@ -487,8 +487,8 @@ mod tests {
     use gp_core::rng::Seeds;
     use rand::SeedableRng;
 
-    fn rng(seed: u64) -> ChaCha8Rng {
-        ChaCha8Rng::seed_from_u64(seed)
+    fn rng(seed: u64) -> Xoshiro256PlusPlus {
+        Xoshiro256PlusPlus::seed_from_u64(seed)
     }
 
     #[test]
@@ -780,13 +780,13 @@ mod tests {
         let mut hole: Vec<Point> = skeleton.hole.iter().copied().collect();
         hole.sort_unstable();
 
-        assert_eq!(ring.len(), 94, "pinned ring cell count changed");
+        assert_eq!(ring.len(), 96, "pinned ring cell count changed");
         assert_eq!(hole.len(), 64, "pinned hole cell count changed");
-        assert_eq!(skeleton.dir, RaceDir::Cw);
-        assert_eq!(ring[0], Point::new(-7, 5));
-        assert_eq!(ring[ring.len() - 1], Point::new(10, 6));
-        assert_eq!(hole[0], Point::new(-4, 6));
-        assert_eq!(hole[hole.len() - 1], Point::new(9, 5));
+        assert_eq!(skeleton.dir, RaceDir::Ccw);
+        assert_eq!(ring[0], Point::new(-10, 3));
+        assert_eq!(ring[ring.len() - 1], Point::new(6, 6));
+        assert_eq!(hole[0], Point::new(-6, 4));
+        assert_eq!(hole[hole.len() - 1], Point::new(3, 5));
         // The full pinned sets (byte-identical snapshot, AC6).
         assert_eq!(ring, snapshot_ring());
         assert_eq!(hole, snapshot_hole());
@@ -795,51 +795,63 @@ mod tests {
     /// The exact, minted `ring` for [`SNAPSHOT_SEED`] at `l_min = 2` (AC6).
     fn snapshot_ring() -> Vec<Point> {
         vec![
+            Point::new(-10, 3),
+            Point::new(-10, 4),
+            Point::new(-10, 5),
+            Point::new(-10, 6),
+            Point::new(-10, 7),
+            Point::new(-10, 8),
+            Point::new(-9, 3),
+            Point::new(-9, 4),
+            Point::new(-9, 5),
+            Point::new(-9, 6),
+            Point::new(-9, 7),
+            Point::new(-9, 8),
+            Point::new(-8, 3),
+            Point::new(-8, 4),
+            Point::new(-8, 5),
+            Point::new(-8, 6),
+            Point::new(-8, 7),
+            Point::new(-8, 8),
+            Point::new(-7, 3),
+            Point::new(-7, 4),
             Point::new(-7, 5),
             Point::new(-7, 6),
             Point::new(-7, 7),
             Point::new(-7, 8),
-            Point::new(-7, 9),
-            Point::new(-7, 10),
-            Point::new(-6, 5),
-            Point::new(-6, 6),
-            Point::new(-6, 7),
+            Point::new(-6, 3),
             Point::new(-6, 8),
-            Point::new(-6, 9),
-            Point::new(-6, 10),
-            Point::new(-5, 5),
-            Point::new(-5, 6),
-            Point::new(-5, 7),
+            Point::new(-5, 3),
             Point::new(-5, 8),
             Point::new(-5, 9),
             Point::new(-5, 10),
+            Point::new(-5, 11),
+            Point::new(-5, 12),
+            Point::new(-5, 13),
+            Point::new(-4, 3),
+            Point::new(-4, 4),
             Point::new(-4, 5),
-            Point::new(-4, 10),
+            Point::new(-4, 12),
+            Point::new(-4, 13),
+            Point::new(-3, 1),
+            Point::new(-3, 2),
+            Point::new(-3, 3),
+            Point::new(-3, 4),
             Point::new(-3, 5),
-            Point::new(-3, 10),
-            Point::new(-3, 11),
             Point::new(-3, 12),
             Point::new(-3, 13),
-            Point::new(-3, 14),
-            Point::new(-3, 15),
-            Point::new(-2, 5),
+            Point::new(-2, 1),
+            Point::new(-2, 8),
+            Point::new(-2, 9),
             Point::new(-2, 12),
             Point::new(-2, 13),
-            Point::new(-2, 14),
-            Point::new(-2, 15),
-            Point::new(-1, -2),
             Point::new(-1, -1),
             Point::new(-1, 0),
             Point::new(-1, 1),
-            Point::new(-1, 2),
-            Point::new(-1, 3),
-            Point::new(-1, 4),
-            Point::new(-1, 5),
+            Point::new(-1, 8),
+            Point::new(-1, 9),
             Point::new(-1, 12),
             Point::new(-1, 13),
-            Point::new(-1, 14),
-            Point::new(-1, 15),
-            Point::new(0, -2),
             Point::new(0, -1),
             Point::new(0, 8),
             Point::new(0, 9),
@@ -847,72 +859,78 @@ mod tests {
             Point::new(0, 11),
             Point::new(0, 12),
             Point::new(0, 13),
-            Point::new(0, 14),
-            Point::new(0, 15),
-            Point::new(1, -2),
             Point::new(1, -1),
             Point::new(1, 8),
-            Point::new(2, -2),
             Point::new(2, -1),
-            Point::new(2, 2),
-            Point::new(2, 3),
             Point::new(2, 6),
             Point::new(2, 7),
             Point::new(2, 8),
-            Point::new(3, -2),
             Point::new(3, -1),
-            Point::new(3, 2),
-            Point::new(3, 3),
             Point::new(3, 6),
-            Point::new(3, 7),
-            Point::new(3, 8),
-            Point::new(4, -2),
             Point::new(4, -1),
             Point::new(4, 0),
             Point::new(4, 1),
             Point::new(4, 2),
             Point::new(4, 3),
-            Point::new(4, 8),
+            Point::new(4, 4),
+            Point::new(4, 5),
+            Point::new(4, 6),
+            Point::new(5, -1),
+            Point::new(5, 0),
+            Point::new(5, 1),
+            Point::new(5, 2),
             Point::new(5, 3),
-            Point::new(5, 8),
+            Point::new(5, 4),
+            Point::new(5, 5),
+            Point::new(5, 6),
+            Point::new(6, -1),
+            Point::new(6, 0),
+            Point::new(6, 1),
+            Point::new(6, 2),
             Point::new(6, 3),
-            Point::new(6, 8),
-            Point::new(7, 3),
-            Point::new(7, 8),
-            Point::new(8, 3),
-            Point::new(8, 6),
-            Point::new(8, 7),
-            Point::new(8, 8),
-            Point::new(9, 3),
-            Point::new(9, 6),
-            Point::new(10, 3),
-            Point::new(10, 4),
-            Point::new(10, 5),
-            Point::new(10, 6),
+            Point::new(6, 4),
+            Point::new(6, 5),
+            Point::new(6, 6),
         ]
     }
 
     /// The exact, minted `hole` for [`SNAPSHOT_SEED`] at `l_min = 2` (AC6).
     fn snapshot_hole() -> Vec<Point> {
         vec![
+            Point::new(-6, 4),
+            Point::new(-6, 5),
+            Point::new(-6, 6),
+            Point::new(-6, 7),
+            Point::new(-5, 4),
+            Point::new(-5, 5),
+            Point::new(-5, 6),
+            Point::new(-5, 7),
             Point::new(-4, 6),
             Point::new(-4, 7),
             Point::new(-4, 8),
             Point::new(-4, 9),
+            Point::new(-4, 10),
+            Point::new(-4, 11),
             Point::new(-3, 6),
             Point::new(-3, 7),
             Point::new(-3, 8),
             Point::new(-3, 9),
+            Point::new(-3, 10),
+            Point::new(-3, 11),
+            Point::new(-2, 2),
+            Point::new(-2, 3),
+            Point::new(-2, 4),
+            Point::new(-2, 5),
             Point::new(-2, 6),
             Point::new(-2, 7),
-            Point::new(-2, 8),
-            Point::new(-2, 9),
             Point::new(-2, 10),
             Point::new(-2, 11),
+            Point::new(-1, 2),
+            Point::new(-1, 3),
+            Point::new(-1, 4),
+            Point::new(-1, 5),
             Point::new(-1, 6),
             Point::new(-1, 7),
-            Point::new(-1, 8),
-            Point::new(-1, 9),
             Point::new(-1, 10),
             Point::new(-1, 11),
             Point::new(0, 0),
@@ -933,32 +951,16 @@ mod tests {
             Point::new(1, 7),
             Point::new(2, 0),
             Point::new(2, 1),
+            Point::new(2, 2),
+            Point::new(2, 3),
             Point::new(2, 4),
             Point::new(2, 5),
             Point::new(3, 0),
             Point::new(3, 1),
+            Point::new(3, 2),
+            Point::new(3, 3),
             Point::new(3, 4),
             Point::new(3, 5),
-            Point::new(4, 4),
-            Point::new(4, 5),
-            Point::new(4, 6),
-            Point::new(4, 7),
-            Point::new(5, 4),
-            Point::new(5, 5),
-            Point::new(5, 6),
-            Point::new(5, 7),
-            Point::new(6, 4),
-            Point::new(6, 5),
-            Point::new(6, 6),
-            Point::new(6, 7),
-            Point::new(7, 4),
-            Point::new(7, 5),
-            Point::new(7, 6),
-            Point::new(7, 7),
-            Point::new(8, 4),
-            Point::new(8, 5),
-            Point::new(9, 4),
-            Point::new(9, 5),
         ]
     }
 

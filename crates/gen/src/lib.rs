@@ -12,7 +12,7 @@ mod phase4;
 
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
-use rand_chacha::ChaCha8Rng;
+use rand_xoshiro::Xoshiro256PlusPlus;
 
 pub use phase1::*;
 pub use phase2::*;
@@ -50,7 +50,7 @@ impl GenParams {
     /// generation pipeline's stochastic phases (design doc §2). No OS
     /// entropy — the same seed always yields the same draw stream (issue
     /// #49). The single generation RNG path (AC10) — no divergent duplicate.
-    pub fn generation_rng(&self) -> ChaCha8Rng {
+    pub fn generation_rng(&self) -> Xoshiro256PlusPlus {
         self.seeds.generation_rng()
     }
 }
@@ -85,7 +85,7 @@ mod tests {
         }
     }
 
-    fn draws(mut rng: ChaCha8Rng) -> Vec<u64> {
+    fn draws(mut rng: Xoshiro256PlusPlus) -> Vec<u64> {
         (0..8).map(|_| rng.next_u64()).collect()
     }
 
