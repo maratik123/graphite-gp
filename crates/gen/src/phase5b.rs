@@ -802,6 +802,134 @@ mod tests {
         assert_eq!(step(seed, Action::East), car(3, 0, 1, 0));
     }
 
+    /// A closed, width-1, 4-connected ring shaped as an **elongated**
+    /// rectangle (14×5, vs. `ring_corridor`'s square 5×5): drivable iff `x ∈
+    /// {0, 13}` or `y ∈ {0, 4}` — border cells only, interior walled off,
+    /// same construction as `ring_corridor` (design § Test Design AC7
+    /// long-straight fixture). The top (`y = 0`) and bottom (`y = 4`) edges
+    /// are each a 14-cell **long straight** along the x-axis — long enough
+    /// (design's ~10–14-cell target) for a car accelerating from rest to
+    /// build up a materially higher L∞ speed than the short 5×5 ring's
+    /// corner-limited corridor ever permits, while the four 90-degree
+    /// corners still force braking before the turn (AC7's "tempo integrates
+    /// the required braking" clause).
+    fn long_straight_corridor() -> Corridor {
+        let mut d = Corridor::new(Point::new(0, 0), 14, 5);
+        for y in 0..5 {
+            for x in 0..14 {
+                if x == 0 || x == 13 || y == 0 || y == 4 {
+                    d.set(Point::new(x, y), true);
+                }
+            }
+        }
+        d
+    }
+
+    /// The long-straight ring's start/finish gate: behind cell `(7, 0)` (the
+    /// midpoint of the top straight), forward `East` — so the ahead cell is
+    /// `(8, 0)`, mirroring `ring_sf`'s gate placement pattern.
+    fn long_straight_sf() -> StartFinish {
+        StartFinish {
+            chord: vec![Point::new(7, 0)],
+            orient: Orient::Vertical,
+            gate: TimingGate {
+                behind: vec![Point::new(7, 0)],
+                forward: Side::East,
+            },
+        }
+    }
+
+    /// The long-straight ring's start grid: one car, behind the gate on the
+    /// long straight, at rest — forward along the straight, mirroring
+    /// `ring_grid`.
+    fn long_straight_grid() -> StartGrid {
+        StartGrid {
+            positions: vec![Point::new(7, 0)],
+        }
+    }
+
+    #[test]
+    fn ac7_long_straight_vmax_attain_dominated_by_the_straight_and_tempo_integrates_braking() {
+        // AC7's "long straight" clause (spec: "on a track with one long
+        // straight, Vmax_attain is dominated by that straight AND tempo is
+        // lower than Vmax_attain alone implies"). The short 5×5 `ring` is
+        // corner-limited (no run-up room), so a materially higher
+        // vmax_attain on the elongated 14×5 fixture is only explainable by
+        // the long straight enabling a higher peak before the corners force
+        // braking -- exactly the AC7 dominance claim.
+        let long_d = long_straight_corridor();
+        let long_sf = long_straight_sf();
+        let long_grid = long_straight_grid();
+        let long_result = phase5_full_oracle(&long_d, &long_grid, &long_sf, RaceDir::Ccw);
+        let OracleResult::Lappable(long_metrics) = long_result else {
+            panic!("expected the long-straight ring to be Lappable, got {long_result:?}");
+        };
+
+        let ring_d = ring_corridor();
+        let short_ring_sf = ring_sf();
+        let short_ring_grid = ring_grid();
+        let ring_result =
+            phase5_full_oracle(&ring_d, &short_ring_grid, &short_ring_sf, RaceDir::Ccw);
+        let OracleResult::Lappable(ring_metrics) = ring_result else {
+            panic!("expected the 5x5 ring to be Lappable, got {ring_result:?}");
+        };
+
+        let long_vmax = long_metrics
+            .vmax_attain
+            .expect("vmax_attain is populated on success");
+        let ring_vmax = ring_metrics
+            .vmax_attain
+            .expect("vmax_attain is populated on success");
+
+        // Recompute long_vmax independently, matching the ac1/ac4 style: a
+        // fresh forward_reachable at the reported vmax must attain exactly
+        // that L-infinity peak.
+        let long_seeds: Vec<CarState> = long_grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let long_r = crate::forward_reachable(&long_d, &long_seeds, long_vmax);
+        let long_peak = long_r.iter().map(|&s| vnorm(s)).max().unwrap_or(0);
+        assert_eq!(
+            long_vmax, long_peak,
+            "Vpeak must equal the max L-infinity speed in R at that ceiling"
+        );
+
+        // 1. Vmax dominated by the straight: the elongated fixture's peak
+        // strictly exceeds the corner-limited 5x5 ring's peak.
+        assert!(
+            long_vmax > ring_vmax,
+            "long straight's vmax_attain ({long_vmax}) must exceed the corner-limited \
+             5x5 ring's ({ring_vmax})"
+        );
+
+        // A peak-speed state lies on the straight: since `R`'s iteration
+        // order is a HashSet (non-deterministic across runs), this asserts
+        // EXISTENCE of a witness -- not that an arbitrary `.find()` hit one
+        // -- with position on the y=0/y=4 long edge, strictly interior (not
+        // a corner column), and velocity axis-aligned with the straight
+        // (vy == 0, vx != 0).
+        assert!(
+            long_r.iter().any(|s| {
+                (s.y == 0 || s.y == 4)
+                    && s.x > 0
+                    && s.x < 13
+                    && s.vy == 0
+                    && s.vx != 0
+                    && vnorm(*s) == long_vmax
+            }),
+            "expected a peak-speed ({long_vmax}), axis-aligned, interior-straight state in R"
+        );
+
+        // 2. tempo integrates braking: the peak straight speed is not
+        // sustained through the whole lap -- the four corners force
+        // repeated braking, so tempo reads strictly below vmax_attain.
+        let long_tempo = long_metrics.tempo.expect("tempo is populated on success");
+        assert!(f64::from(long_tempo) < f64::from(long_vmax));
+        assert!(long_tempo >= 1.0); // len(fastest) <= lap_length always (design § Approach (2))
+    }
+
     #[test]
     fn ac7_a_fast_corner_state_is_reachable_but_provably_absent_from_live() {
         // The ring's sharp 90-degree corners wall-clip a too-fast turn
