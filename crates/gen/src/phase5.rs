@@ -9,11 +9,12 @@
 //! consume; `oracle_liveness_v1` is the standalone binary "a lap exists at
 //! `|v| ≤ 1`" certifier used directly by the generation pipeline.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use gp_core::geom::Corridor;
-use gp_core::sim::{Action, CarState};
+use gp_core::sim::{Action, CarState, legal_move, step};
 use gp_core::track::{RaceDir, StartFinish, StartGrid};
+use strum::IntoEnumIterator;
 
 /// The predecessor of `s2` under action `a` — inverts [`step`]: `step`
 /// computes `vx' = vx + ax` then `x' = x + vx'`, so undoing it takes
@@ -56,18 +57,12 @@ const fn predecessor(s2: CarState, a: Action) -> Option<CarState> {
 ///
 /// `saturating_neg` (not raw negation) keeps this total even at
 /// `v_ceil == i32::MIN`.
-#[allow(
-    dead_code,
-    reason = "wired into forward_reachable/backward_reachable/oracle_liveness_v1 \
-              in subtasks 2-4; unused until then per this design's \
-              leaf-helpers-first skeleton decomposition"
-)]
 const fn within_v_ceil(s: CarState, v_ceil: i32) -> bool {
     let floor = v_ceil.saturating_neg();
     s.vx >= floor && s.vx <= v_ceil && s.vy >= floor && s.vy <= v_ceil
 }
 
-/// Forward flood over `legal_move` edges from `seeds`, bounded to the L∞
+/// Forward flood over [`legal_move`] edges from `seeds`, bounded to the L∞
 /// box `|vx|, |vy| ≤ v_ceil` (AC1).
 ///
 /// `seeds` outside the bound are dropped (never expanded); every seed inside
@@ -75,11 +70,28 @@ const fn within_v_ceil(s: CarState, v_ceil: i32) -> bool {
 /// the bound is purely kinematic, `d` membership is enforced only on
 /// transitions via `legal_move`. Deterministic **membership** (AC5): the
 /// worklist is a `VecDeque` seeded in `seeds`' argument order, expanding
-/// successors in `Action::iter()` declaration order; the returned
+/// successors in [`Action::iter()`] declaration order; the returned
 /// [`HashSet`]'s own iteration order is not meaningful and is never relied on.
 pub fn forward_reachable(d: &Corridor, seeds: &[CarState], v_ceil: i32) -> HashSet<CarState> {
-    let _ = (d, seeds, v_ceil);
-    todo!("subtask 2: forward flood over legal_move edges")
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    for &s in seeds {
+        if within_v_ceil(s, v_ceil) && visited.insert(s) {
+            queue.push_back(s);
+        }
+    }
+    while let Some(s) = queue.pop_front() {
+        for a in Action::iter() {
+            if !legal_move(d, s, a) {
+                continue;
+            }
+            let s2 = step(s, a);
+            if within_v_ceil(s2, v_ceil) && visited.insert(s2) {
+                queue.push_back(s2);
+            }
+        }
+    }
+    visited
 }
 
 /// Backward flood over the *reversed* `legal_move` edges from `goals`,
@@ -124,6 +136,8 @@ pub fn oracle_liveness_v1(
 
 #[cfg(test)]
 mod tests {
+    use gp_core::geom::Point;
+
     use super::*;
 
     /// Shorthand `CarState` constructor for test fixtures.
@@ -154,5 +168,55 @@ mod tests {
         assert!(!within_v_ceil(car(0, 0, 0, -2), 1));
         // Total even at v_ceil == i32::MIN (saturating_neg keeps floor finite).
         assert!(!within_v_ceil(car(0, 0, 0, 0), i32::MIN));
+    }
+
+    // ---- forward_reachable (subtask 2) ----
+
+    #[test]
+    fn forward_reachable_ac1_bounded_flood_from_seed() {
+        let d = Corridor::filled(Point::new(0, 0), 5, 5);
+        let seed = car(2, 2, 0, 0);
+        let set = forward_reachable(&d, &[seed], 1);
+
+        assert!(set.contains(&seed));
+        assert!(set.contains(&car(3, 2, 1, 0))); // East
+        assert!(set.contains(&car(1, 2, -1, 0))); // West
+        assert!(set.contains(&car(2, 3, 0, 1))); // North
+        assert!(set.contains(&car(2, 1, 0, -1))); // South
+
+        // Bound: no member exceeds |v| <= 1.
+        assert!(set.iter().all(|s| s.vx.abs() <= 1 && s.vy.abs() <= 1));
+    }
+
+    #[test]
+    fn forward_reachable_ac3_excludes_supercover_illegal_chord() {
+        // Same wall-clip fixture as gp_core::sim's legal_move test: a chord
+        // whose supercover clips an off-D cell is illegal, so the flood must
+        // never reach the state it would otherwise produce.
+        let mut d = Corridor::new(Point::new(0, 0), 4, 4);
+        d.set(Point::new(0, 0), true);
+        d.set(Point::new(1, 0), true);
+        d.set(Point::new(2, 0), true);
+        d.set(Point::new(1, 1), true);
+        // (0, 1) is deliberately left off-D.
+
+        let s_clip = car(0, 0, 0, 1);
+        let set = forward_reachable(&d, &[s_clip], 1);
+
+        assert!(set.contains(&s_clip));
+        // East from s_clip: v2 = (1, 1), p1 = (1, 1) — in D, but the chord's
+        // supercover clips the off-D (0, 1), so legal_move rejects it.
+        assert!(d.contains(Point::new(1, 1))); // non-vacuous
+        assert!(!set.contains(&car(1, 1, 1, 1)));
+    }
+
+    #[test]
+    fn forward_reachable_ac5_deterministic() {
+        let d = Corridor::filled(Point::new(0, 0), 5, 5);
+        let seeds = [car(2, 2, 0, 0)];
+        assert_eq!(
+            forward_reachable(&d, &seeds, 1),
+            forward_reachable(&d, &seeds, 1)
+        );
     }
 }
