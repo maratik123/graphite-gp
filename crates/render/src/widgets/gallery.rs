@@ -30,7 +30,8 @@ const CANVAS_RECT: Rect = Rect {
 /// never `Pos2 + Vec2` operators, `clippy::arithmetic_side_effects`).
 #[allow(
     clippy::too_many_arguments,
-    reason = "a purely mechanical grid-placement helper for this test-only gallery layout; splitting it into a struct would not aid clarity here"
+    reason = "a purely mechanical grid-placement helper for this test-only gallery layout; \
+    splitting it into a struct would not aid clarity here"
 )]
 fn cell(x0: f32, y0: f32, col: u32, row: u32, cell_w: f32, cell_h: f32, w: f32, h: f32) -> Rect {
     let col_f = f32::from(u16::try_from(col).unwrap_or(u16::MAX));

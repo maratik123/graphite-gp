@@ -71,7 +71,8 @@ mod tests {
     /// Context/painter gate).
     #[cfg_attr(
         miri,
-        ignore = "constructs egui::Context to lay out real galleys — interpreted wall-clock cost, no UB signal"
+        ignore = "constructs egui::Context to lay out real galleys — interpreted wall-clock cost, \
+        no UB signal"
     )]
     #[test]
     fn paint_galley_rect_matches_painter_text_for_every_anchor() {
@@ -122,7 +123,8 @@ mod tests {
     /// differs), so the returned rect must also match `Painter::text`'s.
     #[cfg_attr(
         miri,
-        ignore = "constructs egui::Context to lay out real galleys — interpreted wall-clock cost, no UB signal"
+        ignore = "constructs egui::Context to lay out real galleys — interpreted wall-clock cost, \
+        no UB signal"
     )]
     #[test]
     fn paint_galley_override_rect_matches_painter_text_for_every_anchor() {

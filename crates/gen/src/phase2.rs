@@ -969,7 +969,8 @@ mod tests {
                 let step = v1.abs_diff(v0);
                 assert!(
                     step <= 1,
-                    "{label}: advanced by {step} between coordinate {c0} and {c1} (extent {v0} -> {v1})"
+                    "{label}: advanced by {step} between coordinate {c0} and {c1} \
+                    (extent {v0} -> {v1})"
                 );
             }
         }

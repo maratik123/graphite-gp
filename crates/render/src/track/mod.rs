@@ -325,7 +325,8 @@ mod tests {
         assert_eq!(
             crate::track::regions::triangulate_calls(),
             0,
-            "the ear-clipping triangulation ran during a per-frame render (it must run only at bake time)"
+            "the ear-clipping triangulation ran during a per-frame render \
+            (it must run only at bake time)"
         );
         assert_eq!(
             geometry.triangulated_indices.as_ptr(),
