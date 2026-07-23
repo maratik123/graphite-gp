@@ -299,7 +299,7 @@ Re-invoke /pr-commented after the reviewer responds to the open threads.
 
 > **Default to** spawning the `design` Subagent (then `design-review`) before `self-review` whenever the round's diff touches a `*.spec.md` file. Self-review checks code-against-spec; it cannot validate spec-against-design. The Spec Amendment recipe (Step 4 → `reference.md`) is the canonical flow — do NOT skip the design / design-review step regardless of how small the spec edit appears.
 >
-> _Rationale: when a `/pr-commented` round amends a `*.spec.md`, the `design` Subagent confirms the decomposition still holds and `design-review` issues GO before `self-review` runs downstream — `self-review` checks code-against-spec, not spec-against-design._
+> _Provenance: an architectural default derived from the Spec Amendment recipe (Step 4 → `reference.md`), **not** a promoted-from-`learnings.md` validation carrot — so it carries no back-link by design (unlike the `### N`-numbered validation carrots elsewhere). When a `/pr-commented` round amends a `*.spec.md`, the `design` Subagent confirms the decomposition still holds and `design-review` issues GO before `self-review` runs downstream — `self-review` checks code-against-spec, not spec-against-design._
 
 ## Anti-patterns
 
