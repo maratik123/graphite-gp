@@ -479,17 +479,32 @@ mod tests {
 
     #[test]
     fn narrow_staircase_taper_edge_is_not_a_false_positive() {
-        // A uniform-width-4 corridor (n=3, so width 4 >= n everywhere) with a
-        // 2-cell notch carved from one bottom corner: the notch creates a
-        // near-wall along-flow short run, but the true perpendicular width
-        // stays >= n throughout — DT-consistency must reject it.
+        // A wide (height-6) corridor, n=4, with a diagonal staircase taper
+        // carved from the top-left corner over 3 rows: row y=0 loses x<3,
+        // y=1 loses x<2, y=2 loses x<1. This genuinely exercises the
+        // DT-consistency clause — unlike a shallow rectangular notch, whose
+        // per-column height never dips below n so the clause is never
+        // reached (the original, vacuous version of this fixture).
+        //
+        // At the cells directly below the staircase's toe (x=0, y∈{3,4,5}):
+        // hrun=14 (the full untouched row length) but vrun=3 (up is capped
+        // by the staircase notch at y<3, x=0; down by the box edge at
+        // y=5) — so w = min(hrun, vrun) = 3 < n = 4, and WITHOUT the
+        // DT-consistency clause this cross-section would be flagged
+        // `Narrow`. But at these cells dt = 1 (each is only 1 step from the
+        // staircase's nearest carved-out cell / box edge — a genuinely
+        // *centered* width-3 run would have dt = 2), so
+        // `w = 3 ∉ {2·dt−1, 2·dt} = {1, 2}` — the canonical design-doc Risks
+        // case (§ Risks, "w=3, dt=1") — and the clause correctly rejects
+        // it: the corridor's true perpendicular width (height 6) stays ≥ n
+        // throughout.
         let mut drivable: Vec<(Coord, Coord)> =
-            (0..10).flat_map(|x| (0..4).map(move |y| (x, y))).collect();
-        drivable.retain(|&p| p != (0, 0) && p != (1, 0));
-        let d = corridor((0, 0), 10, 4, &drivable);
+            (0..14).flat_map(|x| (0..6).map(move |y| (x, y))).collect();
+        drivable.retain(|&(x, y)| !((y == 0 && x < 3) || (y == 1 && x < 2) || (y == 2 && x < 1)));
+        let d = corridor((0, 0), 14, 6, &drivable);
         assert!(
-            narrow_set(&d, 3).is_empty(),
-            "the taper edge must not report a false Narrow"
+            narrow_set(&d, 4).is_empty(),
+            "the staircase taper edge must not report a false Narrow"
         );
     }
 
@@ -647,13 +662,14 @@ mod tests {
         let issues: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
             .into_iter()
             .collect();
-        assert!(
-            issues
-                .iter()
-                .all(|issue| matches!(issue, Issue::Narrow { .. })),
-            "expected only Narrow issues, got {issues:?}"
+        assert_eq!(
+            issues,
+            HashSet::from([Issue::Narrow {
+                center: Point::new(2, 10),
+                axis: Orient::Horizontal,
+                width: 1,
+            }]),
         );
-        assert!(!issues.is_empty(), "expected at least one Narrow issue");
     }
 
     #[test]
