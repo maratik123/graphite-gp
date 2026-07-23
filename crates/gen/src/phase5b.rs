@@ -9,7 +9,7 @@
 //! reimplements the flood edge (core's `legal_move`) or the crossing test
 //! (core's `LapCounter::register_move`) (design § Approach; AC5).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use gp_core::geom::{Corridor, Point};
 use gp_core::sim::{Action, CarState, LapCounter, legal_move, step};
@@ -95,6 +95,78 @@ pub(crate) fn lap_close_goals(
         }
     }
     goals
+}
+
+/// The L∞ (Chebyshev) speed norm `max(|vx|, |vy|)` of `s` (design §
+/// Approach (4)/`tempo`; Key-decisions), matching Ф5a's `within_v_ceil` box
+/// bound.
+///
+/// `const fn`, forced by `missing_const_for_fn` (nursery, deny): only a
+/// **branchless** body is const-callable on stable — neither `Ord::max` nor
+/// `try_from` is const-stable (E0658, rust-lang/rust#143874, verified by
+/// compile) — see design § Risks. `saturating_abs` (not plain `i32::abs`)
+/// keeps the body clear of `arithmetic_side_effects` (also deny): plain
+/// `abs` overflows at `i32::MIN`, so this stays total even there.
+#[allow(
+    dead_code,
+    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
+              directly by this subtask's own tests in the interim"
+)]
+pub(crate) const fn vnorm(s: CarState) -> i32 {
+    let a = s.vx.saturating_abs();
+    let b = s.vy.saturating_abs();
+    if a >= b { a } else { b }
+}
+
+/// Per-corridor-point max [`vnorm`] over `live`'s states at that point
+/// (design § Approach (3), `TrackMetrics::speed_heatmap`) — the "where's
+/// fast/slow" diagnostic. Sorted ascending by [`Point`] (`x` then `y`) for
+/// deterministic output (AC6) regardless of `live`'s `HashSet` iteration
+/// order.
+#[allow(
+    dead_code,
+    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
+              directly by this subtask's own tests in the interim"
+)]
+pub(crate) fn speed_heatmap(live: &HashSet<CarState>) -> Vec<(Point, i32)> {
+    let mut peak: HashMap<Point, i32> = HashMap::new();
+    for &s in live {
+        peak.entry(s.pos())
+            .and_modify(|v| *v = (*v).max(vnorm(s)))
+            .or_insert_with(|| vnorm(s));
+    }
+    let mut out: Vec<(Point, i32)> = peak.into_iter().collect();
+    out.sort_by_key(|&(p, _)| p);
+    out
+}
+
+/// The raw reachability-stall frontier between `r` and the (unreached)
+/// lap-close goal (design `[N3]`, § Approach (3)): drivable cells `∉
+/// proj(r)` with a 4-neighbor `∈ proj(r)`, where `proj(r)` is the set of
+/// cell positions any state in `r` occupies.
+///
+/// Mirrors `gp_core::geom::Rect::points`' saturating box-walk (rather than
+/// adding a new public iterator to `Corridor`, a `gp-core` change out of
+/// scope here — spec Key-decisions/Out-of-scope) so the scan stays total
+/// even at extreme `origin`/`width`/`height`. Sorted by [`Point`] for
+/// deterministic output (AC6).
+#[allow(
+    dead_code,
+    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
+              directly by this subtask's own tests in the interim"
+)]
+pub(crate) fn frontier_gap(d: &Corridor, r: &HashSet<CarState>) -> Vec<Point> {
+    let reached: HashSet<Point> = r.iter().map(|s| s.pos()).collect();
+    let origin = d.origin();
+    let x1 = i32::try_from(d.width()).map_or(i32::MAX, |w| origin.x.saturating_add(w));
+    let y1 = i32::try_from(d.height()).map_or(i32::MAX, |h| origin.y.saturating_add(h));
+    let mut frontier: Vec<Point> = (origin.y..y1)
+        .flat_map(|y| (origin.x..x1).map(move |x| Point::new(x, y)))
+        .filter(|&p| d.contains(p) && !reached.contains(&p))
+        .filter(|&p| p.neighbors4().into_iter().any(|q| reached.contains(&q)))
+        .collect();
+    frontier.sort();
+    frontier
 }
 
 #[cfg(test)]
@@ -193,5 +265,98 @@ mod tests {
 
         let goals = lap_close_goals(&d, &sf, &r, 1);
         assert!(goals.is_empty());
+    }
+
+    // ---- vnorm / speed_heatmap / frontier_gap (subtask 4) ----
+
+    #[test]
+    fn vnorm_is_the_l_infinity_norm() {
+        assert_eq!(vnorm(car(0, 0, 2, -3)), 3);
+        assert_eq!(vnorm(car(0, 0, -5, 1)), 5);
+        assert_eq!(vnorm(car(0, 0, 0, 0)), 0);
+    }
+
+    #[test]
+    fn vnorm_is_total_at_i32_min() {
+        // saturating_abs(i32::MIN) == i32::MAX, not a panic.
+        assert_eq!(vnorm(car(0, 0, i32::MIN, 0)), i32::MAX);
+        assert_eq!(vnorm(car(0, 0, 0, i32::MIN)), i32::MAX);
+    }
+
+    #[test]
+    fn speed_heatmap_is_per_point_max_and_sorted_by_point() {
+        let live: HashSet<CarState> = [
+            car(1, 0, 1, 0), // vnorm 1 at (1, 0)
+            car(1, 0, 0, 2), // vnorm 2 at (1, 0) -- same point, higher speed
+            car(0, 0, 1, 1), // vnorm 1 at (0, 0)
+        ]
+        .into_iter()
+        .collect();
+
+        let heatmap = speed_heatmap(&live);
+        assert_eq!(heatmap, vec![(Point::new(0, 0), 1), (Point::new(1, 0), 2)]);
+    }
+
+    #[test]
+    fn frontier_gap_is_empty_on_the_phase5a_broken_ring_fixture_via_a_real_flood() {
+        // IMPORTANT (see progress-file Decisions log / subtask-4 finding):
+        // this fixture is Ф5a's broken-ring (`d.set((4,2), false)`), used
+        // via a REAL `forward_reachable` flood -- deliberately asserting
+        // the EMPTY result here, not the non-empty result design §
+        // Approach (3)/subtask 7 originally expected. Removing one cell
+        // from a width-1 ring's border cycle leaves a single connected
+        // PATH (not two disjoint components): a 4-adjacent cell pair both
+        // in `D` is always connected by a legal move (a unit-distance
+        // chord's supercover is exactly its 2 endpoints, so it is never
+        // wall-clipped), so `forward_reachable`'s BFS -- unbounded in move
+        // count -- eventually reaches every cell in the seed's connected
+        // component. `frontier_gap`'s literal definition (drivable ∉
+        // proj(R) with a 4-neighbor ∈ proj(R)) can therefore never be
+        // non-empty for a REAL flood `R`: any such neighbor would, by the
+        // same reachability, already be `∈ proj(R)`. This is the
+        // "degenerate" case design § Approach (3) itself names (all of `D`
+        // reachable, no forward lap-close) -- it is NOT a stall in `R`,
+        // it is a lap-closure failure, invisible to `frontier_gap(d, &R)`.
+        let mut d = ring_corridor();
+        d.set(Point::new(4, 2), false);
+        let seed = car(2, 0, 0, 0);
+        let r = crate::forward_reachable(&d, &[seed], 1);
+
+        let frontier = frontier_gap(&d, &r);
+        assert!(frontier.is_empty());
+    }
+
+    #[test]
+    fn frontier_gap_lists_drivable_cells_adjacent_to_r_but_not_in_r() {
+        let d = ring_corridor();
+        // R covers only the gate cell; its East and North drivable
+        // neighbors are frontier (drivable, not in R, 4-adjacent to it).
+        // West of (2,0) is (1,0) -- also drivable and not in R.
+        let r: HashSet<CarState> = std::iter::once(car(2, 0, 0, 0)).collect();
+
+        let frontier = frontier_gap(&d, &r);
+        assert!(frontier.contains(&Point::new(3, 0)));
+        assert!(frontier.contains(&Point::new(1, 0)));
+        // R's own cell is never in the frontier.
+        assert!(!frontier.contains(&Point::new(2, 0)));
+        // Not drivable, so never a frontier member even though 4-adjacent.
+        assert!(!frontier.contains(&Point::new(2, 1)));
+        // Sorted ascending by Point.
+        let mut sorted = frontier.clone();
+        sorted.sort();
+        assert_eq!(frontier, sorted);
+    }
+
+    #[test]
+    fn frontier_gap_is_empty_when_r_covers_all_of_d() {
+        let d = ring_corridor();
+        let r: HashSet<CarState> = (0..5)
+            .flat_map(|y| (0..5).map(move |x| Point::new(x, y)))
+            .filter(|&p| d.contains(p))
+            .map(|p| car(p.x, p.y, 0, 0))
+            .collect();
+
+        let frontier = frontier_gap(&d, &r);
+        assert!(frontier.is_empty());
     }
 }
