@@ -11,6 +11,7 @@ mod phase3;
 mod phase4;
 mod phase5;
 mod phase5b;
+mod phase6;
 #[cfg(test)]
 mod testfix;
 
