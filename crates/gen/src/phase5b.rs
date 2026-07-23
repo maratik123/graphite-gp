@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use gp_core::geom::{Corridor, Point};
 use gp_core::sim::{Action, CarState, LapCounter, legal_move, step};
-use gp_core::track::{StartFinish, TrackMetrics};
+use gp_core::track::{RaceDir, StartFinish, StartGrid, TrackMetrics};
 use strum::IntoEnumIterator;
 
 use crate::phase5::within_v_ceil;
@@ -62,11 +62,6 @@ pub enum OracleResult {
 /// on a reverse crossing, and is unchanged otherwise (`register_move`'s
 /// documented at-most-one-event contract) — so comparing `raw()` before and
 /// after pins the answer without depending on the counter's absolute value.
-#[allow(
-    dead_code,
-    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
-              directly by this subtask's own tests in the interim"
-)]
 pub(crate) fn crosses_sf_forward(sf: &StartFinish, from: Point, to: Point) -> bool {
     let mut counter = LapCounter::new();
     let before = counter.raw();
@@ -84,11 +79,6 @@ pub(crate) fn crosses_sf_forward(sf: &StartFinish, from: Point, to: Point) -> bo
 /// May contain duplicate states (multiple `(s, a)` pairs can land on the
 /// same successor) — harmless, since [`crate::backward_reachable`] (the
 /// sole consumer) de-duplicates via its own visited set.
-#[allow(
-    dead_code,
-    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
-              directly by this subtask's own tests in the interim"
-)]
 pub(crate) fn lap_close_goals(
     d: &Corridor,
     sf: &StartFinish,
@@ -120,11 +110,6 @@ pub(crate) fn lap_close_goals(
 /// compile) — see design § Risks. `saturating_abs` (not plain `i32::abs`)
 /// keeps the body clear of `arithmetic_side_effects` (also deny): plain
 /// `abs` overflows at `i32::MIN`, so this stays total even there.
-#[allow(
-    dead_code,
-    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
-              directly by this subtask's own tests in the interim"
-)]
 pub(crate) const fn vnorm(s: CarState) -> i32 {
     let a = s.vx.saturating_abs();
     let b = s.vy.saturating_abs();
@@ -136,11 +121,6 @@ pub(crate) const fn vnorm(s: CarState) -> i32 {
 /// fast/slow" diagnostic. Sorted ascending by [`Point`] (`x` then `y`) for
 /// deterministic output (AC6) regardless of `live`'s `HashSet` iteration
 /// order.
-#[allow(
-    dead_code,
-    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
-              directly by this subtask's own tests in the interim"
-)]
 pub(crate) fn speed_heatmap(live: &HashSet<CarState>) -> Vec<(Point, i32)> {
     let mut peak: HashMap<Point, i32> = HashMap::new();
     for &s in live {
@@ -171,11 +151,6 @@ pub(crate) fn speed_heatmap(live: &HashSet<CarState>) -> Vec<(Point, i32)> {
 /// seed-cell fallback when this frontier is empty) lands in subtask 6.
 ///
 /// Sorted by [`Point`] for deterministic output (AC6).
-#[allow(
-    dead_code,
-    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
-              directly by this subtask's own tests in the interim"
-)]
 pub(crate) fn frontier_gap(r_cells: &HashSet<Point>, p0_cells: &HashSet<Point>) -> Vec<Point> {
     let mut frontier: Vec<Point> = r_cells
         .iter()
@@ -208,11 +183,6 @@ pub(crate) fn frontier_gap(r_cells: &HashSet<Point>, p0_cells: &HashSet<Point>) 
 /// short-circuit, since every seed starts strictly behind a full-chord gate.
 /// BFS (FIFO) order guarantees the first `raw() >= 1` transition found is a
 /// fewest-move path.
-#[allow(
-    dead_code,
-    reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
-              directly by this subtask's own tests in the interim"
-)]
 pub(crate) fn fastest_lap_through_live(
     d: &Corridor,
     seeds: &[Point],
@@ -280,10 +250,110 @@ pub(crate) fn fastest_lap_through_live(
     (None, p0)
 }
 
+/// The move count (edges, not cells) of `path`: `path.len().saturating_sub(1)`.
+///
+/// Total: `saturating_sub` handles a single-cell `path` (never produced by
+/// [`fastest_lap_through_live`], which always returns at least a two-cell
+/// path when it returns `Some`), and the `usize -> i32` conversion saturates
+/// to `i32::MAX` rather than truncating/wrapping — corridor cell counts are
+/// far below either bound in practice.
+fn moves(path: &[Point]) -> i32 {
+    i32::try_from(path.len().saturating_sub(1)).unwrap_or(i32::MAX)
+}
+
+/// Iterative-deepening full-`Vmax` passability oracle (design doc §2 Ф5b
+/// pseudocode / §3; spec AC1/AC2/AC3/AC4/AC6).
+///
+/// Composes the Ф5a substrate ([`crate::forward_reachable`] /
+/// [`crate::backward_reachable`]) with `lap_close_goals`,
+/// `fastest_lap_through_live`, `frontier_gap`, `vnorm`, and
+/// `speed_heatmap` — never reimplementing the flood edge or the crossing
+/// test (AC5).
+///
+/// Doubles `V_ceil` (`1, 2, 4, …`, `saturating_mul` — AC6 termination) until
+/// `Vpeak = max|v|` over `live` no longer reaches the current ceiling
+/// (`Vpeak < V_ceil`), at which point geometry — not the box — bounds attainable
+/// speed. Captures the `V_ceil == 1` fastest-lap move count as `lap_length`
+/// (design § Approach (2)) exactly once, on the first iteration.
+///
+/// `race_dir` is accepted for signature fidelity (design `[N4]`) but unused —
+/// the crossing sign derives from `sf.gate.forward` alone, as in
+/// [`crate::oracle_liveness_v1`].
+pub fn phase5_full_oracle(
+    d: &Corridor,
+    grid: &StartGrid,
+    sf: &StartFinish,
+    race_dir: RaceDir,
+) -> OracleResult {
+    let _ = race_dir;
+
+    let seeds: Vec<CarState> = grid
+        .positions
+        .iter()
+        .map(|&p| CarState {
+            x: p.x,
+            y: p.y,
+            vx: 0,
+            vy: 0,
+        })
+        .collect();
+
+    let mut lap_length: Option<i32> = None;
+    let mut v_ceil: i32 = 1;
+
+    loop {
+        let r = crate::forward_reachable(d, &seeds, v_ceil);
+        let goals = lap_close_goals(d, sf, &r, v_ceil);
+        let b = crate::backward_reachable(d, &goals, v_ceil);
+        let live: HashSet<CarState> = r.intersection(&b).copied().collect();
+
+        let (fastest, p0) = fastest_lap_through_live(d, &grid.positions, sf, &live, v_ceil);
+
+        let Some(fastest) = fastest else {
+            let proj_r: HashSet<Point> = r.iter().map(|s| s.pos()).collect();
+            let mut break_points = frontier_gap(&proj_r, &p0);
+            if break_points.is_empty() {
+                // Unconditional AC3 guarantor (design § Approach (3)): fires
+                // when the P0-frontier is empty, i.e. P0 == ∅ or P0 ==
+                // proj(R) -- `grid.positions` is non-empty by generator
+                // contract.
+                break_points.clone_from(&grid.positions);
+            }
+            return OracleResult::NotLappable { break_points };
+        };
+
+        if v_ceil == 1 {
+            lap_length = Some(moves(&fastest));
+        }
+
+        let vpeak = live.iter().map(|&s| vnorm(s)).max().unwrap_or(0);
+        if vpeak < v_ceil {
+            let lap_length = lap_length.unwrap_or_else(|| moves(&fastest));
+            let fastest_moves = moves(&fastest);
+            let metrics = TrackMetrics {
+                vmax_attain: Some(vpeak),
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "lap_length/fastest_moves are small move counts \
+                              (corridor-cell-bounded), far below f32's 24-bit \
+                              exact-integer range"
+                )]
+                tempo: Some(lap_length as f32 / fastest_moves as f32),
+                fastest_lap: fastest,
+                speed_heatmap: speed_heatmap(&live),
+            };
+            return OracleResult::Lappable(metrics);
+        }
+        v_ceil = v_ceil.saturating_mul(2);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testfix::*;
+    use gp_core::geom::{Orient, Side};
+    use gp_core::track::TimingGate;
 
     #[test]
     fn oracle_result_variants_are_constructible_and_clonable() {
@@ -542,5 +612,110 @@ mod tests {
         assert!(!p0.is_empty());
         assert!(!p0.contains(&Point::new(2, 0))); // non-loopable, § Approach (3) step 2
         assert!(p0.contains(&Point::new(3, 0)));
+    }
+
+    // ---- phase5_full_oracle (subtask 6: AC1, AC2, AC6) ----
+
+    /// A straight, 1-wide, 8-cell track (`(0,0)..(7,0)`) with an S/F gate at
+    /// its very start: `crosses_sf_forward` fires exactly once, on the
+    /// track's first move (`(0,0) -> (1,0)`), and never again (no return
+    /// path on a straight track). Building speed by accelerating every turn
+    /// from rest reaches a state with no legal successor at all (every
+    /// action's minimum resulting `x` exceeds the track's last index) --
+    /// a genuine provable crash: reachable (`R`), but from which no forward
+    /// crossing (hence no `G`) is ever reachable, so absent from `B`.
+    fn crash_pocket_fixture() -> (Corridor, StartFinish, StartGrid) {
+        let d = Corridor::filled(Point::new(0, 0), 8, 1);
+        let sf = StartFinish {
+            chord: vec![Point::new(0, 0)],
+            orient: Orient::Vertical,
+            gate: TimingGate {
+                behind: vec![Point::new(0, 0)],
+                forward: Side::East,
+            },
+        };
+        let grid = StartGrid {
+            positions: vec![Point::new(0, 0)],
+        };
+        (d, sf, grid)
+    }
+
+    #[test]
+    fn phase5_full_oracle_ac1_halts_on_a_lappable_ring_and_reports_vmax() {
+        let d = ring_corridor();
+        let sf = ring_sf();
+        let grid = ring_grid();
+
+        let result = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
+
+        let OracleResult::Lappable(metrics) = result else {
+            panic!("expected a lappable ring to return Lappable, got {result:?}");
+        };
+        // Recompute the halting Vpeak directly: the ring's sharp corners
+        // wall-clip any faster cornering chord (supercover), so Vpeak tops
+        // out below any larger V_ceil tried -- assert the driver's own
+        // Vpeak matches a direct recompute at the same ceiling, rather than
+        // hard-coding a value that would silently drift if the ring fixture
+        // ever changes.
+        let vmax = metrics
+            .vmax_attain
+            .expect("a lappable track reports vmax_attain");
+        let seeds: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let r = crate::forward_reachable(&d, &seeds, vmax);
+        let peak = r.iter().map(|&s| vnorm(s)).max().unwrap_or(0);
+        assert_eq!(
+            vmax, peak,
+            "Vpeak must equal the max L-infinity speed in R at that ceiling"
+        );
+        assert!(!metrics.fastest_lap.is_empty());
+        assert!(!metrics.speed_heatmap.is_empty());
+    }
+
+    #[test]
+    fn phase5_full_oracle_ac2_high_speed_unbrakeable_state_excluded_from_live() {
+        let (d, sf, _grid) = crash_pocket_fixture();
+        let seed = car(0, 0, 0, 0);
+        // Reachable via 3 consecutive accelerate-east moves from rest.
+        let witness = car(6, 0, 3, 0);
+        let v_ceil = 4;
+
+        let r = crate::forward_reachable(&d, &[seed], v_ceil);
+        assert!(r.contains(&witness), "witness must be forward-reachable");
+        // No legal move exists from the witness: every action's minimum
+        // resulting x (vx - 1 = 2, so x' >= 8) exceeds the track's last
+        // index (7).
+        assert!(Action::iter().all(|a| !legal_move(&d, witness, a)));
+
+        let goals = lap_close_goals(&d, &sf, &r, v_ceil);
+        let b = crate::backward_reachable(&d, &goals, v_ceil);
+        assert!(
+            !b.contains(&witness),
+            "an un-brakeable dead state can reach no forward crossing"
+        );
+
+        let live: HashSet<CarState> = r.intersection(&b).copied().collect();
+        assert!(!live.contains(&witness));
+    }
+
+    #[test]
+    fn phase5_full_oracle_ac6_deterministic_on_the_ring() {
+        let d = ring_corridor();
+        let sf = ring_sf();
+        let grid = ring_grid();
+
+        let r1 = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
+        let r2 = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
+
+        let (OracleResult::Lappable(m1), OracleResult::Lappable(m2)) = (r1, r2) else {
+            panic!("expected both runs to be Lappable");
+        };
+        assert_eq!(m1.vmax_attain, m2.vmax_attain);
+        assert_eq!(m1.fastest_lap, m2.fastest_lap);
+        assert_eq!(m1.speed_heatmap, m2.speed_heatmap);
+        assert!((m1.tempo.unwrap() - m2.tempo.unwrap()).abs() < f32::EPSILON);
     }
 }
