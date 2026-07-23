@@ -11,6 +11,8 @@ mod phase3;
 mod phase4;
 mod phase5;
 mod phase5b;
+#[cfg(test)]
+mod testfix;
 
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
