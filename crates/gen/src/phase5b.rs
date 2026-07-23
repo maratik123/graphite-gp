@@ -352,8 +352,6 @@ pub fn phase5_full_oracle(
 mod tests {
     use super::*;
     use crate::testfix::*;
-    use gp_core::geom::{Orient, Side};
-    use gp_core::track::TimingGate;
 
     #[test]
     fn oracle_result_variants_are_constructible_and_clonable() {
@@ -612,30 +610,6 @@ mod tests {
 
     // ---- phase5_full_oracle (subtask 6: AC1, AC2, AC6) ----
 
-    /// A straight, 1-wide, 8-cell track (`(0,0)..(7,0)`) with an S/F gate at
-    /// its very start: `crosses_sf_forward` fires exactly once, on the
-    /// track's first move (`(0,0) -> (1,0)`), and never again (no return
-    /// path on a straight track). Building speed by accelerating every turn
-    /// from rest reaches a state with no legal successor at all (every
-    /// action's minimum resulting `x` exceeds the track's last index) --
-    /// a genuine provable crash: reachable (`R`), but from which no forward
-    /// crossing (hence no `G`) is ever reachable, so absent from `B`.
-    fn crash_pocket_fixture() -> (Corridor, StartFinish, StartGrid) {
-        let d = Corridor::filled(Point::new(0, 0), 8, 1);
-        let sf = StartFinish {
-            chord: vec![Point::new(0, 0)],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![Point::new(0, 0)],
-                forward: Side::East,
-            },
-        };
-        let grid = StartGrid {
-            positions: vec![Point::new(0, 0)],
-        };
-        (d, sf, grid)
-    }
-
     #[test]
     fn phase5_full_oracle_ac1_halts_on_a_lappable_ring_and_reports_vmax() {
         let d = ring_corridor();
@@ -796,52 +770,6 @@ mod tests {
         let seed = car(2, 0, 0, 0);
         assert!(legal_move(&d, seed, Action::East));
         assert_eq!(step(seed, Action::East), car(3, 0, 1, 0));
-    }
-
-    /// A closed, width-1, 4-connected ring shaped as an **elongated**
-    /// rectangle (14×5, vs. `ring_corridor`'s square 5×5): drivable iff `x ∈
-    /// {0, 13}` or `y ∈ {0, 4}` — border cells only, interior walled off,
-    /// same construction as `ring_corridor` (design § Test Design AC7
-    /// long-straight fixture). The top (`y = 0`) and bottom (`y = 4`) edges
-    /// are each a 14-cell **long straight** along the x-axis — long enough
-    /// (design's ~10–14-cell target) for a car accelerating from rest to
-    /// build up a materially higher L∞ speed than the short 5×5 ring's
-    /// corner-limited corridor ever permits, while the four 90-degree
-    /// corners still force braking before the turn (AC7's "tempo integrates
-    /// the required braking" clause).
-    fn long_straight_corridor() -> Corridor {
-        let mut d = Corridor::new(Point::new(0, 0), 14, 5);
-        for y in 0..5 {
-            for x in 0..14 {
-                if x == 0 || x == 13 || y == 0 || y == 4 {
-                    d.set(Point::new(x, y), true);
-                }
-            }
-        }
-        d
-    }
-
-    /// The long-straight ring's start/finish gate: behind cell `(7, 0)` (the
-    /// midpoint of the top straight), forward `East` — so the ahead cell is
-    /// `(8, 0)`, mirroring `ring_sf`'s gate placement pattern.
-    fn long_straight_sf() -> StartFinish {
-        StartFinish {
-            chord: vec![Point::new(7, 0)],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![Point::new(7, 0)],
-                forward: Side::East,
-            },
-        }
-    }
-
-    /// The long-straight ring's start grid: one car, behind the gate on the
-    /// long straight, at rest — forward along the straight, mirroring
-    /// `ring_grid`.
-    fn long_straight_grid() -> StartGrid {
-        StartGrid {
-            positions: vec![Point::new(7, 0)],
-        }
     }
 
     #[test]
