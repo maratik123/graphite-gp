@@ -604,7 +604,7 @@ mod tests {
         // neighbor is unambiguously ∉ D). East/north are off-box in the ordinary
         // (non-overflowing) sense, confirming both paths emit correctly.
         let d = corridor((i32::MIN, i32::MIN), 1, 1, &[(i32::MIN, i32::MIN)]);
-        let expected = HashSet::from_iter([
+        let expected = HashSet::from([
             wall(i32::MIN, i32::MIN, Side::East),
             wall(i32::MIN, i32::MIN, Side::West),
             wall(i32::MIN, i32::MIN, Side::North),
@@ -618,7 +618,7 @@ mod tests {
         // A solid 2×2 block: each cell contributes its two outward sides — the
         // square's 8-edge perimeter, no interior edges between two D cells (AC4).
         let d = corridor((0, 0), 5, 5, &[(1, 1), (2, 1), (1, 2), (2, 2)]);
-        let expected = HashSet::from_iter([
+        let expected = HashSet::from([
             wall(1, 1, Side::West),
             wall(1, 1, Side::South),
             wall(2, 1, Side::East),
@@ -641,7 +641,7 @@ mod tests {
         // The 3×3 ring: outer perimeter edges plus the four inner edges facing the
         // enclosed hole (2,2) — each D↔¬D pair once, none between two D cells (AC4).
         let d = corridor((0, 0), 5, 5, &ring_3x3());
-        let expected = HashSet::from_iter([
+        let expected = HashSet::from([
             // bottom row
             wall(1, 1, Side::West),
             wall(1, 1, Side::South),
