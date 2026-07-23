@@ -56,7 +56,14 @@ half-grid timing gate — all deterministic, no-RNG, zero-panic), closing issues
 typed `Issue`s (`Disconnected` / `BadTopology` / `Narrow` / `NarrowSf` /
 `LostHairpin`) for the future Ф6 repair phase — built on new reusable integer
 **distance-transform + medial-axis** primitives in `gp-core` `geom` that Ф7's
-centerline will consume. The remaining pipeline is Ф5–Ф7 (#28–#34). Block 2
+centerline will consume. **Ф5a (passability reachability substrate + V=1 liveness
+oracle)** has now landed too (#28): `forward_reachable` / `backward_reachable` /
+`oracle_liveness_v1` in `gp-gen`, all reusing core's `legal_move` as the graph
+edge (one code path) — this also fixed a confirmed `gp-core` bug where
+`LapCounter::register_move` tested the S/F gate's infinite supporting line
+instead of design §3's bounded chord, which made a closed-ring lap topologically
+unable to reach `raw() >= 1` (the crossing is now bounded to the chord's extent).
+The remaining pipeline is Ф5b–Ф7 (#29–#34). Block 2
 (`gp-render`) is **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
@@ -118,7 +125,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 464 workspace tests green (116 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 98 gp-gen; 2 doc-tests)
+cargo test             # 482 workspace tests green (118 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 114 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
