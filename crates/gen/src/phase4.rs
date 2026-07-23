@@ -7,7 +7,11 @@
 //! other two are built on the [`DistanceTransform`](gp_core::geom::DistanceTransform)
 //! / [`medial_axis`](gp_core::geom::medial_axis) primitives.
 
-use gp_core::geom::{Corridor, Orient, Point, bounded_complement_components, component_count};
+use gp_core::geom::{
+    Coord, Corridor, DistanceTransform, Orient, Point, bounded_complement_components,
+    component_count,
+};
+use gp_core::track::StartFinish;
 
 /// One statically-detected defect of the fine corridor `D` (design doc §2, Ф4).
 ///
@@ -77,10 +81,134 @@ fn check_topology(d: &Corridor) -> Option<Issue> {
     (bounded_complement_components(d) != 1).then_some(Issue::BadTopology)
 }
 
+/// Every cell point of `d`'s own bounding box, in row-major order — mirrors
+/// Ф1/Ф2/Ф3's private `box_points` (`Corridor`'s own box-point iterator is
+/// private; this is the same accepted re-derivation from the public
+/// `origin`/`width`/`height` accessors, e.g. `crates/gen/src/phase3.rs`).
+fn box_points(d: &Corridor) -> impl Iterator<Item = Point> + '_ {
+    let origin = d.origin();
+    let (w, h) = (d.width(), d.height());
+    (0..h).flat_map(move |dy| {
+        (0..w).map(move |dx| {
+            Point::new(
+                origin.x.saturating_add(i32::try_from(dx).unwrap_or(0)),
+                origin.y.saturating_add(i32::try_from(dy).unwrap_or(0)),
+            )
+        })
+    })
+}
+
+/// The count of consecutive `D` cells starting at (and including) `p`,
+/// extending one step at a time along `(dx, dy)` until the first `¬D` /
+/// out-of-box cell. Always `≥ 1` when `p ∈ D` (the loop's first iteration).
+fn wall_run(d: &Corridor, p: Point, delta: (Coord, Coord)) -> usize {
+    let (dx, dy) = delta;
+    let mut count = 0usize;
+    let mut cur = p;
+    while d.contains(cur) {
+        count = count.saturating_add(1);
+        cur = Point::new(cur.x.saturating_add(dx), cur.y.saturating_add(dy));
+    }
+    count
+}
+
+/// The four in-`D` wall-distance walks from `p`: `(left, right, up, down)`,
+/// each the step count (`p` included) to the first `¬D` / box-edge cell.
+fn wall_runs(d: &Corridor, p: Point) -> (usize, usize, usize, usize) {
+    (
+        wall_run(d, p, (-1, 0)),
+        wall_run(d, p, (1, 0)),
+        wall_run(d, p, (0, 1)),
+        wall_run(d, p, (0, -1)),
+    )
+}
+
+/// The `Narrow` issue at `p`, or `None` — the DT pre-filter + exact
+/// perpendicular cross-section confirmation (design doc §2 Ф4 Width).
+///
+/// DT pre-filter: skips `p` when `2·dt(p) − 1 ≥ n` — provably wide
+/// (`w(p) ≥ 2·dt(p) − 1 ≥ n`, the DT pre-filter soundness argument). Otherwise
+/// walks the four wall-distances to get `hrun`/`vrun`, and emits iff
+/// `w(p) = min(hrun, vrun) < n` **and** `w(p) ∈ {2·dt(p) − 1, 2·dt(p)}` — the
+/// DT-consistency test that rejects a staircase/taper-edge false positive
+/// (design doc Risks) while still catching a doorway-neck DT valley.
+fn narrow_at(d: &Corridor, dt: &DistanceTransform, p: Point, n: u32) -> Option<Issue> {
+    let n = usize::try_from(n).unwrap_or(usize::MAX);
+    let dt_p = usize::try_from(dt.at(p)).unwrap_or(usize::MAX);
+    let two_dt_minus_1 = dt_p.saturating_mul(2).saturating_sub(1);
+    if two_dt_minus_1 >= n {
+        return None;
+    }
+
+    let (left, right, up, down) = wall_runs(d, p);
+    let hrun = left.saturating_add(right).saturating_sub(1);
+    let vrun = up.saturating_add(down).saturating_sub(1);
+    let w = hrun.min(vrun);
+    let two_dt = dt_p.saturating_mul(2);
+    if w >= n || (w != two_dt_minus_1 && w != two_dt) {
+        return None;
+    }
+
+    let width = u32::try_from(w).unwrap_or(u32::MAX);
+    if vrun <= hrun {
+        let down_i32 = i32::try_from(down).unwrap_or(i32::MAX);
+        let center = Point::new(p.x, p.y.saturating_sub(down_i32).saturating_add(1));
+        Some(Issue::Narrow {
+            center,
+            axis: Orient::Vertical,
+            width,
+        })
+    } else {
+        let left_i32 = i32::try_from(left).unwrap_or(i32::MAX);
+        let center = Point::new(p.x.saturating_sub(left_i32).saturating_add(1), p.y);
+        Some(Issue::Narrow {
+            center,
+            axis: Orient::Horizontal,
+            width,
+        })
+    }
+}
+
+/// The `Narrow` issues over **all** `D` cells (AC3) — deliberately not
+/// restricted to `medial_axis`'s ridge, since a neck is a DT valley a
+/// local-maximum ridge would miss (design doc Risks, Issue #1).
+#[allow(
+    dead_code,
+    reason = "wired into phase4_static_checks by subtask 6 of this same file \
+              (design doc decomposition Task 4 → Task 6); dead outside tests \
+              until then"
+)]
+fn narrow_issues(d: &Corridor, dt: &DistanceTransform, n: u32) -> Vec<Issue> {
+    box_points(d)
+        .filter(|&p| d.contains(p))
+        .filter_map(|p| narrow_at(d, dt, p, n))
+        .collect()
+}
+
+/// The `NarrowSf` issue on `sf`'s chord, or `None` — no DT sampling needed,
+/// the chord's width is `sf.chord.len()` directly (design doc §2 Ф4 Width).
+#[allow(
+    dead_code,
+    reason = "wired into phase4_static_checks by subtask 6 of this same file \
+              (design doc decomposition Task 4 → Task 6); dead outside tests \
+              until then"
+)]
+fn check_narrow_sf(sf: &StartFinish, m: u32) -> Option<Issue> {
+    let len = sf.chord.len();
+    if len >= usize::try_from(m).unwrap_or(usize::MAX) {
+        return None;
+    }
+    let center = sf.chord.iter().copied().min()?;
+    Some(Issue::NarrowSf {
+        center,
+        axis: sf.orient,
+        width: u32::try_from(len).unwrap_or(u32::MAX),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gp_core::geom::Coord;
     use std::collections::HashSet;
 
     /// Build a corridor over `[origin, origin + (w, h))` with the given `(x, y)`
@@ -166,5 +294,128 @@ mod tests {
         assert_eq!(set.len(), 4);
         assert!(set.contains(&a));
         assert!(set.contains(&Issue::Disconnected));
+    }
+
+    /// Collect `narrow_issues` into a `HashSet` (AC7 compares this way; a
+    /// narrow chord's ≤2 centered cells collapse to one entry).
+    fn narrow_set(d: &Corridor, n: u32) -> HashSet<Issue> {
+        let dt = DistanceTransform::compute(d);
+        narrow_issues(d, &dt, n).into_iter().collect()
+    }
+
+    /// A minimal `StartFinish` fixture: `chord` at the given `(x, y)`
+    /// points, oriented `orient`, with a placeholder single-cell gate (the
+    /// gate is not read by the width check).
+    fn sf_fixture(chord: &[(Coord, Coord)], orient: Orient) -> StartFinish {
+        let chord: Vec<Point> = chord.iter().map(|&(x, y)| Point::new(x, y)).collect();
+        StartFinish {
+            gate: gp_core::track::TimingGate {
+                behind: chord.clone(),
+                forward: gp_core::geom::Side::East,
+            },
+            chord,
+            orient,
+        }
+    }
+
+    #[test]
+    fn narrow_clean_ring_has_no_issues() {
+        // A thickness-2 frame: every cross-section is exactly 2 cells wide, so
+        // n=2 (strict `<`) never fires.
+        let mut d = Corridor::filled(Point::new(0, 0), 9, 9);
+        for y in 2..7 {
+            for x in 2..7 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        assert!(narrow_set(&d, 2).is_empty());
+    }
+
+    #[test]
+    fn narrow_sharp_single_cross_section_neck_fires_once() {
+        // A 3-row-tall corridor pinched to a single-row neck at x=3 (n=3):
+        // exactly one Narrow, centered on the neck cell.
+        let mut drivable = Vec::new();
+        for x in 0..7 {
+            if x == 3 {
+                drivable.push((x, 2));
+            } else {
+                for y in 1..4 {
+                    drivable.push((x, y));
+                }
+            }
+        }
+        let d = corridor((0, 0), 7, 5, &drivable);
+        let issues = narrow_set(&d, 3);
+        assert_eq!(
+            issues,
+            HashSet::from([Issue::Narrow {
+                center: Point::new(3, 2),
+                axis: Orient::Vertical,
+                width: 1,
+            }]),
+        );
+    }
+
+    #[test]
+    fn narrow_doorway_neck_is_caught_by_completeness() {
+        // Two 5x5 rooms joined by a sub-n width-3 doorway corridor (n=4): the
+        // neck's DT is a valley (its along-flow neighbors in the wider rooms
+        // have strictly greater DT), so a ridge-restricted sampler would miss
+        // it — the all-cells scan must still catch it (design doc Risks,
+        // Issue #1 completeness argument).
+        let mut drivable = Vec::new();
+        drivable.extend((0..5).flat_map(|x| (0..5).map(move |y| (x, y))));
+        drivable.extend((10..15).flat_map(|x| (0..5).map(move |y| (x, y))));
+        drivable.extend((5..10).flat_map(|x| (1..4).map(move |y| (x, y))));
+        let d = corridor((0, 0), 15, 5, &drivable);
+        let issues = narrow_set(&d, 4);
+        assert!(
+            issues.iter().any(|issue| matches!(
+                issue,
+                Issue::Narrow {
+                    width: 3,
+                    axis: Orient::Vertical,
+                    ..
+                }
+            )),
+            "expected a width-3 Narrow in the doorway, got {issues:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_staircase_taper_edge_is_not_a_false_positive() {
+        // A uniform-width-4 corridor (n=3, so width 4 >= n everywhere) with a
+        // 2-cell notch carved from one bottom corner: the notch creates a
+        // near-wall along-flow short run, but the true perpendicular width
+        // stays >= n throughout — DT-consistency must reject it.
+        let mut drivable: Vec<(Coord, Coord)> =
+            (0..10).flat_map(|x| (0..4).map(move |y| (x, y))).collect();
+        drivable.retain(|&p| p != (0, 0) && p != (1, 0));
+        let d = corridor((0, 0), 10, 4, &drivable);
+        assert!(
+            narrow_set(&d, 3).is_empty(),
+            "the taper edge must not report a false Narrow"
+        );
+    }
+
+    #[test]
+    fn narrow_sf_below_floor_emits_issue_keyed_on_min_point() {
+        let sf = sf_fixture(&[(3, 5), (4, 5), (5, 5)], Orient::Horizontal);
+        assert_eq!(
+            check_narrow_sf(&sf, 4),
+            Some(Issue::NarrowSf {
+                center: Point::new(3, 5),
+                axis: Orient::Horizontal,
+                width: 3,
+            }),
+        );
+    }
+
+    #[test]
+    fn narrow_sf_at_or_above_floor_emits_none() {
+        let sf = sf_fixture(&[(3, 5), (4, 5), (5, 5)], Orient::Horizontal);
+        assert_eq!(check_narrow_sf(&sf, 3), None);
+        assert_eq!(check_narrow_sf(&sf, 2), None);
     }
 }
