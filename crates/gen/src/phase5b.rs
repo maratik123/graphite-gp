@@ -18,7 +18,8 @@ use strum::IntoEnumIterator;
 
 use crate::phase5::within_v_ceil;
 
-/// The result of running [`phase5_full_oracle`] (design § Approach (3)).
+/// The result of running `phase5_full_oracle` (subtask 6; design §
+/// Approach (3)).
 ///
 /// `Lappable` populates the existing [`TrackMetrics`] fields (the exported
 /// artifact contract, `gp-core::track`); `NotLappable` carries the raw
@@ -30,8 +31,19 @@ pub enum OracleResult {
     /// A closed lap exists; carries the populated speed metrics.
     Lappable(TrackMetrics),
     /// No closed lap exists in `live`; carries the frontier-gap diagnostic
-    /// (design `[N3]`) — non-empty by the generator-guarantee dependency
-    /// (design § Approach (3), AC3).
+    /// (design `[N3]`, § Approach (3)) — the **goal-aware** outer 4-frontier
+    /// of the phase-0 reachable region `P0` (post-race-start, pre-lap-close
+    /// cells, emitted by `fastest_lap_through_live`, subtask 5) within
+    /// `proj(R)`. Its
+    /// non-emptiness (AC3) is guaranteed **unconditionally** by the driver's
+    /// seed-cell fallback, which fires whenever this frontier is empty — both
+    /// when `P0 == ∅` (no forward crossing reachable at all) and when `P0 ==
+    /// proj(R)` (the phase-0 region already covers the whole drivable
+    /// component, leaving no outer frontier); `grid.positions` is non-empty
+    /// by generator contract, so the fallback is always non-empty. In the
+    /// normal (non-degenerate) `NotLappable` case (`∅ ⊊ P0 ⊊ proj(R)`) the
+    /// P0-frontier itself is the meaningful diagnostic, localizing the
+    /// reachability stall for Ф6's `map_frontier_gap_to_edge`.
     NotLappable {
         /// The raw reachability-stall frontier between `R` and the
         /// lap-close goal.
@@ -140,30 +152,35 @@ pub(crate) fn speed_heatmap(live: &HashSet<CarState>) -> Vec<(Point, i32)> {
     out
 }
 
-/// The raw reachability-stall frontier between `r` and the (unreached)
-/// lap-close goal (design `[N3]`, § Approach (3)): drivable cells `∉
-/// proj(r)` with a 4-neighbor `∈ proj(r)`, where `proj(r)` is the set of
-/// cell positions any state in `r` occupies.
+/// The goal-aware reachability-stall frontier (design `[N3]`, § Approach (3),
+/// design amendment): the **outer 4-frontier of `p0_cells` within
+/// `r_cells`** — cells `c ∈ r_cells`, `c ∉ p0_cells`, with a 4-neighbor `∈
+/// p0_cells`.
 ///
-/// Mirrors `gp_core::geom::Rect::points`' saturating box-walk (rather than
-/// adding a new public iterator to `Corridor`, a `gp-core` change out of
-/// scope here — spec Key-decisions/Out-of-scope) so the scan stays total
-/// even at extreme `origin`/`width`/`height`. Sorted by [`Point`] for
-/// deterministic output (AC6).
+/// **Pure** point-set helper — this replaces the earlier committed
+/// `frontier_gap(d, &R)` (drivable-vs-`R`), which was **provably always
+/// empty** for a real `forward_reachable` flood (design § Risks: any
+/// 4-adjacent drivable neighbor of a reached cell is itself always reachable,
+/// by construction of `legal_move`'s unit-distance supercover). The
+/// goal-aware form is instead evaluated against `proj(R)` (drivable cells any
+/// live state occupies) and `P0` (the phase-0 reachable region emitted by
+/// `fastest_lap_through_live`, subtask 5) — the phase distinction encodes
+/// the lap-close-vs-race-start awareness a plain drivability boundary cannot.
+/// Full driver wiring (`r_cells = proj(R)`, `p0_cells = P0`, plus the
+/// seed-cell fallback when this frontier is empty) lands in subtask 6.
+///
+/// Sorted by [`Point`] for deterministic output (AC6).
 #[allow(
     dead_code,
     reason = "not yet wired into phase5_full_oracle (subtask 6); exercised \
               directly by this subtask's own tests in the interim"
 )]
-pub(crate) fn frontier_gap(d: &Corridor, r: &HashSet<CarState>) -> Vec<Point> {
-    let reached: HashSet<Point> = r.iter().map(|s| s.pos()).collect();
-    let origin = d.origin();
-    let x1 = i32::try_from(d.width()).map_or(i32::MAX, |w| origin.x.saturating_add(w));
-    let y1 = i32::try_from(d.height()).map_or(i32::MAX, |h| origin.y.saturating_add(h));
-    let mut frontier: Vec<Point> = (origin.y..y1)
-        .flat_map(|y| (origin.x..x1).map(move |x| Point::new(x, y)))
-        .filter(|&p| d.contains(p) && !reached.contains(&p))
-        .filter(|&p| p.neighbors4().into_iter().any(|q| reached.contains(&q)))
+pub(crate) fn frontier_gap(r_cells: &HashSet<Point>, p0_cells: &HashSet<Point>) -> Vec<Point> {
+    let mut frontier: Vec<Point> = r_cells
+        .iter()
+        .filter(|p| !p0_cells.contains(p))
+        .filter(|p| p.neighbors4().into_iter().any(|q| p0_cells.contains(&q)))
+        .copied()
         .collect();
     frontier.sort();
     frontier
@@ -298,49 +315,28 @@ mod tests {
     }
 
     #[test]
-    fn frontier_gap_is_empty_on_the_phase5a_broken_ring_fixture_via_a_real_flood() {
-        // IMPORTANT (see progress-file Decisions log / subtask-4 finding):
-        // this fixture is Ф5a's broken-ring (`d.set((4,2), false)`), used
-        // via a REAL `forward_reachable` flood -- deliberately asserting
-        // the EMPTY result here, not the non-empty result design §
-        // Approach (3)/subtask 7 originally expected. Removing one cell
-        // from a width-1 ring's border cycle leaves a single connected
-        // PATH (not two disjoint components): a 4-adjacent cell pair both
-        // in `D` is always connected by a legal move (a unit-distance
-        // chord's supercover is exactly its 2 endpoints, so it is never
-        // wall-clipped), so `forward_reachable`'s BFS -- unbounded in move
-        // count -- eventually reaches every cell in the seed's connected
-        // component. `frontier_gap`'s literal definition (drivable ∉
-        // proj(R) with a 4-neighbor ∈ proj(R)) can therefore never be
-        // non-empty for a REAL flood `R`: any such neighbor would, by the
-        // same reachability, already be `∈ proj(R)`. This is the
-        // "degenerate" case design § Approach (3) itself names (all of `D`
-        // reachable, no forward lap-close) -- it is NOT a stall in `R`,
-        // it is a lap-closure failure, invisible to `frontier_gap(d, &R)`.
-        let mut d = ring_corridor();
-        d.set(Point::new(4, 2), false);
-        let seed = car(2, 0, 0, 0);
-        let r = crate::forward_reachable(&d, &[seed], 1);
+    fn frontier_gap_lists_r_cells_adjacent_to_a_proper_p0_but_not_in_p0() {
+        // Hand-built, connected `r`: a 4-cell straight line (0,0)-(3,0).
+        // `p0` is the proper subset `{(1,0)}` in its interior.
+        let r: HashSet<Point> = [
+            Point::new(0, 0),
+            Point::new(1, 0),
+            Point::new(2, 0),
+            Point::new(3, 0),
+        ]
+        .into_iter()
+        .collect();
+        let p0: HashSet<Point> = std::iter::once(Point::new(1, 0)).collect();
 
-        let frontier = frontier_gap(&d, &r);
-        assert!(frontier.is_empty());
-    }
+        let frontier = frontier_gap(&r, &p0);
 
-    #[test]
-    fn frontier_gap_lists_drivable_cells_adjacent_to_r_but_not_in_r() {
-        let d = ring_corridor();
-        // R covers only the gate cell; its East and North drivable
-        // neighbors are frontier (drivable, not in R, 4-adjacent to it).
-        // West of (2,0) is (1,0) -- also drivable and not in R.
-        let r: HashSet<CarState> = std::iter::once(car(2, 0, 0, 0)).collect();
-
-        let frontier = frontier_gap(&d, &r);
-        assert!(frontier.contains(&Point::new(3, 0)));
-        assert!(frontier.contains(&Point::new(1, 0)));
-        // R's own cell is never in the frontier.
-        assert!(!frontier.contains(&Point::new(2, 0)));
-        // Not drivable, so never a frontier member even though 4-adjacent.
-        assert!(!frontier.contains(&Point::new(2, 1)));
+        // (0,0) and (2,0) are 4-adjacent to (1,0), in r, not in p0.
+        assert!(frontier.contains(&Point::new(0, 0)));
+        assert!(frontier.contains(&Point::new(2, 0)));
+        // (3,0) is in r but not 4-adjacent to (1,0) -- excluded.
+        assert!(!frontier.contains(&Point::new(3, 0)));
+        // p0's own cell is never in the frontier.
+        assert!(!frontier.contains(&Point::new(1, 0)));
         // Sorted ascending by Point.
         let mut sorted = frontier.clone();
         sorted.sort();
@@ -348,15 +344,20 @@ mod tests {
     }
 
     #[test]
-    fn frontier_gap_is_empty_when_r_covers_all_of_d() {
-        let d = ring_corridor();
-        let r: HashSet<CarState> = (0..5)
-            .flat_map(|y| (0..5).map(move |x| Point::new(x, y)))
-            .filter(|&p| d.contains(p))
-            .map(|p| car(p.x, p.y, 0, 0))
-            .collect();
+    fn frontier_gap_is_empty_when_p0_equals_r() {
+        let r: HashSet<Point> = [Point::new(0, 0), Point::new(1, 0)].into_iter().collect();
+        let p0 = r.clone();
 
-        let frontier = frontier_gap(&d, &r);
-        assert!(frontier.is_empty());
+        assert!(frontier_gap(&r, &p0).is_empty());
+    }
+
+    #[test]
+    fn frontier_gap_is_empty_when_p0_is_empty() {
+        // The driver (subtask 6), not this pure helper, supplies the
+        // seed-cell fallback for this degenerate case.
+        let r: HashSet<Point> = [Point::new(0, 0), Point::new(1, 0)].into_iter().collect();
+        let p0: HashSet<Point> = HashSet::new();
+
+        assert!(frontier_gap(&r, &p0).is_empty());
     }
 }
