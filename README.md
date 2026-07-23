@@ -63,7 +63,14 @@ edge (one code path) — this also fixed a confirmed `gp-core` bug where
 `LapCounter::register_move` tested the S/F gate's infinite supporting line
 instead of design §3's bounded chord, which made a closed-ring lap topologically
 unable to reach `raw() >= 1` (the crossing is now bounded to the chord's extent).
-The remaining pipeline is Ф5b–Ф7 (#29–#34). Block 2
+**Ф5b (full `Vmax` oracle)** has now landed too (#29): `phase5_full_oracle` in
+`gp-gen` runs iterative deepening (`V_ceil = 1, 2, 4, 8, …`) over `live = R ∩ B`,
+halting at the true `Vmax_attain`, excluding provable-crash states (`R \ B`), and
+— on a valid lap — computing `tempo` / `fastest_lap` / `speed_heatmap` into
+`TrackMetrics`, or on no lap returning a goal-aware `break_points` frontier
+diagnostic (for the future Ф6 repair). It **composes** the Ф5a floods (no
+reimplementation, same `legal_move` / `register_move` path). The remaining
+pipeline is Ф6–Ф7 (#30–#34). Block 2
 (`gp-render`) is **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
@@ -125,7 +132,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 482 workspace tests green (118 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 114 gp-gen; 2 doc-tests)
+cargo test             # 506 workspace tests green (118 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 138 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
