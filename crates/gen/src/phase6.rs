@@ -129,9 +129,12 @@ pub fn map_frontier_gap_to_edge(
 mod tests {
     use std::collections::HashSet;
 
+    use gp_core::geom::{Corridor, Point, Side, Wall};
     use gp_core::sim::CarState;
-    use gp_core::track::RaceDir;
+    use gp_core::track::{RaceDir, StartGrid};
 
+    use super::{RepairCandidate, map_frontier_gap_to_edge, p0_at_v1};
+    use crate::phase5b::wall_neighbor;
     use crate::testfix::*;
     use crate::{OracleResult, oracle_liveness_v1, phase5_full_oracle};
 
@@ -223,5 +226,221 @@ mod tests {
                  full-oracle lappability ({full})"
             );
         }
+    }
+
+    // ---- map_frontier_gap_to_edge (subtasks 6-7: AC3, AC4, AC5, AC6, AC9, AC10, AC11) ----
+
+    /// The broken ring's stall diagnostic, obtained from a real
+    /// `phase5_full_oracle` call rather than hand-built, so these tests
+    /// cover the producer/consumer contract end to end.
+    fn broken_ring_diagnostic() -> (Corridor, gp_core::track::StartFinish, StartGrid, Vec<Wall>) {
+        let mut d = ring_corridor();
+        d.set(Point::new(4, 2), false);
+        let sf = ring_sf();
+        let grid = ring_grid();
+
+        let OracleResult::NotLappable { stall_walls } =
+            phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw)
+        else {
+            panic!("expected the broken ring to return NotLappable");
+        };
+        (d, sf, grid, stall_walls)
+    }
+
+    #[test]
+    fn maps_a_v1_sever_to_a_boundary_edge() {
+        let (d, sf, grid, stall_walls) = broken_ring_diagnostic();
+
+        let result = map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &stall_walls);
+
+        let expected = Wall {
+            cell: Point::new(4, 1),
+            side: Side::North,
+        };
+        assert_eq!(result, RepairCandidate::Edge(expected));
+
+        // AC4, independently of the mapper's own re-validation: the
+        // returned wall is a genuine boundary edge of D.
+        assert!(d.contains(expected.cell));
+        let neighbor = wall_neighbor(expected).expect("in-box neighbor");
+        assert!(!d.contains(neighbor));
+    }
+
+    #[test]
+    fn returned_edit_strictly_grows_p0() {
+        let (d, sf, grid, stall_walls) = broken_ring_diagnostic();
+
+        let RepairCandidate::Edge(w) =
+            map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &stall_walls)
+        else {
+            panic!("expected an Edge candidate on the broken ring");
+        };
+        let neighbor = wall_neighbor(w).expect("in-box neighbor");
+
+        // Recomputed independently of the mapper's internals: a fresh
+        // p0_at_v1 call before/after, not a reuse of the mapper's own
+        // measurement.
+        let before = p0_at_v1(&d, &grid, &sf).len();
+        let mut d2 = d;
+        d2.set(neighbor, true);
+        let after = p0_at_v1(&d2, &grid, &sf).len();
+
+        assert!(
+            after > before,
+            "expected strict growth, got {before} -> {after}"
+        );
+        // Measured (design § Approach (2)): 3 -> 16.
+    }
+
+    #[test]
+    fn max_growth_selects_the_severed_edge_over_a_lesser_candidate() {
+        // (3, 0)'s North side is also an admissible candidate on the broken
+        // ring: its off-D neighbor (3, 1) is in-box and non-drivable, so it
+        // passes the mapper's admissibility filter -- this test pins that
+        // `max grown` (not `wall_sort_key`, which would pick (3,0) < (4,1))
+        // is the rule that selects (4,1)North.
+        let (d, sf, grid, _) = broken_ring_diagnostic();
+
+        let severed = Wall {
+            cell: Point::new(4, 1),
+            side: Side::North,
+        };
+        let lesser = Wall {
+            cell: Point::new(3, 0),
+            side: Side::North,
+        };
+        let severed_neighbor = wall_neighbor(severed).expect("in-box neighbor");
+        let lesser_neighbor = wall_neighbor(lesser).expect("in-box neighbor");
+        assert!(d.contains(severed.cell) && !d.contains(severed_neighbor));
+        assert!(d.contains(lesser.cell) && !d.contains(lesser_neighbor));
+
+        let base = p0_at_v1(&d, &grid, &sf).len();
+        let mut d_severed = d.clone();
+        d_severed.set(severed_neighbor, true);
+        let severed_growth = p0_at_v1(&d_severed, &grid, &sf).len() - base;
+
+        let mut d_lesser = d.clone();
+        d_lesser.set(lesser_neighbor, true);
+        let lesser_growth = p0_at_v1(&d_lesser, &grid, &sf).len().saturating_sub(base);
+
+        assert!(
+            lesser_growth < severed_growth,
+            "expected (3,0)'s growth ({lesser_growth}) to be strictly less than \
+             (4,1)'s ({severed_growth})"
+        );
+
+        // Both candidates admissible; the mapper must still pick the
+        // higher-growth one, not (3,0) via wall_sort_key ascending order.
+        let both = [lesser, severed];
+        assert_eq!(
+            map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &both),
+            RepairCandidate::Edge(severed)
+        );
+    }
+
+    #[test]
+    fn returned_edit_closes_the_lap() {
+        let (d, sf, grid, stall_walls) = broken_ring_diagnostic();
+        assert!(matches!(
+            phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw),
+            OracleResult::NotLappable { .. }
+        ));
+
+        let RepairCandidate::Edge(w) =
+            map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &stall_walls)
+        else {
+            panic!("expected an Edge candidate on the broken ring");
+        };
+        let neighbor = wall_neighbor(w).expect("in-box neighbor");
+
+        let mut d2 = d;
+        d2.set(neighbor, true);
+        assert!(matches!(
+            phase5_full_oracle(&d2, &grid, &sf, RaceDir::Ccw),
+            OracleResult::Lappable(_)
+        ));
+    }
+
+    #[test]
+    fn no_candidate_when_no_boundary_edge_grows_p0() {
+        // Both dead_end_corridor and crash_pocket_fixture are box-filling
+        // corridors: every off-D neighbor of any boundary wall lies
+        // outside the bounding box, so Corridor::set is a documented no-op
+        // there and no edit can grow P0.
+        for (d, sf, grid) in [dead_end_corridor(), crash_pocket_fixture()] {
+            let OracleResult::NotLappable { stall_walls } =
+                phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw)
+            else {
+                panic!("expected NotLappable");
+            };
+            assert!(
+                !stall_walls.is_empty(),
+                "diagnostic must be non-empty for this to be a real decision"
+            );
+
+            assert_eq!(
+                map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &stall_walls),
+                RepairCandidate::NoCandidate
+            );
+        }
+    }
+
+    #[test]
+    fn is_total_on_adversarial_input() {
+        let (d, sf, grid) = dead_end_corridor();
+
+        // Empty diagnostic.
+        assert_eq!(
+            map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &[]),
+            RepairCandidate::NoCandidate
+        );
+
+        // Walls naming cells far outside D's bounding box, including
+        // coordinates that would overflow wall_neighbor's checked_add --
+        // guarded upfront by the d.contains(w.cell) check, so
+        // wall_neighbor is never even reached for these; either way the
+        // function must return cleanly, never panic.
+        let adversarial = [
+            Wall {
+                cell: Point::new(9999, 9999),
+                side: Side::East,
+            },
+            Wall {
+                cell: Point::new(i32::MAX, i32::MAX),
+                side: Side::East,
+            },
+            Wall {
+                cell: Point::new(i32::MIN, i32::MIN),
+                side: Side::West,
+            },
+        ];
+        assert_eq!(
+            map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &adversarial),
+            RepairCandidate::NoCandidate
+        );
+
+        // A degenerate zero-area corridor.
+        let empty_d = Corridor::new(Point::new(0, 0), 0, 0);
+        let empty_grid = StartGrid {
+            positions: vec![Point::new(0, 0)],
+        };
+        assert_eq!(
+            map_frontier_gap_to_edge(&empty_d, &empty_grid, &sf, RaceDir::Ccw, &adversarial),
+            RepairCandidate::NoCandidate
+        );
+    }
+
+    #[test]
+    fn is_deterministic_and_input_order_independent() {
+        let (d, sf, grid, stall_walls) = broken_ring_diagnostic();
+
+        let r1 = map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &stall_walls);
+        let r2 = map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &stall_walls);
+        assert_eq!(r1, r2, "repeated calls must agree");
+
+        let mut reversed = stall_walls;
+        reversed.reverse();
+        let r3 = map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &reversed);
+        assert_eq!(r1, r3, "a reversed input slice must yield the same outcome");
     }
 }
