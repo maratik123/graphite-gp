@@ -351,10 +351,7 @@ mod tests {
                     .iter()
                     .copied()
                     .zip(next)
-                    .flat_map(|pair| {
-                        let (p0, p1) = pair;
-                        std::iter::once(p0).chain(std::iter::once(p1))
-                    })
+                    .flat_map(|pair| <[(f32, f32); 2]>::from(pair).into_iter())
                     .collect();
                 assert_eq!(smoothed.len(), expected_nearer.len());
                 for (&(sx, sy), &nearer) in smoothed.iter().zip(&expected_nearer) {

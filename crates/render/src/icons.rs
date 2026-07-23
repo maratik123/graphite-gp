@@ -425,7 +425,7 @@ mod tests {
             .iter()
             .map(|v| (v.uv.x.to_bits(), v.uv.y.to_bits()))
             .collect();
-        let expected_corners = HashSet::from_iter(
+        let expected_corners = HashSet::from(
             [
                 (FULL_UV.min.x, FULL_UV.min.y),
                 (FULL_UV.min.x, FULL_UV.max.y),

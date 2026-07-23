@@ -16,6 +16,7 @@ use super::tag::{Tag, tag_label_galley};
 use crate::icons::{Icon, IconSet};
 use crate::tokens::typography;
 use egui::{FontFamily, FontId, Pos2, Rect};
+use strum::IntoEnumIterator;
 
 /// The gallery's fixed canvas: 1040×900 logical points at
 /// `pixels_per_point = 1.0`.
@@ -261,15 +262,7 @@ fn draw_cards(painter: &egui::Painter, x0: f32, y0: f32) -> f32 {
     let card_w = 150.0;
     let card_h = 110.0;
 
-    for (col, elevation) in [
-        Elevation::Level0,
-        Elevation::Level1,
-        Elevation::Level2,
-        Elevation::Level3,
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    for (col, elevation) in Elevation::iter().enumerate() {
         let rect = cell(
             x0,
             y0,

@@ -426,7 +426,7 @@ mod tests {
         let d = ring_corridor();
         let sf = ring_sf();
         let seed = car(2, 0, 0, 0);
-        let r: HashSet<CarState> = std::iter::once(seed).collect();
+        let r = HashSet::from([seed]);
 
         let goals = lap_close_goals(&d, &sf, &r, 1);
 
@@ -442,7 +442,7 @@ mod tests {
         let sf = ring_sf();
         // A state already past the gate, moving further away from it: no
         // move from this state re-crosses the gate forward.
-        let r: HashSet<CarState> = std::iter::once(car(3, 0, 1, 0)).collect();
+        let r = HashSet::from([car(3, 0, 1, 0)]);
 
         let goals = lap_close_goals(&d, &sf, &r, 1);
         assert!(goals.is_empty());
@@ -466,13 +466,11 @@ mod tests {
 
     #[test]
     fn speed_heatmap_is_per_point_max_and_sorted_by_point() {
-        let live: HashSet<CarState> = [
+        let live = HashSet::from([
             car(1, 0, 1, 0), // vnorm 1 at (1, 0)
             car(1, 0, 0, 2), // vnorm 2 at (1, 0) -- same point, higher speed
             car(0, 0, 1, 1), // vnorm 1 at (0, 0)
-        ]
-        .into_iter()
-        .collect();
+        ]);
 
         let heatmap = speed_heatmap(&live);
         assert_eq!(heatmap, vec![(Point::new(0, 0), 1), (Point::new(1, 0), 2)]);
@@ -482,15 +480,13 @@ mod tests {
     fn frontier_gap_lists_r_cells_adjacent_to_a_proper_p0_but_not_in_p0() {
         // Hand-built, connected `r`: a 4-cell straight line (0,0)-(3,0).
         // `p0` is the proper subset `{(1,0)}` in its interior.
-        let r: HashSet<Point> = [
+        let r = HashSet::from([
             Point::new(0, 0),
             Point::new(1, 0),
             Point::new(2, 0),
             Point::new(3, 0),
-        ]
-        .into_iter()
-        .collect();
-        let p0: HashSet<Point> = std::iter::once(Point::new(1, 0)).collect();
+        ]);
+        let p0 = HashSet::from([Point::new(1, 0)]);
 
         let frontier = frontier_gap(&r, &p0);
 
@@ -509,7 +505,7 @@ mod tests {
 
     #[test]
     fn frontier_gap_is_empty_when_p0_equals_r() {
-        let r: HashSet<Point> = [Point::new(0, 0), Point::new(1, 0)].into_iter().collect();
+        let r = HashSet::from([Point::new(0, 0), Point::new(1, 0)]);
         let p0 = r.clone();
 
         assert!(frontier_gap(&r, &p0).is_empty());
@@ -519,7 +515,7 @@ mod tests {
     fn frontier_gap_is_empty_when_p0_is_empty() {
         // The driver (subtask 6), not this pure helper, supplies the
         // seed-cell fallback for this degenerate case.
-        let r: HashSet<Point> = [Point::new(0, 0), Point::new(1, 0)].into_iter().collect();
+        let r = HashSet::from([Point::new(0, 0), Point::new(1, 0)]);
         let p0: HashSet<Point> = HashSet::new();
 
         assert!(frontier_gap(&r, &p0).is_empty());

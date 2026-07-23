@@ -558,19 +558,19 @@ mod tests {
     fn asphalt_equals_corridor_contains() {
         let d = ring_3x3();
         let regions = classify(&d);
-        let want: HashSet<Point> = [
-            (1, 1),
-            (2, 1),
-            (3, 1),
-            (1, 2),
-            (3, 2),
-            (1, 3),
-            (2, 3),
-            (3, 3),
-        ]
-        .into_iter()
-        .map(|(x, y)| Point::new(x, y))
-        .collect();
+        let want = HashSet::from(
+            [
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (1, 2),
+                (3, 2),
+                (1, 3),
+                (2, 3),
+                (3, 3),
+            ]
+            .map(|(x, y)| Point::new(x, y)),
+        );
         assert_eq!(set(&regions.asphalt), want);
     }
 
