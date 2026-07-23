@@ -198,3 +198,22 @@ prose* assesses argument quality, not truth.
 Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-16 and
 2026-07-17 (topic now at 2 occurrences) — *directing `self-review` to verify
 factual claims in prose caught every `major` on an all-prose diff, both times*.
+
+### 2. Verify a no-false-positive / guard-clause test actually reaches the clause it names
+
+*Default to* checking, whenever a test asserts a guard or soundness clause
+*suppresses* a false positive (an `is_empty()` / "reports nothing" / "not
+flagged" assertion), that its fixture actually reaches that clause — mutate it:
+temporarily delete the clause from production and confirm the test FAILS. If it
+still passes, the fixture never triggers the pre-clause condition and the
+assertion is cosmetic; a green "reports nothing" proves nothing. Construct the
+fixture so the cheaper pre-condition IS met at some cell while the guard clause
+is what does the rejecting. The tell: *would this test still pass if I broke the
+thing it names?* (Sharper than the whole-function "would this pass if production
+were deleted" check — here the enclosing function still runs; it is one *clause*
+that is dead.)
+
+Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-23 —
+a phase-4 width-check guard test asserted emptiness on a fixture that never met
+its pre-clause condition; deleting the soundness clause left all tests green,
+exposing zero coverage.
