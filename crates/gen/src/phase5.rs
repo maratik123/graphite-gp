@@ -52,7 +52,7 @@ const fn predecessor(s2: CarState, a: Action) -> Option<CarState> {
 ///
 /// `saturating_neg` (not raw negation) keeps this total even at
 /// `v_ceil == i32::MIN`.
-const fn within_v_ceil(s: CarState, v_ceil: i32) -> bool {
+pub(crate) const fn within_v_ceil(s: CarState, v_ceil: i32) -> bool {
     let floor = v_ceil.saturating_neg();
     s.vx >= floor && s.vx <= v_ceil && s.vy >= floor && s.vy <= v_ceil
 }
