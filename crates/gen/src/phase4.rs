@@ -61,12 +61,6 @@ pub enum Issue {
 /// Connectivity check (AC1): `Some(Issue::Disconnected)` iff `d` does not have
 /// exactly one 4-connected component. Delegates verbatim to
 /// [`component_count`].
-#[allow(
-    dead_code,
-    reason = "wired into phase4_static_checks by subtask 6 of this same file \
-              (design doc decomposition Task 3 → Task 6); dead outside tests \
-              until then"
-)]
 fn check_connectivity(d: &Corridor) -> Option<Issue> {
     (component_count(d) != 1).then_some(Issue::Disconnected)
 }
@@ -75,12 +69,6 @@ fn check_connectivity(d: &Corridor) -> Option<Issue> {
 /// not have exactly one bounded hole. Delegates verbatim to
 /// [`bounded_complement_components`], which already counts only bounded
 /// (non-border-touching), non-empty complement components.
-#[allow(
-    dead_code,
-    reason = "wired into phase4_static_checks by subtask 6 of this same file \
-              (design doc decomposition Task 3 → Task 6); dead outside tests \
-              until then"
-)]
 fn check_topology(d: &Corridor) -> Option<Issue> {
     (bounded_complement_components(d) != 1).then_some(Issue::BadTopology)
 }
@@ -176,12 +164,6 @@ fn narrow_at(d: &Corridor, dt: &DistanceTransform, p: Point, n: u32) -> Option<I
 /// The `Narrow` issues over **all** `D` cells (AC3) — deliberately not
 /// restricted to `medial_axis`'s ridge, since a neck is a DT valley a
 /// local-maximum ridge would miss (design doc Risks, Issue #1).
-#[allow(
-    dead_code,
-    reason = "wired into phase4_static_checks by subtask 6 of this same file \
-              (design doc decomposition Task 4 → Task 6); dead outside tests \
-              until then"
-)]
 fn narrow_issues(d: &Corridor, dt: &DistanceTransform, n: u32) -> Vec<Issue> {
     box_points(d)
         .filter(|&p| d.contains(p))
@@ -191,12 +173,6 @@ fn narrow_issues(d: &Corridor, dt: &DistanceTransform, n: u32) -> Vec<Issue> {
 
 /// The `NarrowSf` issue on `sf`'s chord, or `None` — no DT sampling needed,
 /// the chord's width is `sf.chord.len()` directly (design doc §2 Ф4 Width).
-#[allow(
-    dead_code,
-    reason = "wired into phase4_static_checks by subtask 6 of this same file \
-              (design doc decomposition Task 4 → Task 6); dead outside tests \
-              until then"
-)]
 fn check_narrow_sf(sf: &StartFinish, m: u32) -> Option<Issue> {
     let len = sf.chord.len();
     if len >= usize::try_from(m).unwrap_or(usize::MAX) {
@@ -251,12 +227,6 @@ fn walk_finger(hole: &BTreeSet<Point>, tip: Point) -> Vec<Point> {
 /// A hole cell with exactly one 4-connected neighbor in `P` is a finger tip;
 /// its finger is the chain of degree-`≤2` hole cells from that tip up to (but
 /// excluding) the first degree-`≥3` branch cell.
-#[allow(
-    dead_code,
-    reason = "wired into phase4_static_checks by subtask 6 of this same file \
-              (design doc decomposition Task 5 → Task 6); dead outside tests \
-              until then"
-)]
 fn infield_fingers(skel: &CoarseSkeleton) -> BTreeMap<Point, Vec<Point>> {
     skel.hole
         .iter()
@@ -285,16 +255,49 @@ fn block_points(c: Point, k: i32) -> impl Iterator<Item = Point> {
 /// cell) is **entirely** drivable in `d` — the separating infield strip is
 /// fully filled, so the finger's two flanking arms have merged (design doc §1
 /// line 24).
-#[allow(
-    dead_code,
-    reason = "wired into phase4_static_checks by subtask 6 of this same file \
-              (design doc decomposition Task 5 → Task 6); dead outside tests \
-              until then"
-)]
 fn absorbed(finger: &[Point], d: &Corridor, k: i32) -> bool {
     finger
         .iter()
         .all(|&c| block_points(c, k).all(|p| d.contains(p)))
+}
+
+/// Runs Ф4's four static-validation checks over `d`, in fixed order.
+///
+/// Connectivity → topology → width (`Narrow`/`NarrowSf`) → finger liveness;
+/// returns every issue found (empty ⟺ statically valid, design doc §2 Ф4).
+///
+/// - `skel` — the coarse skeleton (`skel.hole` drives finger extraction).
+/// - `k` — the coarse-block size, mapping coarse fingers to fine blocks
+///   (Ф2's `k`).
+/// - `n` — the global width floor (`GenParams::min_width`).
+/// - `m` — the S/F width floor (`GenParams::start_finish_width`).
+/// - `sf` — the start/finish chord.
+///
+/// Total and deterministic: no `Result`, no production panic (design doc
+/// Risks) — mirrors Ф1/Ф2/Ф3.
+pub fn phase4_static_checks(
+    d: &Corridor,
+    skel: &CoarseSkeleton,
+    k: i32,
+    n: u32,
+    m: u32,
+    sf: &StartFinish,
+) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    issues.extend(check_connectivity(d));
+    issues.extend(check_topology(d));
+
+    let dt = DistanceTransform::compute(d);
+    issues.extend(narrow_issues(d, &dt, n));
+    issues.extend(check_narrow_sf(sf, m));
+
+    for (&tip, finger) in &infield_fingers(skel) {
+        if absorbed(finger, d, k) {
+            issues.push(Issue::LostHairpin { tip });
+        }
+    }
+
+    issues
 }
 
 #[cfg(test)]
@@ -558,5 +561,178 @@ mod tests {
             d.set(p, true);
         }
         assert!(absorbed(finger, &d, 3));
+    }
+
+    // ---- Orchestrator (AC6/AC7/AC8) --------------------------------------
+    //
+    // Shared fixture geometry: k=3, n=3, m=4. A 21x21 outer box with a 9x9
+    // centered fine hole (x:6..15, y:6..15) — a thickness-6 frame, well above
+    // n=3. The coarse hole is the matching 3x3 coarse-block region
+    // {2,3,4}x{2,3,4} (block size k=3), with an optional one-cell peninsula
+    // block (5,3) attached to (4,3) — its fine footprint x:15..18, y:9..12
+    // sits inside the frame's thickness (with a 3-cell buffer to the box
+    // border), so carving/filling it never breaches the frame or merges the
+    // hole with the outfield.
+
+    /// The plain thickness-6 frame ring, no finger notch.
+    fn base_ring_d() -> Corridor {
+        let mut d = Corridor::filled(Point::new(0, 0), 21, 21);
+        for y in 6..15 {
+            for x in 6..15 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        d
+    }
+
+    /// `base_ring_d` with the peninsula block (5,3)'s fine footprint carved
+    /// out (not drivable) — the finger's separating strip is intact.
+    fn notch_ring_d() -> Corridor {
+        let mut d = base_ring_d();
+        for x in 15..18 {
+            for y in 9..12 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        d
+    }
+
+    /// The matching coarse hole, no peninsula.
+    fn plain_hole_skel() -> CoarseSkeleton {
+        let hole: BTreeSet<Point> = (2..5)
+            .flat_map(|x| (2..5).map(move |y| Point::new(x, y)))
+            .collect();
+        CoarseSkeleton {
+            ring: BTreeSet::new(),
+            hole,
+            dir: gp_core::track::RaceDir::Cw,
+        }
+    }
+
+    /// `plain_hole_skel` plus the one-cell peninsula block `(5,3)`.
+    fn hole_with_finger_skel() -> CoarseSkeleton {
+        let mut skel = plain_hole_skel();
+        skel.hole.insert(Point::new(5, 3));
+        skel
+    }
+
+    /// A clean S/F chord, width 4 (`≥ m`).
+    fn clean_sf() -> StartFinish {
+        sf_fixture(&[(0, 0), (0, 1), (0, 2), (0, 3)], Orient::Vertical)
+    }
+
+    /// An S/F chord of width 3 — `∈ [n, m)`, so only `NarrowSf` fires.
+    fn narrow_sf_chord() -> StartFinish {
+        sf_fixture(&[(0, 0), (0, 1), (0, 2)], Orient::Vertical)
+    }
+
+    #[test]
+    fn ac6_clean_ring_with_intact_finger_is_empty() {
+        let d = notch_ring_d();
+        let skel = hole_with_finger_skel();
+        let sf = clean_sf();
+        let issues = phase4_static_checks(&d, &skel, 3, 3, 4, &sf);
+        assert!(issues.is_empty(), "expected no issues, got {issues:?}");
+    }
+
+    #[test]
+    fn ac7_sharp_neck_yields_exactly_narrow() {
+        // Pinch the left frame arm to a single drivable column at y=10.
+        let mut d = base_ring_d();
+        for x in [0, 1, 3, 4, 5] {
+            d.set(Point::new(x, 10), false);
+        }
+        let skel = plain_hole_skel();
+        let sf = clean_sf();
+        let issues: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        assert!(
+            issues
+                .iter()
+                .all(|issue| matches!(issue, Issue::Narrow { .. })),
+            "expected only Narrow issues, got {issues:?}"
+        );
+        assert!(!issues.is_empty(), "expected at least one Narrow issue");
+    }
+
+    #[test]
+    fn ac7_disk_merge_yields_exactly_bad_topology() {
+        let d = Corridor::filled(Point::new(0, 0), 21, 21);
+        let skel = plain_hole_skel();
+        let sf = clean_sf();
+        let issues: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        assert_eq!(issues, HashSet::from([Issue::BadTopology]));
+    }
+
+    #[test]
+    fn ac7_narrow_sf_yields_exactly_narrow_sf() {
+        let d = base_ring_d();
+        let skel = plain_hole_skel();
+        let sf = narrow_sf_chord();
+        let issues: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        assert_eq!(
+            issues,
+            HashSet::from([Issue::NarrowSf {
+                center: Point::new(0, 0),
+                axis: Orient::Vertical,
+                width: 3,
+            }]),
+        );
+    }
+
+    #[test]
+    fn ac7_filled_finger_yields_exactly_lost_hairpin() {
+        let d = base_ring_d();
+        let skel = hole_with_finger_skel();
+        let sf = clean_sf();
+        let issues: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        assert_eq!(
+            issues,
+            HashSet::from([Issue::LostHairpin {
+                tip: Point::new(5, 3),
+            }]),
+        );
+    }
+
+    #[test]
+    fn ac8_repeated_calls_are_set_identical() {
+        let d = notch_ring_d();
+        let skel = hole_with_finger_skel();
+        let sf = clean_sf();
+        let a: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        let b: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn ac8_degenerate_inputs_are_total_no_panic() {
+        let skel = plain_hole_skel();
+        let sf = clean_sf();
+
+        // An empty D: no drivable cells at all.
+        let empty = Corridor::new(Point::new(0, 0), 4, 4);
+        let issues: HashSet<Issue> = phase4_static_checks(&empty, &skel, 3, 3, 4, &sf)
+            .into_iter()
+            .collect();
+        assert!(
+            issues.contains(&Issue::Disconnected),
+            "an empty D has zero components, not one"
+        );
+
+        // A degenerate 1x1 corridor.
+        let mut tiny = Corridor::new(Point::new(0, 0), 1, 1);
+        tiny.set(Point::new(0, 0), true);
+        let _ = phase4_static_checks(&tiny, &skel, 3, 3, 4, &sf);
     }
 }
