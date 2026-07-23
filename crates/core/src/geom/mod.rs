@@ -8,10 +8,14 @@
 //!
 //! The corridor-graph helpers ([`Side`], [`flood_fill`], [`component_count`],
 //! [`bounded_complement_components`], [`CorridorScratch`], [`geodesic_layers`],
-//! [`walls_from_boundary`]) live in a private `graph` submodule and are
+//! [`walls_from_boundary`]) live in a private `graph` submodule, and the
+//! distance-transform / medial-axis primitives ([`DistanceTransform`],
+//! [`medial_axis`]) live in a private `distance` submodule; both are
 //! re-exported here, so every `crate::geom::*` path stays flat.
 
+mod distance;
 mod graph;
+pub use distance::*;
 pub use graph::*;
 
 /// Integer grid coordinate.
