@@ -228,7 +228,8 @@ findings*.
 
 | Path | Purpose |
 |------|---------|
-| `ai-docs/context.md` | Project context — read on demand |
+| `ai-docs/context.md` | Project context (orientation) — read on demand |
+| `ai-docs/context-status.md` | Per-issue implementation status log — read on demand |
 | `ai-docs/code-style.md` | Workspace code-style reference — read on demand |
 | `ai-docs/doc-convention.md` | rustdoc conventions — read on demand |
 | `ai-docs/corrections-log.md` | Learning-Log carve-outs + field glossary |

@@ -185,11 +185,9 @@ The `**entry_args:**` field is recorded ONCE at Step 8 creation and **read-only 
 
 Update content files only — **do not move spec/design to `done/` yet** (that happens at Step 12):
 
-1. **`ai-docs/context.md`** — update any section touched by this task:
-   - Resolve open questions that were answered during implementation
-   - Update the Plans list (add ✅ to implemented crates)
-   - Add new architectural decisions to the Key Decisions table
-2. **`README.md`** — update the status table if a new crate was implemented.
+1. **`ai-docs/context-status.md`** (detailed per-issue log) — append this task's implementation-status entry: the per-issue bullet capturing design decisions, traps, and invariants worth not rediscovering (the same shape as the existing `## Status` bullets there). This is where the growing per-issue log lives — **not** `context.md`, which stays a thin orientation page under the size cap.
+2. **`ai-docs/context.md`** (orientation) — update only if a block's high-level state changed: bump the `## Status` summary bullet for the affected block, resolve open questions answered during implementation, keep the Architecture / Track-artifact orientation current.
+3. **`README.md`** — update the status table if a new crate was implemented.
 
 ## Step 8 — first-action GO-notes verification (detail)
 
@@ -256,6 +254,8 @@ For each `⬜ Open` finding in the latest `## Self-Review (Round N)` section of 
 
 After all findings are resolved (`✅ Fixed` or `⚠️ Objected`), run the **full** gate set — `cargo build`, `cargo test`, `cargo fmt -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, plus `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace` if any `///`/`//!` changed — **after EVERY fix, including ones an agent (or you) calls trivial: "one character", "just a typo", "doc-comment only"**. A fix's *size* is not evidence of its *risk*; "fix is one character" is a claim about the edit, never about the gates. Doc comments are compiled input, so a prose edit can fail clippy — `too_long_first_doc_paragraph` (`nursery`), `doc_markdown` / `missing_panics_doc` (`pedantic`); both groups `deny` — while build/test/fmt **and the doc gate itself** stay green: `cargo doc` does NOT subsume `cargo clippy` for doc-comment lints, and vice versa. *Corollary when fixing a DOC-1 tense violation on a long summary:* prefer **restructuring to a short first paragraph + blank `///` + a detail paragraph** over inserting the verb suffix in place — the in-place insertion is the form that trips the length lint, and the restructure satisfies DOC-1's one-line-summary intent directly (the lint and the convention agree; only the original prose disagreed with both). See `ai-docs/learnings.md` 2026-07-16 DOC-1 entry. Then update `.progress.md`, re-read the PR body (`gh pr view <N> --json title,body`) and edit only if it contradicts new commits, and resolve every fixed review thread per the GraphQL recipe in AGENTS.md § *Workflow* (PR review comment resolution) — reply via REST, query unresolved thread IDs via `reviewThreads`, then `resolveReviewThread` each fixed thread and verify `isResolved: true`. Threads behind `⚠️ Objected` findings stay open. Skipping this resolution has caused the same correction twice (`ai-docs/learnings.md` entries #33 and #44).
 
+**Design-marker `[Xn]` references MUST be backticked** (write `` `[X3]` ``, never bare `[X3]`). A bare `[Xn]` in a `///`/`//!` doc comment reads as a broken intra-doc link (`broken_intra_doc_links` = `deny`) and fails **only** the doc gate — `cargo build`/`clippy`/`test` all stay green, so it is invisible until `RUSTDOCFLAGS="-D warnings" cargo doc` runs. Same class as the DOC-1 corollary above: the doc gate is the sole catcher. See `ai-docs/learnings.md` 2026-07-16 `[Xn]`-backtick entry.
+
 ## Step 12 — PR-body template (detail)
 
 `gh pr create --title "..." --body "$(cat <<'EOF' ... EOF)"` — body must include:
@@ -299,7 +299,7 @@ The Step 12 sub-step 4 parser specification lives in a dedicated reference file:
 | Step 8 start | Feature branch created? Run `git branch --show-current` before every `git commit` — must not be `main`. `base_commit` + `branch` recorded in progress file? |
 | Each subtask | `cargo build` ✅? Tests run? `.progress.md` updated? |
 | Step 9 | `cargo build` ✅? `cargo test` green? `cargo fmt -- --check` clean? `cargo clippy --workspace --all-targets -- -D warnings` clean (note: `--workspace --all-targets`, not bare)? `cargo doc --no-deps --workspace` clean (with `RUSTDOCFLAGS="-D warnings"`)? `actionlint` clean on every changed `.github/workflows/*.yml` (skip if none changed)? Any new `# Panics` doc section / `.unwrap()` / `.expect()` / `panic!` outside `#[cfg(test)]` → `ai-docs/panic-index.md` updated and staged (skip when no new production panics)? Any new `# Safety` doc section / `unsafe { … }` / `unsafe fn` outside `#[cfg(test)]` → `ai-docs/unsafe-index.md` updated and staged (skip when no new production unsafe sites)? All ACs covered? |
-| Step 9.5 | context.md + README.md updated? (spec/design NOT moved yet — happens at Step 12) |
+| Step 9.5 | context-status.md entry appended + context.md summary/README.md updated? (spec/design NOT moved yet — happens at Step 12) |
 | Step 10 | Self-review APPROVE? (Progress file persists in working tree — gitignored — until `/pr-merged`. Do NOT `rm` it here.) |
 | Step 11 | `major`/`blocker` objections confirmed by user? Design change → Design Amendment triggered? `gh pr view <N>` re-read after every push (unconditional) — `gh pr edit` only if body contradicts new commits? |
 | Design Amendment | User approved the amendment? Design review returned GO before resuming? |
