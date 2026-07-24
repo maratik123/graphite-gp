@@ -4,14 +4,27 @@
 //! the track almost-valid by construction so the expensive passability oracle
 //! acts as a certifier, not a regeneration engine. The pipeline runs in phases
 //! Ф1–Ф7 and emits a [`TrackArtifact`].
+//!
+//! Ф6 (local repair, `[C3]`) is the last phase built so far:
+//! [`phase6_local_repair`] applies one dual edge per committed edit, with an
+//! edit-type-scoped `[C3]` recheck (add → local, remove → global flood-fill,
+//! run-out → sink-to-sink), and returns [`RepairOutcome::Failed`] iff zero
+//! edits were committed across the pass (`ai-docs/plans/
+//! 2026-07-24-gp-gen-phase6-local-repair.design.md`).
 
+mod coarse;
 mod phase1;
 mod phase2;
 mod phase3;
 mod phase4;
+mod phase4_defects;
 mod phase5;
+mod phase5_runout;
 mod phase5b;
 mod phase6;
+mod phase6_arms;
+mod phase6_remove;
+mod phase6_repair;
 #[cfg(test)]
 mod testfix;
 
@@ -24,8 +37,10 @@ pub use phase2::*;
 pub use phase3::*;
 pub use phase4::*;
 pub use phase5::*;
+pub use phase5_runout::phase5_runout_checks;
 pub use phase5b::*;
 pub use phase6::*;
+pub use phase6_repair::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]

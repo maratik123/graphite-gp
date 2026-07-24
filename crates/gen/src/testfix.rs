@@ -9,6 +9,8 @@
 
 #![cfg(test)]
 
+use std::collections::BTreeSet;
+
 use gp_core::geom::{Corridor, Orient, Point, Side};
 use gp_core::sim::CarState;
 use gp_core::track::{StartFinish, StartGrid, TimingGate};
@@ -178,6 +180,63 @@ pub(crate) fn trap_ring() -> (Corridor, StartFinish, StartGrid) {
         positions: vec![Point::new(2, 0)],
     };
     (d, sf, grid)
+}
+
+/// AC3's discriminating fixture (Ф6 local-repair,
+/// `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md` § Test
+/// Design): a straight feeding a 90-degree corner, sized and speed-tuned so
+/// a fixed-radius recheck wrongly reports "fixed" while the sink-to-sink
+/// recheck correctly reports "still deficient".
+///
+/// Box `origin (0,0)`, `14 × 6`. Drivable: the straight `y = 0, x ∈ 0..=11`,
+/// plus the corner leg `x = 11, y ∈ 1..=4`. `(12,0)` and `(13,0)` are
+/// **in-box and `¬D`** — so the add-edit tested against this fixture is a
+/// real flip, not a `Corridor::set` no-op (the corridor returned here is the
+/// **pre-edit** state; the caller applies the edit with `d.set(Point::new(12,
+/// 0), true)`).
+///
+/// Returns `(d, path, sinks)`: the frozen `fastest_lap` path
+/// `[(0,0), …, (11,0), (11,1), (11,2), (11,3), (11,4)]` and the sink index
+/// set `{0}` — both hand-supplied rather than derived from a real oracle
+/// run, so the fixture does not depend on which lap the oracle happens to
+/// pick.
+pub(crate) fn brake_deficit_corridor() -> (Corridor, Vec<Point>, BTreeSet<usize>) {
+    let mut d = Corridor::new(Point::new(0, 0), 14, 6);
+    for x in 0..=11 {
+        d.set(Point::new(x, 0), true);
+    }
+    for y in 1..=4 {
+        d.set(Point::new(11, y), true);
+    }
+
+    let mut path: Vec<Point> = (0..=11).map(|x| Point::new(x, 0)).collect();
+    path.extend((1..=4).map(|y| Point::new(11, y)));
+
+    let sinks = BTreeSet::from([0]);
+
+    (d, path, sinks)
+}
+
+/// AC1 helper (Ф6 local-repair): asserts that `after` differs from `before`
+/// in **exactly one** cell's drivability, over `before`'s own bounding box
+/// (every arm's `apply_edit` clones `before` verbatim, so the two share a
+/// box by construction), and that the differing cell is `expected_cell` at
+/// `expected_drivable`.
+pub(crate) fn assert_single_cell_flip(
+    before: &Corridor,
+    after: &Corridor,
+    expected_cell: Point,
+    expected_drivable: bool,
+) {
+    let diffs: Vec<Point> = crate::phase4::box_points(before)
+        .filter(|&p| before.contains(p) != after.contains(p))
+        .collect();
+    assert_eq!(
+        diffs,
+        vec![expected_cell],
+        "expected exactly one cell to flip drivability"
+    );
+    assert_eq!(after.contains(expected_cell), expected_drivable);
 }
 
 /// The AC2 tier-2 fallback witness: a single-cell corridor
