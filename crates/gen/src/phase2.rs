@@ -14,6 +14,7 @@ use gp_core::geom::{Corridor, Point, Side};
 use strum::IntoEnumIterator;
 
 use crate::CoarseSkeleton;
+use crate::coarse::block_points;
 
 /// Fine-cell padding around `D0`'s bounding box, on every side — gives every
 /// `D0` boundary cell an in-box `¬D` neighbor for `walls_from_boundary` /
@@ -43,19 +44,6 @@ pub fn phase2_rasterize(skel: &CoarseSkeleton, k: i32, n: i32) -> Corridor {
 }
 
 // ---- Stage 1: baseline k×k expansion (D0) + expanded hole mask (H) -------
-
-/// The fine-point origin of coarse block `c`'s `k×k` patch — `(c.x·k, c.y·k)`.
-const fn block_origin(c: Point, k: i32) -> Point {
-    Point::new(c.x.saturating_mul(k), c.y.saturating_mul(k))
-}
-
-/// Every fine point of coarse block `c`'s `k×k` patch, row-major.
-fn block_points(c: Point, k: i32) -> impl Iterator<Item = Point> {
-    let origin = block_origin(c, k);
-    (0..k).flat_map(move |dy| {
-        (0..k).map(move |dx| Point::new(origin.x.saturating_add(dx), origin.y.saturating_add(dy)))
-    })
-}
 
 /// An empty [`Corridor`] over `ring`'s coarse bounding box, scaled by `k` and
 /// padded by [`BBOX_PAD`] fine cells on every side. An empty `ring` yields a

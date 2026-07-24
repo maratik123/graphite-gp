@@ -16,6 +16,7 @@ use gp_core::geom::{
 use gp_core::track::StartFinish;
 
 use crate::CoarseSkeleton;
+use crate::coarse::block_points;
 
 /// One statically-detected defect of the fine corridor `D` (design doc §2, Ф4).
 ///
@@ -77,7 +78,7 @@ fn check_topology(d: &Corridor) -> Option<Issue> {
 /// Ф1/Ф2/Ф3's private `box_points` (`Corridor`'s own box-point iterator is
 /// private; this is the same accepted re-derivation from the public
 /// `origin`/`width`/`height` accessors, e.g. `crates/gen/src/phase3.rs`).
-fn box_points(d: &Corridor) -> impl Iterator<Item = Point> + '_ {
+pub(crate) fn box_points(d: &Corridor) -> impl Iterator<Item = Point> + '_ {
     let origin = d.origin();
     let (w, h) = (d.width(), d.height());
     (0..h).flat_map(move |dy| {
@@ -93,7 +94,7 @@ fn box_points(d: &Corridor) -> impl Iterator<Item = Point> + '_ {
 /// The count of consecutive `D` cells starting at (and including) `p`,
 /// extending one step at a time along `(dx, dy)` until the first `¬D` /
 /// out-of-box cell. Always `≥ 1` when `p ∈ D` (the loop's first iteration).
-fn wall_run(d: &Corridor, p: Point, delta: (Coord, Coord)) -> usize {
+pub(crate) fn wall_run(d: &Corridor, p: Point, delta: (Coord, Coord)) -> usize {
     let (dx, dy) = delta;
     let mut count = 0usize;
     let mut cur = p;
@@ -106,7 +107,7 @@ fn wall_run(d: &Corridor, p: Point, delta: (Coord, Coord)) -> usize {
 
 /// The four in-`D` wall-distance walks from `p`: `(left, right, up, down)`,
 /// each the step count (`p` included) to the first `¬D` / box-edge cell.
-fn wall_runs(d: &Corridor, p: Point) -> (usize, usize, usize, usize) {
+pub(crate) fn wall_runs(d: &Corridor, p: Point) -> (usize, usize, usize, usize) {
     (
         wall_run(d, p, (-1, 0)),
         wall_run(d, p, (1, 0)),
@@ -198,7 +199,7 @@ fn hole_degree(hole: &BTreeSet<Point>, c: Point) -> usize {
 /// The finger chain starting at coarse tip `tip` — the tip cell plus every
 /// subsequent degree-`≤2` hole cell along the walk, stopping *before* the
 /// first degree-`≥3` branch cell (design doc §2 Ф4 Finger liveness).
-fn walk_finger(hole: &BTreeSet<Point>, tip: Point) -> Vec<Point> {
+pub(crate) fn walk_finger(hole: &BTreeSet<Point>, tip: Point) -> Vec<Point> {
     let mut chain = vec![tip];
     let mut prev = None;
     let mut current = tip;
@@ -227,7 +228,7 @@ fn walk_finger(hole: &BTreeSet<Point>, tip: Point) -> Vec<Point> {
 /// A hole cell with exactly one 4-connected neighbor in `P` is a finger tip;
 /// its finger is the chain of degree-`≤2` hole cells from that tip up to (but
 /// excluding) the first degree-`≥3` branch cell.
-fn infield_fingers(skel: &CoarseSkeleton) -> BTreeMap<Point, Vec<Point>> {
+pub(crate) fn infield_fingers(skel: &CoarseSkeleton) -> BTreeMap<Point, Vec<Point>> {
     skel.hole
         .iter()
         .copied()
@@ -236,26 +237,11 @@ fn infield_fingers(skel: &CoarseSkeleton) -> BTreeMap<Point, Vec<Point>> {
         .collect()
 }
 
-/// The fine-point origin of coarse block `c`'s `k×k` patch — mirrors Ф2's
-/// private `block_origin` (`crates/gen/src/phase2.rs`).
-const fn block_origin(c: Point, k: i32) -> Point {
-    Point::new(c.x.saturating_mul(k), c.y.saturating_mul(k))
-}
-
-/// Every fine point of coarse block `c`'s `k×k` patch, row-major — mirrors
-/// Ф2's private `block_points`.
-fn block_points(c: Point, k: i32) -> impl Iterator<Item = Point> {
-    let origin = block_origin(c, k);
-    (0..k).flat_map(move |dy| {
-        (0..k).map(move |dx| Point::new(origin.x.saturating_add(dx), origin.y.saturating_add(dy)))
-    })
-}
-
 /// Whether `finger`'s fine footprint (the `×k` block expansion of each coarse
 /// cell) is **entirely** drivable in `d` — the separating infield strip is
 /// fully filled, so the finger's two flanking arms have merged (design doc §1
 /// line 24).
-fn absorbed(finger: &[Point], d: &Corridor, k: i32) -> bool {
+pub(crate) fn absorbed(finger: &[Point], d: &Corridor, k: i32) -> bool {
     finger
         .iter()
         .all(|&c| block_points(c, k).all(|p| d.contains(p)))

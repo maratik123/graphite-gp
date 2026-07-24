@@ -5,10 +5,12 @@
 //! acts as a certifier, not a regeneration engine. The pipeline runs in phases
 //! Ф1–Ф7 and emits a [`TrackArtifact`].
 
+mod coarse;
 mod phase1;
 mod phase2;
 mod phase3;
 mod phase4;
+mod phase4_defects;
 mod phase5;
 mod phase5b;
 mod phase6;
