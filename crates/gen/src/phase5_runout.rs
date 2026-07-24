@@ -5,14 +5,15 @@
 //! A `v_target`-referenced run-out budget check, never a lap-existence check
 //! (#30's executed AC7 result: no track V=1-lappable can be un-lappable at a
 //! higher `V_ceil`, so "the corner cannot be taken at all" is never a
-//! producible verdict). This module owns the primitives; `phase4.rs`'s
-//! `Issue::NoBraking` variant carries the payload, and the detector body
-//! (`phase5_runout_checks`) lands in this same module at subtask 6.
+//! producible verdict). This module owns the primitives and the detector
+//! body (`phase5_runout_checks`); `phase4.rs`'s `Issue::NoBraking` variant
+//! carries the payload. `NoBraking` is emitted from this Ф5 family, never
+//! from `phase4_static_checks` (design.md § Decomposition subtask 2).
 #![allow(
     dead_code,
-    reason = "no production caller until phase5_runout_checks wires these primitives in \
-              at subtask 6 — every item here is already exercised by this module's own \
-              tests"
+    reason = "no production caller until the Ф6 driver (phase6_repair.rs, Group B) wires \
+              phase5_runout_checks into the single-pass dispatch — every item here is \
+              already exercised by this module's own tests"
 )]
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -22,6 +23,7 @@ use gp_core::sim::{Action, CarState, legal_move, step};
 use gp_core::track::TrackMetrics;
 use strum::IntoEnumIterator;
 
+use crate::Issue;
 use crate::phase4::wall_run;
 use crate::phase5::within_v_ceil;
 use crate::phase5b::vnorm;
@@ -260,6 +262,80 @@ pub(crate) fn deficit_at(
     braking_cells(v_entry, v_corner).saturating_sub(runout)
 }
 
+/// Every `|v| ≤ 1` state at `p` — the seed set `window_speed`'s sink-seeded
+/// detection call uses (design doc § Decision 2). A deliberate conservative
+/// superset of the sink's *live* states (`RepairContext` exposes `metrics`,
+/// not `live`; recomputing `live` per candidate would be the global oracle
+/// run `[C3]` exists to avoid) — it can only inflate `attainable`, hence the
+/// deficit, hence over-report `NoBraking`, never mask a genuine one.
+fn low_speed_states_at(p: Point) -> Vec<CarState> {
+    (-1..=1)
+        .flat_map(|vx| {
+            (-1..=1).map(move |vy| CarState {
+                x: p.x,
+                y: p.y,
+                vx,
+                vy,
+            })
+        })
+        .collect()
+}
+
+/// The `NoBraking` issues along `metrics.fastest_lap` (design doc §2 Ф6,
+/// `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md` § Decision 2):
+/// one issue per maximal run of deficient path indices, anchored at the
+/// run's first point. `[]` on an empty path (total, no panic).
+///
+/// Each index's deficit is measured against the sink-to-sink flood seeded at
+/// its nearest **upstream** sink (`sink_indices`), barriered at every sink
+/// cell — the flood is cached per distinct upstream sink index rather than
+/// recomputed per path point, since every point between two sinks shares the
+/// same upstream flood.
+pub(crate) fn phase5_runout_checks(
+    d: &Corridor,
+    metrics: &TrackMetrics,
+    v_target: i32,
+) -> Vec<Issue> {
+    let path = &metrics.fastest_lap;
+    if path.is_empty() {
+        return Vec::new();
+    }
+    let sinks = sink_indices(metrics);
+    let sink_points: HashSet<Point> = sinks.iter().filter_map(|&i| path.get(i).copied()).collect();
+    let v_ceil = v_target.max(1);
+
+    let mut floods: HashMap<usize, WindowFlood> = HashMap::new();
+    let mut deficient = vec![false; path.len()];
+    for (i, &c) in path.iter().enumerate() {
+        let u = sinks.range(..=i).next_back().copied().unwrap_or(0);
+        let flood = floods.entry(u).or_insert_with(|| match path.get(u) {
+            Some(&seed_cell) => {
+                window_speed(d, &low_speed_states_at(seed_cell), &sink_points, v_ceil)
+            }
+            None => WindowFlood {
+                states: HashSet::new(),
+                peak: HashMap::new(),
+            },
+        });
+        let dir = travel_dir(path, i);
+        deficient[i] = deficit_at(d, flood, c, dir, v_target) > 0;
+    }
+
+    let mut issues = Vec::new();
+    let mut i = 0;
+    while i < deficient.len() {
+        if deficient[i] {
+            issues.push(Issue::NoBraking { at: path[i] });
+            while i < deficient.len() && deficient[i] {
+                i = i.saturating_add(1);
+            }
+        } else {
+            i = i.saturating_add(1);
+        }
+    }
+    issues
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,5 +527,83 @@ mod tests {
         let flood = window_speed(&d, &[car(0, 0, 1, 0)], &barriers, 3);
         // c = (5,0) is beyond the barrier at (2,0) -> absent from flood.peak.
         let _ = deficit_at(&d, &flood, Point::new(5, 0), (1, 0), 3);
+    }
+
+    // ---- phase5_runout_checks --------------------------------------------
+
+    /// A straight `len`-cell corridor at `y=0`, `x ∈ 0..len`, with
+    /// `metrics.fastest_lap` the straight walked west-to-east — no
+    /// `speed_heatmap` entries, so the only sink is the unconditional index
+    /// `0` (R4: the start cell's heatmap is never consulted).
+    fn straight_metrics(len: i32) -> (Corridor, TrackMetrics) {
+        let d = Corridor::filled(Point::new(0, 0), usize::try_from(len).unwrap_or(0), 1);
+        let path: Vec<Point> = (0..len).map(|x| Point::new(x, 0)).collect();
+        let metrics = TrackMetrics {
+            fastest_lap: path,
+            ..Default::default()
+        };
+        (d, metrics)
+    }
+
+    #[test]
+    fn runout_checks_is_empty_on_an_empty_path() {
+        let d = Corridor::filled(Point::new(0, 0), 5, 1);
+        assert!(phase5_runout_checks(&d, &TrackMetrics::default(), 3).is_empty());
+    }
+
+    #[test]
+    fn runout_checks_adequate_room_is_empty() {
+        // v_target=1: braking from v<=1 to a legal-successor speed never
+        // needs more than 1 cell of room, which the straight always has
+        // (even at the very last cell, decelerating to rest in place is a
+        // legal zero-length successor).
+        let (d, metrics) = straight_metrics(9);
+        assert!(
+            phase5_runout_checks(&d, &metrics, 1).is_empty(),
+            "adequate run-out room must not fire NoBraking"
+        );
+    }
+
+    #[test]
+    fn runout_checks_r4_pin_start_cell_heatmap_above_one_is_still_a_sink() {
+        // R4: speed_heatmap is a per-point max over ALL live states, so a
+        // start cell traversed fast later has heatmap > 1 and would NOT be
+        // a heatmap-derived sink — sink_indices' unconditional index-0
+        // inclusion is what keeps this call well-founded at all.
+        let (d, mut metrics) = straight_metrics(9);
+        metrics.speed_heatmap = vec![(metrics.fastest_lap[0], 5)];
+        // Must not panic, and must produce the same result as the
+        // no-heatmap-data case (heatmap is not consulted for index 0).
+        assert_eq!(
+            phase5_runout_checks(&d, &metrics, 1),
+            phase5_runout_checks(&d, &straight_metrics(9).1, 1),
+        );
+    }
+
+    #[test]
+    fn runout_checks_deficient_run_fires_one_issue_anchored_at_its_first_point() {
+        let (d, metrics) = straight_metrics(12);
+        let issues = phase5_runout_checks(&d, &metrics, 3);
+        // Exactly one maximal run near the far wall, anchored at its first
+        // (most-upstream) deficient point.
+        assert_eq!(
+            issues.len(),
+            1,
+            "expected exactly one maximal run, got {issues:?}"
+        );
+        let Issue::NoBraking { at } = issues[0] else {
+            panic!("expected NoBraking, got {:?}", issues[0]);
+        };
+        // Non-vacuity: the anchor is genuinely inside the path, and the
+        // deficit at that exact point is what fired it.
+        let idx = metrics
+            .fastest_lap
+            .iter()
+            .position(|&p| p == at)
+            .expect("anchor must be a path point");
+        assert!(
+            idx > 0,
+            "the deficient run must not be anchored at the sink itself"
+        );
     }
 }
