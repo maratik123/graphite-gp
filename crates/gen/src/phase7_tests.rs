@@ -23,16 +23,28 @@ fn empty_corridor_yields_default_centerline() {
     assert!(cl.at(0.0).is_none());
 }
 
-/// Subtask 2 (happy): the annulus fixture's 4 corner-gapped medial strips
-/// bridge into one 4-connected component.
+/// Subtask 2 (happy), rebuilt for Ф7 follow-through (design doc § Ф7
+/// follow-through, subtask 7): the real `annulus_corridor` medial axis is now
+/// one connected loop straight out of `medial_axis` (DT-ordered anchored
+/// thinning), so this test instead hand-builds the OLD 4 corner-gapped
+/// strips (the shape the previous strict-local-max `medial_axis` used to
+/// return on this corridor) to keep exercising `bridge_gaps`'s
+/// cross-component-corner-gap bridging directly.
 #[test]
 fn bridge_gaps_joins_annulus_corner_gaps_into_one_component() {
     let d = crate::testfix::annulus_corridor();
-    let dt = DistanceTransform::compute(&d);
-    let medial = medial_axis(&dt);
+    let mut medial = BTreeSet::new();
+    for x in 3..8 {
+        medial.insert(Point::new(x, 1));
+        medial.insert(Point::new(x, 9));
+    }
+    for y in 3..8 {
+        medial.insert(Point::new(1, y));
+        medial.insert(Point::new(9, y));
+    }
     assert!(
         components(&medial).len() > 1,
-        "the annulus's medial axis starts as >1 disjoint strip"
+        "the hand-built 4-strip set starts as >1 disjoint strip"
     );
 
     let bridged = bridge_gaps(&d, medial).expect("annulus corner gaps are bridgeable");

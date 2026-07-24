@@ -35,10 +35,10 @@ pub(crate) fn corridor(
 }
 
 /// An 11×11 filled square minus a centred 5×5 hole (`x, y ∈ 3..8`) — the
-/// odd-thickness annulus shape whose medial axis is 4 disjoint corner-gapped
-/// strips (`gp_core::geom::distance` tests this shape's exact medial set).
-/// Ф7's `bridge_gaps`/AC7 fixtures reuse this shape to exercise real
-/// diagonal-corner bridging.
+/// odd-thickness annulus shape whose medial axis is one connected 32-cell
+/// thin loop under DT-ordered anchored thinning (`gp_core::geom::distance`
+/// tests this shape's exact medial set). Ф7's AC7 fixtures reuse this shape
+/// to exercise a real, already-connected corridor loop.
 pub(crate) fn annulus_corridor() -> Corridor {
     let mut d = Corridor::filled(Point::new(0, 0), 11, 11);
     for y in 3..8 {

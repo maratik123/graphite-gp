@@ -106,8 +106,9 @@ fn narrow_at(d: &Corridor, dt: &DistanceTransform, p: Point, n: u32) -> Option<I
 }
 
 /// The `Narrow` issues over **all** `D` cells (AC3) — deliberately not
-/// restricted to `medial_axis`'s ridge, since a neck is a DT valley a
-/// local-maximum ridge would miss (design doc Risks, Issue #1).
+/// restricted to `medial_axis`'s skeleton: this scan covers every `D` cell
+/// independently of Ф7's skeleton, regardless of which cells `medial_axis`
+/// itself returns (design doc Risks, Issue #1).
 ///
 /// Mechanically moved from `phase4.rs` at subtask 4 (§ Risks R1 backstop) —
 /// no logic change; `phase4_static_checks` calls this via

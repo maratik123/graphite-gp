@@ -1,19 +1,20 @@
 //! Ф7: render-only racing centerline producer (design doc §2 line 191:
 //! `centerline = racing_line(medial_axis(D))`).
 //!
-//! [`medial_axis`] deliberately leaves a *thin but imperfect* ridge cell set:
-//! even-width 2-cell bands unthinned, a diagonal gap at each rectilinear
-//! corner, and spur branches on infield-finger / hairpin tracks (its own
-//! rustdoc names these as `racing_line`'s job). [`racing_line`] turns that set
-//! into one closed, arc-length-parameterised, `race_dir`-oriented loop:
-//! bridge cross-component gaps (a minimal 4-connected rectilinear path) →
-//! prune degree-1 spurs → walk a straightest-continuation cycle anchored at
-//! `gate`'s forward face → orient by integer shoelace winding vs `race_dir`
-//! → resample by arc length → wraparound unit tangents. Every failure path
-//! (empty medial axis, an unbridgeable gap, an empty post-prune core, or a
-//! walk that cannot close) returns [`Centerline::default()`] — render-only,
-//! `Centerline::at` already degrades gracefully on an empty centerline; this
-//! producer never panics.
+//! [`medial_axis`] now arrives connected and thin (DT-ordered anchored
+//! thinning, `ai-docs/plans/2026-07-24-gp-gen-generate-pipeline.design.md`
+//! § A1) — for a corridor with exactly one bounded hole it is already one
+//! 4-connected loop, no bridging needed. [`racing_line`] still runs the same
+//! pipeline for the residual cases (a genuinely disconnected medial set, or
+//! spur branches on infield-finger / hairpin tracks): bridge cross-component
+//! gaps only when the medial set is disconnected (a minimal 4-connected
+//! rectilinear path) → prune degree-1 spurs → walk a straightest-continuation
+//! cycle anchored at `gate`'s forward face → orient by integer shoelace
+//! winding vs `race_dir` → resample by arc length → wraparound unit tangents.
+//! Every failure path (empty medial axis, an unbridgeable gap, an empty
+//! post-prune core, or a walk that cannot close) returns
+//! [`Centerline::default()`] — render-only, `Centerline::at` already degrades
+//! gracefully on an empty centerline; this producer never panics.
 
 use std::collections::BTreeSet;
 
@@ -22,9 +23,13 @@ use gp_core::track::{Centerline, CenterlineSample, RaceDir, TimingGate};
 
 /// Maximum Manhattan gap (in cells) [`bridge_gaps`] will bridge between two
 /// cross-component medial-axis cells; a wider minimal gap abandons bridging
-/// (fallback to [`Centerline::default()`]). The annulus fixture's nearest
-/// cross-strip corner pair (e.g. `(3, 1)` to `(1, 3)`) is Manhattan `4`; this
-/// is that value plus a small margin.
+/// (fallback to [`Centerline::default()`]). Sized against the hand-built
+/// 4-strip unit-test fixture (`bridge_gaps_joins_annulus_corner_gaps_into_one_component`)
+/// — its nearest cross-strip corner pair (e.g. `(3, 1)` to `(1, 3)`) is
+/// Manhattan `4`; this is that value plus a small margin. (The real
+/// `medial_axis` of that annulus corridor is no longer 4 disjoint strips —
+/// see [`medial_axis`]'s own rustdoc — so this constant now guards only the
+/// residual genuinely-disconnected case, not the common one.)
 const MAX_BRIDGE_GAP: i32 = 6;
 
 /// The Manhattan distance between `a` and `b`, widened to avoid any overflow
@@ -498,19 +503,28 @@ fn resample(order: &[Point]) -> Option<Centerline> {
 /// Produces the render-only racing centerline for corridor `d` (design doc §2
 /// line 191).
 ///
-/// Computes the distance transform + medial axis internally, trims and
-/// orders the result into a single closed loop anchored at `gate`'s forward
-/// face and oriented along `race_dir`, then resamples it by arc length.
-/// Never panics: every failure path (empty medial axis and — once wired —
-/// every later-stage fallback) returns [`Centerline::default()`], which
-/// degrades gracefully under [`Centerline::at`].
+/// Computes the distance transform + medial axis internally, bridges the
+/// medial set only when it is genuinely disconnected (`components(&medial)`
+/// has more than one component — the common case, a corridor with exactly
+/// one bounded hole, is already one connected loop out of `medial_axis`),
+/// trims and orders the result into a single closed loop anchored at `gate`'s
+/// forward face and oriented along `race_dir`, then resamples it by arc
+/// length. Never panics: every failure path (empty medial axis, an
+/// unbridgeable gap, an empty post-prune core, or a walk that cannot close)
+/// returns [`Centerline::default()`], which degrades gracefully under
+/// [`Centerline::at`].
 pub fn racing_line(d: &Corridor, gate: &TimingGate, race_dir: RaceDir) -> Centerline {
     let dt = DistanceTransform::compute(d);
     let medial = medial_axis(&dt);
     if medial.is_empty() {
         return Centerline::default();
     }
-    let Some(bridged) = bridge_gaps(d, medial) else {
+    let bridged = if components(&medial).len() > 1 {
+        bridge_gaps(d, medial)
+    } else {
+        Some(medial)
+    };
+    let Some(bridged) = bridged else {
         return Centerline::default();
     };
     let Some(core) = prune_spurs(&bridged) else {
