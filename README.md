@@ -92,8 +92,13 @@ generic multi-seed, barrier-aware 4-connected BFS (`barrier_distance_field` in
 edges as impassable barriers so `s` grows the long way around the loop and never
 folds at the antipode; the sole discontinuity is the intended `L→0` reset across
 the gate. It ships as an independently-tested `gp-core` unit since `generate()`
-is still a stub. The remaining pipeline is the Ф6 repair *loop* and the Ф7 output
-assembly that wires these phases into `generate()`. Block 2 (`gp-render`) is
+is still a stub. **Ф7's render-only racing centerline** has landed as well (#33):
+`racing_line(d, gate, race_dir) -> Centerline` in `gp-gen` `phase7.rs` trims the
+medial axis to one closed loop and arc-length-resamples it into
+`core::track::Centerline` for the renderer's ideal line — *render-only*, guarded
+by a source-scan test so no `gp-ai` symbol depends on it (the AI frame comes from
+`∇s`, not this curve). The remaining pipeline is the Ф6 repair *loop* and the Ф7
+output assembly that wires these phases into `generate()`. Block 2 (`gp-render`) is
 **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
