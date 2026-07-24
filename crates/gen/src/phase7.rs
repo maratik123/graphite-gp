@@ -142,6 +142,114 @@ fn prune_spurs(cells: &BTreeSet<Point>) -> Option<BTreeSet<Point>> {
     if cur.is_empty() { None } else { Some(cur) }
 }
 
+/// The `core` cell nearest (Manhattan) to the centroid of `gate`'s forward
+/// face, tie-broken by minimal `Point` (design doc § "The loop-trim /
+/// resample algorithm", step 4). `None` if either `core` or the forward face
+/// is empty.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "face.len() is a small, grid-realistic cell count, exactly \
+              representable in f64"
+)]
+fn anchor(core: &BTreeSet<Point>, gate: &TimingGate) -> Option<Point> {
+    let face: Vec<Point> = gate.forward_face().collect();
+    if face.is_empty() || core.is_empty() {
+        return None;
+    }
+    let n = face.len() as f64;
+    let (sx, sy) = face.iter().fold((0.0f64, 0.0f64), |(sx, sy), p| {
+        (sx + f64::from(p.x), sy + f64::from(p.y))
+    });
+    let (cx, cy) = (sx / n, sy / n);
+    let dist_to_centroid = |p: Point| (f64::from(p.x) - cx).abs() + (f64::from(p.y) - cy).abs();
+
+    let mut ranked: Vec<(f64, Point)> = core.iter().map(|&p| (dist_to_centroid(p), p)).collect();
+    ranked.sort_by(|a, b| {
+        a.0.partial_cmp(&b.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.1.cmp(&b.1))
+    });
+    ranked.into_iter().next().map(|(_, p)| p)
+}
+
+/// The `(dx, dy)` step from `from` to a 4-connected neighbor `to` — bounded
+/// to `{-1, 0, 1}` per axis in every caller here, since `to` is always drawn
+/// from `from.neighbors4()`.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "to is always one of from.neighbors4() in every call site below, \
+              so each axis delta is bounded to {-1, 0, 1} and cannot overflow"
+)]
+const fn step_delta(from: Point, to: Point) -> (i32, i32) {
+    (to.x - from.x, to.y - from.y)
+}
+
+/// The straightest-continuation priority rank of step direction `dir`
+/// relative to `heading` (design doc step 4): `0` = straight ahead, `1` = a
+/// turn, `2` = a U-turn, and `3` when there is no established `heading` yet
+/// (every direction ties, so only the `Point`-order tie-break in
+/// [`walk_cycle`] discriminates).
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "heading and dir are always {-1, 0, 1}-per-axis unit step deltas \
+              (see step_delta), so the dot product is bounded to {-1, 0, 1} \
+              and cannot overflow"
+)]
+const fn turn_rank(heading: Option<(i32, i32)>, dir: (i32, i32)) -> u8 {
+    let Some(h) = heading else { return 3 };
+    match h.0 * dir.0 + h.1 * dir.1 {
+        1 => 0,
+        0 => 1,
+        _ => 2,
+    }
+}
+
+/// Walks `core` into an ordered, closed cycle starting at [`anchor`] (design
+/// doc § "The loop-trim / resample algorithm", step 4).
+///
+/// At each step, picks the best straightest-continuation candidate among
+/// `core` neighbors that are either unvisited or (once at least 4 cells have
+/// been walked, the minimum possible 4-connected grid cycle length) the
+/// `start` cell itself — closing the loop. Ties are broken by minimal
+/// `Point`. Returns `None` (fallback) if `core`/the forward face is empty, if
+/// a step dead-ends (no viable candidate), or if the walk exhausts `core`
+/// without ever closing.
+fn walk_cycle(core: &BTreeSet<Point>, gate: &TimingGate) -> Option<Vec<Point>> {
+    let start = anchor(core, gate)?;
+    let mut order = vec![start];
+    let mut visited = BTreeSet::from([start]);
+    let mut heading: Option<(i32, i32)> = None;
+
+    loop {
+        let current = *order.last().expect("order is never empty");
+        let mut candidates: Vec<Point> = current
+            .neighbors4()
+            .into_iter()
+            .filter(|n| core.contains(n))
+            .filter(|&n| !visited.contains(&n) || (n == start && order.len() >= 4))
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        candidates.sort_by_key(|&cand| {
+            let dir = step_delta(current, cand);
+            (turn_rank(heading, dir), cand)
+        });
+        let next = candidates[0];
+        if next == start {
+            break;
+        }
+        heading = Some(step_delta(current, next));
+        visited.insert(next);
+        order.push(next);
+        if order.len() > core.len() {
+            return None; // safety: cannot exceed core's own size without closing
+        }
+    }
+
+    if order.len() < 4 { None } else { Some(order) }
+}
+
 /// Produces the render-only racing centerline for corridor `d` (design doc §2
 /// line 191).
 ///
@@ -151,7 +259,7 @@ fn prune_spurs(cells: &BTreeSet<Point>) -> Option<BTreeSet<Point>> {
 /// Never panics: every failure path (empty medial axis and — once wired —
 /// every later-stage fallback) returns [`Centerline::default()`], which
 /// degrades gracefully under [`Centerline::at`].
-pub fn racing_line(d: &Corridor, _gate: &TimingGate, _race_dir: RaceDir) -> Centerline {
+pub fn racing_line(d: &Corridor, gate: &TimingGate, _race_dir: RaceDir) -> Centerline {
     let dt = DistanceTransform::compute(d);
     let medial = medial_axis(&dt);
     if medial.is_empty() {
@@ -160,10 +268,13 @@ pub fn racing_line(d: &Corridor, _gate: &TimingGate, _race_dir: RaceDir) -> Cent
     let Some(bridged) = bridge_gaps(d, medial) else {
         return Centerline::default();
     };
-    let Some(_core) = prune_spurs(&bridged) else {
+    let Some(core) = prune_spurs(&bridged) else {
         return Centerline::default();
     };
-    // Subtasks 4-5 wire the rest of the pipeline; until then a pruned core
+    let Some(_cycle) = walk_cycle(&core, gate) else {
+        return Centerline::default();
+    };
+    // Subtask 5 wires the rest of the pipeline; until then an ordered cycle
     // also falls back (no producer overclaims yet).
     Centerline::default()
 }
@@ -290,5 +401,84 @@ mod tests {
     fn prune_spurs_rejects_a_pure_tree() {
         let tree = BTreeSet::from([Point::new(0, 0), Point::new(1, 0), Point::new(2, 0)]);
         assert!(prune_spurs(&tree).is_none());
+    }
+
+    /// A gate whose `behind`/`forward_face` anchor sits just outside
+    /// `small_ring`'s bottom edge, near `(1, 0)`/`(2, 0)`.
+    fn small_ring_gate() -> TimingGate {
+        TimingGate {
+            behind: vec![Point::new(1, -1), Point::new(2, -1)],
+            forward: Side::North,
+        }
+    }
+
+    /// Subtask 4 (happy): the ring core walks into an ordered cycle that
+    /// covers every ring cell and closes back to its own start.
+    #[test]
+    fn walk_cycle_covers_and_closes_a_clean_ring() {
+        let ring = small_ring();
+        let order = walk_cycle(&ring, &small_ring_gate()).expect("a clean ring must close");
+        assert_eq!(order.len(), ring.len());
+        assert_eq!(order.iter().copied().collect::<BTreeSet<_>>(), ring);
+        let start = order[0];
+        assert!(start.neighbors4().contains(order.last().unwrap()));
+    }
+
+    /// Subtask 4 (thinning): a 2-cell-wide band traces a single strand — the
+    /// walk never visits both rails of the band.
+    #[test]
+    fn walk_cycle_thins_a_two_cell_band_to_one_strand() {
+        // A closed loop with an even-width (2-cell) top/bottom band: rows
+        // y=0 and y=3 are single-wide; the "band" is the two parallel side
+        // columns x=0..=1 (west) and x=4..=5 (east), each 2 cells wide across
+        // rows y=1..=2 — mimicking medial_axis_even_width_band_is_two_cell's
+        // documented 2-cell ridge.
+        let mut band = BTreeSet::new();
+        for x in 0..6 {
+            band.insert(Point::new(x, 0));
+            band.insert(Point::new(x, 3));
+        }
+        for y in 1..3 {
+            for x in [0, 1, 4, 5] {
+                band.insert(Point::new(x, y));
+            }
+        }
+        let gate = TimingGate {
+            behind: vec![Point::new(2, -1)],
+            forward: Side::North,
+        };
+        let order = walk_cycle(&band, &gate).expect("a thinnable band must close");
+        // Every visited cell distinct (a simple cycle, not a doubled-back walk).
+        assert_eq!(
+            order.len(),
+            order.iter().collect::<BTreeSet<_>>().len(),
+            "walk must not revisit a cell"
+        );
+        // The walk never uses both rails of a side band in the same row: for
+        // each side, at most one of the two columns appears per row.
+        for y in 1..3 {
+            let west = [Point::new(0, y), Point::new(1, y)]
+                .iter()
+                .filter(|p| order.contains(p))
+                .count();
+            let east = [Point::new(4, y), Point::new(5, y)]
+                .iter()
+                .filter(|p| order.contains(p))
+                .count();
+            assert!(west <= 1, "row {y} west rail must be single-strand");
+            assert!(east <= 1, "row {y} east rail must be single-strand");
+        }
+    }
+
+    /// Subtask 4 (edge): a broken (open) core — a straight line, not a ring —
+    /// dead-ends and never returns to `start` (fallback signal).
+    #[test]
+    fn walk_cycle_rejects_an_open_core() {
+        let open: BTreeSet<Point> = (0..5).map(|x| Point::new(x, 0)).collect();
+        let gate = TimingGate {
+            behind: vec![Point::new(2, -1)],
+            forward: Side::North,
+        };
+        assert!(walk_cycle(&open, &gate).is_none());
     }
 }
