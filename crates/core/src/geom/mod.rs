@@ -275,6 +275,17 @@ impl Corridor {
         }
     }
 
+    /// The bounding box `[origin, origin + (width, height))` this corridor is
+    /// backed by.
+    ///
+    /// Lets a caller outside `geom` (e.g. `track::SField::from_gate_bfs`, which
+    /// cannot see `Corridor`'s private `rect` field) mirror the corridor's box
+    /// without hand-rebuilding it from `origin()`/`width()`/`height()`.
+    #[inline]
+    pub const fn rect(&self) -> Rect {
+        self.rect
+    }
+
     /// The bounding-box origin — its minimum-coordinate corner.
     #[inline]
     pub const fn origin(&self) -> Point {
@@ -435,6 +446,20 @@ mod tests {
         let off = Corridor::filled(Point::new(5, 5), 2, 2);
         assert!(off.contains(Point::new(6, 6)));
         assert!(!off.contains(Point::new(0, 0)));
+    }
+
+    #[test]
+    fn corridor_rect_mirrors_bounding_box() {
+        // An off-origin corridor's rect() agrees with its own membership box.
+        let d = Corridor::new(Point::new(2, 3), 4, 5);
+        let rect = d.rect();
+        assert_eq!(rect.origin, Point::new(2, 3));
+        assert_eq!(rect.size, Size::new(4, 5));
+        assert_eq!(rect.index(Point::new(2, 3)), d.index(Point::new(2, 3)));
+        assert_eq!(
+            rect.points().collect::<Vec<_>>(),
+            d.box_points().collect::<Vec<_>>()
+        );
     }
 
     #[test]
