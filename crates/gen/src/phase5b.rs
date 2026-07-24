@@ -1,7 +1,10 @@
 //! Ф5b — full Vmax passability oracle (iterative deepening) + speed metrics +
-//! `break_points` (design doc §2/§3, spec
+//! `stall_walls` (design doc §2/§3, spec
 //! `ai-docs/plans/2026-07-23-gp-gen-phase5b-full-oracle.spec.md`,
-//! design `ai-docs/plans/2026-07-23-gp-gen-phase5b-full-oracle.design.md`).
+//! design `ai-docs/plans/2026-07-23-gp-gen-phase5b-full-oracle.design.md`;
+//! amended by `ai-docs/plans/2026-07-24-gp-gen-frontier-gap-mapping.design.md`
+//! § Approach (1) — the stall diagnostic now *localizes* the stall, see
+//! [`OracleResult::NotLappable`]).
 //!
 //! Composes the Ф5a substrate ([`crate::forward_reachable`] /
 //! [`crate::backward_reachable`] / `within_v_ceil`, `phase5.rs`) into
@@ -12,7 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use gp_core::geom::{Corridor, Point};
+use gp_core::geom::{Corridor, Point, Side, Wall, walls_from_boundary};
 use gp_core::sim::{Action, CarState, LapCounter, legal_move, step};
 use gp_core::track::{RaceDir, StartFinish, StartGrid, TrackMetrics};
 use strum::IntoEnumIterator;
@@ -20,36 +23,145 @@ use strum::IntoEnumIterator;
 use crate::phase5::within_v_ceil;
 
 /// The result of running `phase5_full_oracle` (subtask 6; design §
-/// Approach (3)).
+/// Approach (3); payload amended by the `[N3]` frontier-gap-mapping design §
+/// Approach (1)).
 ///
 /// `Lappable` populates the existing [`TrackMetrics`] fields (the exported
-/// artifact contract, `gp-core::track`); `NotLappable` carries the raw
-/// reachability-stall diagnostic `break_points` — a gen-internal input to
-/// Ф6's `map_frontier_gap_to_edge` (out of scope here), not part of the
-/// exported contract type.
+/// artifact contract, `gp-core::track`); `NotLappable` carries the
+/// stall-localizing diagnostic `stall_walls` — a gen-internal input to Ф6's
+/// `map_frontier_gap_to_edge` (`phase6.rs`), not part of the exported
+/// contract type.
+///
+/// **Precondition:** `d` (the corridor `D`) is non-empty. `D` is the
+/// rasterized corridor from Ф2 of the generator pipeline; an empty `D` never
+/// reaches Ф5b in practice. On a degenerate empty `D`, `stall_walls` is
+/// empty — a documented out-of-precondition outcome, not an AC2 violation
+/// (`ai-docs/plans/2026-07-24-gp-gen-frontier-gap-mapping.design.md` §
+/// Approach (1) → *edge case*).
 #[derive(Clone, Debug)]
 pub enum OracleResult {
     /// A closed lap exists; carries the populated speed metrics.
     Lappable(TrackMetrics),
-    /// No closed lap exists in `live`; carries the frontier-gap diagnostic
-    /// (design `[N3]`, § Approach (3)) — the **goal-aware** outer 4-frontier
-    /// of the phase-0 reachable region `P0` (post-race-start, pre-lap-close
-    /// cells, emitted by `fastest_lap_through_live`, subtask 5) within
-    /// `proj(R)`. Its
-    /// non-emptiness (AC3) is guaranteed **unconditionally** by the driver's
-    /// seed-cell fallback, which fires whenever this frontier is empty — both
-    /// when `P0 == ∅` (no forward crossing reachable at all) and when `P0 ==
-    /// proj(R)` (the phase-0 region already covers the whole drivable
-    /// component, leaving no outer frontier); `grid.positions` is non-empty
-    /// by generator contract, so the fallback is always non-empty. In the
-    /// normal (non-degenerate) `NotLappable` case (`∅ ⊊ P0 ⊊ proj(R)`) the
-    /// P0-frontier itself is the meaningful diagnostic, localizing the
-    /// reachability stall for Ф6's `map_frontier_gap_to_edge`.
+    /// No closed lap exists in `live`; carries the stall-localizing
+    /// diagnostic (design `[N3]`) — every boundary [`Wall`] of the phase-0
+    /// reachable region `P0` (post-race-start, pre-lap-close cells, emitted
+    /// by `fastest_lap_through_live`, subtask 5): for every cell `c ∈ P0`
+    /// and every [`Side`] whose neighbor is not in `D`, one `Wall { cell: c,
+    /// side }` (`p0_boundary_walls`). Each such wall's off-`D` neighbor is
+    /// exactly the cell an add-edit would make drivable, so this
+    /// **localizes** the stall (unlike the retired `break_points`, which
+    /// could never name a non-drivable cell).
+    ///
+    /// Non-emptiness (AC2) is guaranteed by a two-tier fallback: tier 1 is
+    /// `p0_boundary_walls(d, &p0)`; when that is empty (`P0 == ∅`, or every
+    /// `P0` cell is `D`-interior), tier 2 is [`walls_from_boundary`] over
+    /// the whole corridor, re-sorted with the same `wall_sort_key` —
+    /// non-empty for any non-empty `D` (the topmost drivable row's `North`
+    /// side is always a boundary wall). See the module/type-level
+    /// precondition for the degenerate empty-`D` case, where both tiers are
+    /// empty.
     NotLappable {
-        /// The raw reachability-stall frontier between `R` and the
-        /// lap-close goal.
-        break_points: Vec<Point>,
+        /// The stall-localizing boundary-wall diagnostic (see the variant
+        /// doc above for the two-tier derivation).
+        stall_walls: Vec<Wall>,
     },
+}
+
+/// Total order key for [`Wall`] (design § Approach (1), R3): `(Point, u8)`
+/// with side rank `East = 0, West = 1, North = 2, South = 3`. Neither
+/// [`Wall`] nor [`Side`] derives `Ord` (a `gp-core` change, out of scope —
+/// spec § Out of scope), so a bare `.sort()` on `Vec<Wall>` does not
+/// compile; this crate-local key gives `p0_boundary_walls` and
+/// `phase6`'s tie-break a total order without touching `gp-core`.
+///
+/// `const fn`: a field read plus a `match` on a `Copy` enum is
+/// const-eligible, and `missing_const_for_fn` (nursery, deny) forces it.
+pub(crate) const fn wall_sort_key(w: Wall) -> (Point, u8) {
+    let rank = match w.side {
+        Side::East => 0,
+        Side::West => 1,
+        Side::North => 2,
+        Side::South => 3,
+    };
+    (w.cell, rank)
+}
+
+/// The off-`D` neighbor a shift of `w` would make drivable, or `None` if
+/// `w.cell`'s neighbor across `w.side` is off the representable grid
+/// (design § Approach (4)).
+///
+/// Deliberately does **not** use [`Point::neighbors4`] — that method
+/// saturates on overflow, and a saturated self-neighbor would test
+/// `d.contains(cell) == true` and wrongly suppress a real boundary wall
+/// (the identical hazard [`walls_from_boundary`] documents). Uses
+/// `checked_add` instead.
+///
+/// `const fn`, forced by `missing_const_for_fn` (nursery, deny): `Side::delta`
+/// is `pub const fn`, and `i32::checked_add` / `Point::new` are const, so
+/// this is const-eligible. Uses the `let-else` form (not `?`) — `?` on
+/// `Option` is not allowed inside a `const fn` on stable (E0658), the same
+/// constraint `phase5.rs`'s `predecessor` already works around.
+pub(crate) const fn wall_neighbor(w: Wall) -> Option<Point> {
+    let (dx, dy) = w.side.delta();
+    let Some(x) = w.cell.x.checked_add(dx) else {
+        return None;
+    };
+    let Some(y) = w.cell.y.checked_add(dy) else {
+        return None;
+    };
+    Some(Point::new(x, y))
+}
+
+/// The P0 boundary-wall set — tier 1 of [`OracleResult::NotLappable`]'s
+/// stall diagnostic (design § Approach (1)): for every cell `c ∈ p0_cells`
+/// and every [`Side`] whose neighbor across it is not in `d`, one
+/// `Wall { cell: c, side }`.
+///
+/// This satisfies R1 directly: the `Wall` *is* the dual edge, and calling
+/// [`wall_neighbor`] on it yields the off-`D` neighbor an add-edit would
+/// make drivable — precisely what Ф6's `map_frontier_gap_to_edge` needs. Unlike
+/// the retired `frontier_gap` (which related `proj(R)` to `P0`, and could
+/// therefore only ever name already-drivable cells), this relates `P0` to
+/// `D` itself.
+///
+/// Sorted by [`wall_sort_key`] for deterministic output (R3).
+///
+/// **Precondition:** `d` is non-empty (see [`OracleResult::NotLappable`]'s
+/// module-level precondition note) — on a degenerate empty `d` this
+/// returns `[]` regardless of `p0_cells`, which the caller's tier-2
+/// fallback does not rescue either (design § Approach (1) → *edge case*).
+pub(crate) fn p0_boundary_walls(d: &Corridor, p0_cells: &HashSet<Point>) -> Vec<Wall> {
+    let mut walls: Vec<Wall> = Vec::new();
+    for &cell in p0_cells {
+        for side in Side::iter() {
+            let off_d =
+                wall_neighbor(Wall { cell, side }).is_none_or(|neighbor| !d.contains(neighbor));
+            if off_d {
+                walls.push(Wall { cell, side });
+            }
+        }
+    }
+    walls.sort_by_key(|&w| wall_sort_key(w));
+    walls
+}
+
+/// The `R → G → B → R ∩ B` composition (design § Approach): forward-flood
+/// from `seeds`, enumerate the lap-close goals reachable from that flood,
+/// backward-flood from those goals, and intersect. Extracted from
+/// `phase5_full_oracle`'s driver loop (subtask 3; design § Scope-delta
+/// item 1) so it has one definition shared by the driver and `phase6`'s
+/// progress metric, rather than duplicated inline at 2 production sites
+/// (plus a 3rd copy that existed only as a test-local helper).
+pub(crate) fn live_at(
+    d: &Corridor,
+    seeds: &[CarState],
+    sf: &StartFinish,
+    v_ceil: i32,
+) -> HashSet<CarState> {
+    let r = crate::forward_reachable(d, seeds, v_ceil);
+    let goals = lap_close_goals(d, sf, &r, v_ceil);
+    let b = crate::backward_reachable(d, &goals, v_ceil);
+    r.intersection(&b).copied().collect()
 }
 
 /// Whether the move `from → to` is a **forward** crossing of `sf`'s
@@ -133,42 +245,13 @@ pub(crate) fn speed_heatmap(live: &HashSet<CarState>) -> Vec<(Point, i32)> {
     out
 }
 
-/// The goal-aware reachability-stall frontier (design `[N3]`, § Approach (3),
-/// design amendment): the **outer 4-frontier of `p0_cells` within
-/// `r_cells`** — cells `c ∈ r_cells`, `c ∉ p0_cells`, with a 4-neighbor `∈
-/// p0_cells`.
-///
-/// **Pure** point-set helper — this replaces the earlier committed
-/// `frontier_gap(d, &R)` (drivable-vs-`R`), which was **provably always
-/// empty** for a real `forward_reachable` flood (design § Risks: any
-/// 4-adjacent drivable neighbor of a reached cell is itself always reachable,
-/// by construction of `legal_move`'s unit-distance supercover). The
-/// goal-aware form is instead evaluated against `proj(R)` (drivable cells any
-/// live state occupies) and `P0` (the phase-0 reachable region emitted by
-/// `fastest_lap_through_live`, subtask 5) — the phase distinction encodes
-/// the lap-close-vs-race-start awareness a plain drivability boundary cannot.
-/// Full driver wiring (`r_cells = proj(R)`, `p0_cells = P0`, plus the
-/// seed-cell fallback when this frontier is empty) lands in subtask 6.
-///
-/// Sorted by [`Point`] for deterministic output (AC6).
-pub(crate) fn frontier_gap(r_cells: &HashSet<Point>, p0_cells: &HashSet<Point>) -> Vec<Point> {
-    let mut frontier: Vec<Point> = r_cells
-        .iter()
-        .filter(|p| !p0_cells.contains(p))
-        .filter(|p| p.neighbors4().into_iter().any(|q| p0_cells.contains(&q)))
-        .copied()
-        .collect();
-    frontier.sort();
-    frontier
-}
-
 /// Confined augmented `(CarState, LapCounter)` BFS from `seeds` (start-grid
 /// positions, expanded at rest, `v = (0, 0)`) through `live`, returning the
 /// fewest-move path to the first lap-close (`raw() >= 1`) transition —
 /// `None` if no lap exists — together with the phase-0 reachable cell set
 /// `P0` (design § Approach (1)/(3)): `P0 = { s.pos() : a visited augmented
 /// state (s, φ) has φ == 0 }`, the post-race-start, pre-lap-close region
-/// `frontier_gap` consumes (subtask 6).
+/// [`p0_boundary_walls`] consumes.
 ///
 /// Reuses the identical `legal_move` / `step` / [`LapCounter::register_move`]
 /// triple `oracle_liveness_v1` (`phase5.rs`) uses (AC5) — this is a distinct
@@ -266,7 +349,7 @@ fn moves(path: &[Point]) -> i32 {
 ///
 /// Composes the Ф5a substrate ([`crate::forward_reachable`] /
 /// [`crate::backward_reachable`]) with `lap_close_goals`,
-/// `fastest_lap_through_live`, `frontier_gap`, `vnorm`, and
+/// `fastest_lap_through_live`, `p0_boundary_walls`, `vnorm`, and
 /// `speed_heatmap` — never reimplementing the flood edge or the crossing
 /// test (AC5).
 ///
@@ -302,24 +385,22 @@ pub fn phase5_full_oracle(
     let mut v_ceil: i32 = 1;
 
     loop {
-        let r = crate::forward_reachable(d, &seeds, v_ceil);
-        let goals = lap_close_goals(d, sf, &r, v_ceil);
-        let b = crate::backward_reachable(d, &goals, v_ceil);
-        let live: HashSet<CarState> = r.intersection(&b).copied().collect();
+        let live = live_at(d, &seeds, sf, v_ceil);
 
         let (fastest, p0) = fastest_lap_through_live(d, &grid.positions, sf, &live, v_ceil);
 
         let Some(fastest) = fastest else {
-            let proj_r: HashSet<Point> = r.iter().map(|s| s.pos()).collect();
-            let mut break_points = frontier_gap(&proj_r, &p0);
-            if break_points.is_empty() {
-                // Unconditional AC3 guarantor (design § Approach (3)): fires
-                // when the P0-frontier is empty, i.e. P0 == ∅ or P0 ==
-                // proj(R) -- `grid.positions` is non-empty by generator
-                // contract.
-                break_points.clone_from(&grid.positions);
+            // Two-tier fallback (design § Approach (1), R2): tier 1 is the
+            // P0 boundary-wall set; tier 2 (fires when P0 == ∅, or every P0
+            // cell is D-interior) is every boundary wall of D, non-empty for
+            // any non-empty D (the topmost drivable row's North side is
+            // always a boundary wall).
+            let mut stall_walls = p0_boundary_walls(d, &p0);
+            if stall_walls.is_empty() {
+                stall_walls = walls_from_boundary(d);
+                stall_walls.sort_by_key(|&w| wall_sort_key(w));
             }
-            return OracleResult::NotLappable { break_points };
+            return OracleResult::NotLappable { stall_walls };
         };
 
         if v_ceil == 1 {
@@ -352,8 +433,6 @@ pub fn phase5_full_oracle(
 mod tests {
     use super::*;
     use crate::testfix::*;
-    use gp_core::geom::{Orient, Side};
-    use gp_core::track::TimingGate;
 
     #[test]
     fn oracle_result_variants_are_constructible_and_clonable() {
@@ -372,13 +451,16 @@ mod tests {
         }
 
         let not_lappable = OracleResult::NotLappable {
-            break_points: vec![Point::new(1, 2)],
+            stall_walls: vec![Wall {
+                cell: Point::new(1, 2),
+                side: Side::North,
+            }],
         };
         let not_lappable2 = not_lappable.clone();
         match (not_lappable, not_lappable2) {
             (
-                OracleResult::NotLappable { break_points: a },
-                OracleResult::NotLappable { break_points: b },
+                OracleResult::NotLappable { stall_walls: a },
+                OracleResult::NotLappable { stall_walls: b },
             ) => assert_eq!(a, b),
             _ => panic!("expected both to be NotLappable"),
         }
@@ -448,7 +530,7 @@ mod tests {
         assert!(goals.is_empty());
     }
 
-    // ---- vnorm / speed_heatmap / frontier_gap (subtask 4) ----
+    // ---- vnorm / speed_heatmap / p0_boundary_walls (subtask 4) ----
 
     #[test]
     fn vnorm_is_the_l_infinity_norm() {
@@ -477,66 +559,133 @@ mod tests {
     }
 
     #[test]
-    fn frontier_gap_lists_r_cells_adjacent_to_a_proper_p0_but_not_in_p0() {
-        // Hand-built, connected `r`: a 4-cell straight line (0,0)-(3,0).
-        // `p0` is the proper subset `{(1,0)}` in its interior.
-        let r = HashSet::from([
-            Point::new(0, 0),
-            Point::new(1, 0),
-            Point::new(2, 0),
-            Point::new(3, 0),
-        ]);
+    fn p0_boundary_walls_lists_one_wall_per_off_d_side() {
+        // Hand-built D: a 3-cell straight line (0,0)-(2,0). p0 is the
+        // singleton {(1,0)} in its interior -- its North/South sides are
+        // off the box entirely (off D), and its East/West neighbors (2,0)
+        // and (0,0) are themselves drivable (in D), so only North/South
+        // walls are emitted.
+        let mut d = Corridor::new(Point::new(0, 0), 3, 1);
+        for x in 0..3 {
+            d.set(Point::new(x, 0), true);
+        }
         let p0 = HashSet::from([Point::new(1, 0)]);
 
-        let frontier = frontier_gap(&r, &p0);
+        let walls = p0_boundary_walls(&d, &p0);
 
-        // (0,0) and (2,0) are 4-adjacent to (1,0), in r, not in p0.
-        assert!(frontier.contains(&Point::new(0, 0)));
-        assert!(frontier.contains(&Point::new(2, 0)));
-        // (3,0) is in r but not 4-adjacent to (1,0) -- excluded.
-        assert!(!frontier.contains(&Point::new(3, 0)));
-        // p0's own cell is never in the frontier.
-        assert!(!frontier.contains(&Point::new(1, 0)));
-        // Sorted ascending by Point.
-        let mut sorted = frontier.clone();
-        sorted.sort();
-        assert_eq!(frontier, sorted);
+        assert!(walls.contains(&Wall {
+            cell: Point::new(1, 0),
+            side: Side::North,
+        }));
+        assert!(walls.contains(&Wall {
+            cell: Point::new(1, 0),
+            side: Side::South,
+        }));
+        // East/West neighbors are drivable -- no wall on those sides.
+        assert!(!walls.contains(&Wall {
+            cell: Point::new(1, 0),
+            side: Side::East,
+        }));
+        assert!(!walls.contains(&Wall {
+            cell: Point::new(1, 0),
+            side: Side::West,
+        }));
+        assert_eq!(walls.len(), 2);
+        // Sorted by wall_sort_key.
+        let mut sorted = walls.clone();
+        sorted.sort_by_key(|&w| wall_sort_key(w));
+        assert_eq!(walls, sorted);
     }
 
     #[test]
-    fn frontier_gap_is_empty_when_p0_equals_r() {
-        let r = HashSet::from([Point::new(0, 0), Point::new(1, 0)]);
-        let p0 = r.clone();
+    fn p0_boundary_walls_is_empty_when_every_p0_cell_is_interior() {
+        // A filled 3x3 D; p0 = {(1,1)}, the center -- every neighbor is
+        // drivable, so no boundary wall is anchored there.
+        let d = Corridor::filled(Point::new(0, 0), 3, 3);
+        let p0 = HashSet::from([Point::new(1, 1)]);
 
-        assert!(frontier_gap(&r, &p0).is_empty());
+        assert!(p0_boundary_walls(&d, &p0).is_empty());
     }
 
     #[test]
-    fn frontier_gap_is_empty_when_p0_is_empty() {
-        // The driver (subtask 6), not this pure helper, supplies the
-        // seed-cell fallback for this degenerate case.
-        let r = HashSet::from([Point::new(0, 0), Point::new(1, 0)]);
+    fn p0_boundary_walls_is_empty_when_p0_is_empty() {
+        // The driver, not this pure helper, supplies the tier-2 fallback
+        // for this degenerate case.
+        let d = Corridor::filled(Point::new(0, 0), 3, 3);
         let p0: HashSet<Point> = HashSet::new();
 
-        assert!(frontier_gap(&r, &p0).is_empty());
+        assert!(p0_boundary_walls(&d, &p0).is_empty());
+    }
+
+    #[test]
+    fn wall_neighbor_returns_none_when_the_step_overflows_i32() {
+        // The `checked_add` guard the `const fn` + `let-else` shape exists
+        // for: at the coordinate extremes the neighbor does not exist, and
+        // must be reported as absent rather than wrapping into a bogus
+        // in-range `Point` (the hazard `walls_from_boundary` documents).
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(i32::MAX, 0),
+                side: Side::East,
+            }),
+            None
+        );
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(i32::MIN, 0),
+                side: Side::West,
+            }),
+            None
+        );
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(0, i32::MAX),
+                side: Side::North,
+            }),
+            None
+        );
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(0, i32::MIN),
+                side: Side::South,
+            }),
+            None
+        );
+        // Non-overflowing steps still resolve.
+        assert_eq!(
+            wall_neighbor(Wall {
+                cell: Point::new(i32::MAX - 1, 0),
+                side: Side::East,
+            }),
+            Some(Point::new(i32::MAX, 0))
+        );
+    }
+
+    #[test]
+    fn p0_boundary_walls_emits_a_wall_when_the_neighbor_overflows() {
+        // Exercises `is_none_or`'s `None` arm: a `p0` cell at the eastern
+        // `i32` extreme has no East neighbor at all, which counts as
+        // "not in `d`" and must still emit the wall — the alternative
+        // (silently dropping it) would hide a genuine boundary from Ф6.
+        let d = Corridor::filled(Point::new(0, 0), 3, 3);
+        let extreme = Point::new(i32::MAX, 0);
+        let p0 = HashSet::from([extreme]);
+
+        let walls = p0_boundary_walls(&d, &p0);
+
+        let east = Wall {
+            cell: extreme,
+            side: Side::East,
+        };
+        assert!(
+            walls.contains(&east),
+            "the overflowing East side must still be emitted, got {walls:?}"
+        );
+        // Pins *why* it was emitted: via the `None` arm, not a `!contains`.
+        assert_eq!(wall_neighbor(east), None);
     }
 
     // ---- fastest_lap_through_live (subtask 5) ----
-
-    /// Computes `live = R ∩ B` the way the driver (subtask 6) will, for a
-    /// test fixture: `forward_reachable` from `seeds`, `lap_close_goals`
-    /// over `R`, `backward_reachable` from those goals, intersected with `R`.
-    fn live_for(
-        d: &Corridor,
-        sf: &StartFinish,
-        seeds: &[CarState],
-        v_ceil: i32,
-    ) -> HashSet<CarState> {
-        let r = crate::forward_reachable(d, seeds, v_ceil);
-        let goals = lap_close_goals(d, sf, &r, v_ceil);
-        let b = crate::backward_reachable(d, &goals, v_ceil);
-        r.intersection(&b).copied().collect()
-    }
 
     #[test]
     fn fastest_lap_through_live_finds_the_fewest_move_lap_on_a_valid_ring() {
@@ -548,7 +697,7 @@ mod tests {
             .iter()
             .map(|&p| car(p.x, p.y, 0, 0))
             .collect();
-        let live = live_for(&d, &sf, &seed_states, 1);
+        let live = live_at(&d, &seed_states, &sf, 1);
 
         let (path, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
 
@@ -577,7 +726,7 @@ mod tests {
             .iter()
             .map(|&p| car(p.x, p.y, 0, 0))
             .collect();
-        let live = live_for(&d, &sf, &seed_states, 1);
+        let live = live_at(&d, &seed_states, &sf, 1);
 
         let (path, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
 
@@ -600,7 +749,7 @@ mod tests {
             .iter()
             .map(|&p| car(p.x, p.y, 0, 0))
             .collect();
-        let live = live_for(&d, &sf, &seed_states, 1);
+        let live = live_at(&d, &seed_states, &sf, 1);
 
         let (path, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
 
@@ -611,30 +760,6 @@ mod tests {
     }
 
     // ---- phase5_full_oracle (subtask 6: AC1, AC2, AC6) ----
-
-    /// A straight, 1-wide, 8-cell track (`(0,0)..(7,0)`) with an S/F gate at
-    /// its very start: `crosses_sf_forward` fires exactly once, on the
-    /// track's first move (`(0,0) -> (1,0)`), and never again (no return
-    /// path on a straight track). Building speed by accelerating every turn
-    /// from rest reaches a state with no legal successor at all (every
-    /// action's minimum resulting `x` exceeds the track's last index) --
-    /// a genuine provable crash: reachable (`R`), but from which no forward
-    /// crossing (hence no `G`) is ever reachable, so absent from `B`.
-    fn crash_pocket_fixture() -> (Corridor, StartFinish, StartGrid) {
-        let d = Corridor::filled(Point::new(0, 0), 8, 1);
-        let sf = StartFinish {
-            chord: vec![Point::new(0, 0)],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![Point::new(0, 0)],
-                forward: Side::East,
-            },
-        };
-        let grid = StartGrid {
-            positions: vec![Point::new(0, 0)],
-        };
-        (d, sf, grid)
-    }
 
     #[test]
     fn phase5_full_oracle_ac1_halts_on_a_lappable_ring_and_reports_vmax() {
@@ -718,7 +843,7 @@ mod tests {
     // ---- Cross-cutting AC tests (subtask 7: AC3, AC4, AC5, AC7) ----
 
     #[test]
-    fn ac3_broken_ring_is_not_lappable_with_non_empty_break_points() {
+    fn ac1_broken_ring_diagnostic_implicates_the_severed_region() {
         let mut d = ring_corridor();
         d.set(Point::new(4, 2), false); // Ф5a's broken-ring fixture.
         let sf = ring_sf();
@@ -726,15 +851,123 @@ mod tests {
 
         let result = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
 
-        let OracleResult::NotLappable { break_points } = result else {
+        let OracleResult::NotLappable { stall_walls } = result else {
             panic!("expected a broken ring to return NotLappable, got {result:?}");
         };
-        assert!(!break_points.is_empty());
-        // Non-vacuous per design § Approach (3)'s AC3 derivation: the
-        // behind-gate cell (2, 0) is 4-adjacent to phase-0 (3, 0) but itself
-        // reachable only at phase -1 (non-loopable topology), hence a member
-        // of proj(R) \ P0 -- the P0-frontier diagnostic.
-        assert!(break_points.contains(&Point::new(2, 0)));
+        assert!(!stall_walls.is_empty());
+        // R1: the diagnostic must implicate the neighborhood of the severed
+        // cell (4, 2) -- some wall's off-D neighbor names it directly.
+        assert!(
+            stall_walls
+                .iter()
+                .filter_map(|&w| wall_neighbor(w))
+                .any(|n| n == Point::new(4, 2)),
+            "expected some stall wall's off-D neighbor to be the severed cell (4, 2), \
+             got {stall_walls:?}"
+        );
+        // The retired expectation is not merely relaxed, it is excluded:
+        // (2, 0) is the behind-gate cell, outside P0, so no wall is anchored
+        // there at all.
+        assert!(
+            !stall_walls.iter().any(|w| w.cell == Point::new(2, 0)),
+            "the behind-gate cell (2, 0) must not anchor any stall wall"
+        );
+    }
+
+    #[test]
+    fn ac2_diagnostic_is_non_empty_on_the_broken_ring() {
+        // Tier 1: the P0 boundary-wall set is non-empty on the broken ring
+        // (the normal, non-degenerate NotLappable case).
+        let mut d = ring_corridor();
+        d.set(Point::new(4, 2), false);
+        let sf = ring_sf();
+        let grid = ring_grid();
+
+        let result = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
+        let OracleResult::NotLappable { stall_walls } = result else {
+            panic!("expected a broken ring to return NotLappable, got {result:?}");
+        };
+        assert!(!stall_walls.is_empty());
+    }
+
+    #[test]
+    fn ac2_diagnostic_falls_back_to_boundary_walls_when_p0_is_empty() {
+        // Tier 2: no_crossing_corridor has no forward crossing reachable at
+        // all, so P0 == ∅ and tier 1 (p0_boundary_walls) is empty -- the
+        // driver must fall back to walls_from_boundary.
+        let (d, sf, grid) = no_crossing_corridor();
+
+        // Non-vacuous about *which* tier fired: independently confirm P0 is
+        // actually empty on this fixture.
+        let seed_states: Vec<CarState> = grid
+            .positions
+            .iter()
+            .map(|&p| car(p.x, p.y, 0, 0))
+            .collect();
+        let live = live_at(&d, &seed_states, &sf, 1);
+        let (_, p0) = fastest_lap_through_live(&d, &grid.positions, &sf, &live, 1);
+        assert!(
+            p0.is_empty(),
+            "fixture must have an empty P0 for this test to be meaningful"
+        );
+
+        let result = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
+        let OracleResult::NotLappable { stall_walls } = result else {
+            panic!("expected no_crossing_corridor to return NotLappable, got {result:?}");
+        };
+        assert!(!stall_walls.is_empty());
+        let mut expected = walls_from_boundary(&d);
+        expected.sort_by_key(|&w| wall_sort_key(w));
+        assert_eq!(stall_walls, expected);
+    }
+
+    #[test]
+    fn ac2_diagnostic_is_sorted_and_deterministic() {
+        let mut d = ring_corridor();
+        d.set(Point::new(4, 2), false);
+        let sf = ring_sf();
+        let grid = ring_grid();
+
+        let (
+            OracleResult::NotLappable { stall_walls: w1 },
+            OracleResult::NotLappable { stall_walls: w2 },
+        ) = (
+            phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw),
+            phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw),
+        )
+        else {
+            panic!("expected both runs to be NotLappable");
+        };
+        assert_eq!(w1, w2, "repeated runs must agree");
+
+        let mut sorted = w1.clone();
+        sorted.sort_by_key(|&w| wall_sort_key(w));
+        assert_eq!(w1, sorted, "diagnostic must already be sorted");
+    }
+
+    #[test]
+    fn ac2_diagnostic_is_empty_only_outside_the_d_non_empty_precondition() {
+        // On a degenerate empty D, both tiers are empty by construction
+        // (tier 1's P0 is empty, tier 2's walls_from_boundary has no
+        // drivable cell to anchor at) -- this is the *documented*
+        // out-of-precondition outcome, not an AC2 violation: `D` non-empty
+        // is an explicit precondition on OracleResult::NotLappable /
+        // p0_boundary_walls (design § Approach (1) -> edge case).
+        let d = Corridor::new(Point::new(0, 0), 0, 0);
+        let sf = ring_sf();
+        let grid = StartGrid {
+            positions: vec![Point::new(0, 0)],
+        };
+
+        let result = phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw);
+        let OracleResult::NotLappable { stall_walls } = result else {
+            panic!("expected an empty D to return NotLappable, got {result:?}");
+        };
+        assert!(
+            stall_walls.is_empty(),
+            "an empty D lies outside the documented non-empty-D precondition, \
+             so an empty diagnostic here is expected, not a bug to paper over"
+        );
     }
 
     #[test]
@@ -796,52 +1029,6 @@ mod tests {
         let seed = car(2, 0, 0, 0);
         assert!(legal_move(&d, seed, Action::East));
         assert_eq!(step(seed, Action::East), car(3, 0, 1, 0));
-    }
-
-    /// A closed, width-1, 4-connected ring shaped as an **elongated**
-    /// rectangle (14×5, vs. `ring_corridor`'s square 5×5): drivable iff `x ∈
-    /// {0, 13}` or `y ∈ {0, 4}` — border cells only, interior walled off,
-    /// same construction as `ring_corridor` (design § Test Design AC7
-    /// long-straight fixture). The top (`y = 0`) and bottom (`y = 4`) edges
-    /// are each a 14-cell **long straight** along the x-axis — long enough
-    /// (design's ~10–14-cell target) for a car accelerating from rest to
-    /// build up a materially higher L∞ speed than the short 5×5 ring's
-    /// corner-limited corridor ever permits, while the four 90-degree
-    /// corners still force braking before the turn (AC7's "tempo integrates
-    /// the required braking" clause).
-    fn long_straight_corridor() -> Corridor {
-        let mut d = Corridor::new(Point::new(0, 0), 14, 5);
-        for y in 0..5 {
-            for x in 0..14 {
-                if x == 0 || x == 13 || y == 0 || y == 4 {
-                    d.set(Point::new(x, y), true);
-                }
-            }
-        }
-        d
-    }
-
-    /// The long-straight ring's start/finish gate: behind cell `(7, 0)` (the
-    /// midpoint of the top straight), forward `East` — so the ahead cell is
-    /// `(8, 0)`, mirroring `ring_sf`'s gate placement pattern.
-    fn long_straight_sf() -> StartFinish {
-        StartFinish {
-            chord: vec![Point::new(7, 0)],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![Point::new(7, 0)],
-                forward: Side::East,
-            },
-        }
-    }
-
-    /// The long-straight ring's start grid: one car, behind the gate on the
-    /// long straight, at rest — forward along the straight, mirroring
-    /// `ring_grid`.
-    fn long_straight_grid() -> StartGrid {
-        StartGrid {
-            positions: vec![Point::new(7, 0)],
-        }
     }
 
     #[test]

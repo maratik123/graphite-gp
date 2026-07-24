@@ -120,8 +120,11 @@ pub fn backward_reachable(d: &Corridor, goals: &[CarState], v_ceil: i32) -> Hash
 }
 
 /// The V=1 velocity ceiling `oracle_liveness_v1` floods within (design doc §2
-/// Ф5a scaffolding: `|v| ≤ 1`).
-const ORACLE_V1_CEIL: i32 = 1;
+/// Ф5a scaffolding: `|v| ≤ 1`). Widened from private to `pub(crate)`
+/// (`[N3]` frontier-gap-mapping design § Scope-delta item 3) so `phase6`'s
+/// `p0_at_v1` progress metric reuses the same V=1 literal rather than
+/// re-declaring it.
+pub(crate) const ORACLE_V1_CEIL: i32 = 1;
 
 /// Binary "a driveable closed lap exists at `|v| ≤ 1`" oracle (AC4).
 ///

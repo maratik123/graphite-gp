@@ -11,6 +11,7 @@ mod phase3;
 mod phase4;
 mod phase5;
 mod phase5b;
+mod phase6;
 #[cfg(test)]
 mod testfix;
 
@@ -24,6 +25,7 @@ pub use phase3::*;
 pub use phase4::*;
 pub use phase5::*;
 pub use phase5b::*;
+pub use phase6::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]
