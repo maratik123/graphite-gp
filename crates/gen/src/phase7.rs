@@ -104,6 +104,44 @@ fn bridge_gaps(d: &Corridor, medial: BTreeSet<Point>) -> Option<BTreeSet<Point>>
     }
 }
 
+/// The 4-connected degree of `p` within `cells` — the number of `p`'s 4
+/// neighbors that are themselves members of `cells`.
+fn degree(cells: &BTreeSet<Point>, p: Point) -> usize {
+    p.neighbors4()
+        .into_iter()
+        .filter(|n| cells.contains(n))
+        .count()
+}
+
+/// Prunes spur (degree-1) branches from the bridged medial set `cells`
+/// (design doc § "The loop-trim / resample algorithm", step 3).
+///
+/// Iterative degree-1 removal (synchronous rounds: each round's degrees are
+/// computed against the round's starting set, then every degree-`< 2` cell is
+/// removed together) until every surviving cell has 4-connected degree `>= 2`
+/// — the graph's 2-core. A clean, already-thinned loop is all-degree-2 (the
+/// pass is then a no-op); infield-finger / hairpin spurs are trees hanging
+/// off the ring and peel away round by round. Returns `None` (fallback) if
+/// the 2-core is empty (nothing survives, e.g. `cells` was itself a tree with
+/// no cycle).
+fn prune_spurs(cells: &BTreeSet<Point>) -> Option<BTreeSet<Point>> {
+    let mut cur = cells.clone();
+    loop {
+        let leaves: Vec<Point> = cur
+            .iter()
+            .copied()
+            .filter(|&p| degree(&cur, p) < 2)
+            .collect();
+        if leaves.is_empty() {
+            break;
+        }
+        for p in leaves {
+            cur.remove(&p);
+        }
+    }
+    if cur.is_empty() { None } else { Some(cur) }
+}
+
 /// Produces the render-only racing centerline for corridor `d` (design doc §2
 /// line 191).
 ///
@@ -119,11 +157,14 @@ pub fn racing_line(d: &Corridor, _gate: &TimingGate, _race_dir: RaceDir) -> Cent
     if medial.is_empty() {
         return Centerline::default();
     }
-    let Some(_bridged) = bridge_gaps(d, medial) else {
+    let Some(bridged) = bridge_gaps(d, medial) else {
         return Centerline::default();
     };
-    // Subtasks 3-5 wire the rest of the pipeline; until then a bridged medial
-    // set also falls back (no producer overclaims yet).
+    let Some(_core) = prune_spurs(&bridged) else {
+        return Centerline::default();
+    };
+    // Subtasks 4-5 wire the rest of the pipeline; until then a pruned core
+    // also falls back (no producer overclaims yet).
     Centerline::default()
 }
 
@@ -199,5 +240,55 @@ mod tests {
     fn bridge_gaps_rejects_empty_medial() {
         let d = Corridor::new(Point::new(0, 0), 4, 4);
         assert!(bridge_gaps(&d, BTreeSet::new()).is_none());
+    }
+
+    /// A hand-built 4×4 square ring (border of a 4×4 box), 4-connected and
+    /// already all-degree-2 — the "clean loop" prune fixture.
+    fn small_ring() -> BTreeSet<Point> {
+        BTreeSet::from([
+            Point::new(0, 0),
+            Point::new(1, 0),
+            Point::new(2, 0),
+            Point::new(3, 0),
+            Point::new(3, 1),
+            Point::new(3, 2),
+            Point::new(3, 3),
+            Point::new(2, 3),
+            Point::new(1, 3),
+            Point::new(0, 3),
+            Point::new(0, 2),
+            Point::new(0, 1),
+        ])
+    }
+
+    /// Subtask 3 (happy): an all-degree-2 loop is unaffected by pruning.
+    #[test]
+    fn prune_spurs_is_a_no_op_on_a_clean_loop() {
+        let ring = small_ring();
+        assert_eq!(prune_spurs(&ring), Some(ring));
+    }
+
+    /// Subtask 3 (happy): a 2-cell dead-end finger hanging off ring cell
+    /// `(1, 0)` (poking outward, below the ring's own box) is fully peeled
+    /// away, leaving exactly the ring, all-degree-2.
+    #[test]
+    fn prune_spurs_removes_a_dangling_finger() {
+        let mut with_finger = small_ring();
+        with_finger.insert(Point::new(1, -1)); // attaches to ring's (1, 0)
+        with_finger.insert(Point::new(1, -2)); // the dead-end tip
+
+        let core = prune_spurs(&with_finger).expect("the ring survives pruning");
+        assert_eq!(core, small_ring());
+        for &p in &core {
+            assert!(degree(&core, p) >= 2, "{p:?} must have degree >= 2");
+        }
+    }
+
+    /// Subtask 3 (edge): a pure tree (no cycle) prunes to nothing (fallback
+    /// signal).
+    #[test]
+    fn prune_spurs_rejects_a_pure_tree() {
+        let tree = BTreeSet::from([Point::new(0, 0), Point::new(1, 0), Point::new(2, 0)]);
+        assert!(prune_spurs(&tree).is_none());
     }
 }
