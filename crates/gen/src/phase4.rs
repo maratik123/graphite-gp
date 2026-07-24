@@ -57,6 +57,34 @@ pub enum Issue {
         /// The finger's coarse tip — the anchor Ф6's `nudge_finger` acts near.
         tip: Point,
     },
+    /// A degree-1 non-drivable protrusion into the corridor cuts a concave
+    /// corner the strict supercover predicate refuses to graze past (design
+    /// doc §2 Ф6: `CONCAVE_CHORD_CUT → fill_inner_tooth`). Detected in
+    /// `phase4_defects.rs`.
+    ConcaveChordCut {
+        /// The protruding cell Ф6's `fill_inner_tooth` makes drivable.
+        tooth: Point,
+    },
+    /// A drivable fine cell has intruded into the expanded coarse-hole mask
+    /// `H`, bridging the corridor across the infield and threatening to merge
+    /// its two arms (design doc §2 Ф6: `ARMS_MERGING → trim_arm_wall`).
+    /// Detected in `phase4_defects.rs`.
+    ArmsMerging {
+        /// The drivable intrusion cell Ф6's `trim_arm_wall` makes
+        /// non-drivable — the min-`Point` anchor of its 4-connected
+        /// intrusion component.
+        bridge: Point,
+    },
+    /// A corner-entry path point has insufficient run-out room to brake from
+    /// its attainable entry speed to a speed with a legal successor at the
+    /// corner (design doc §2 Ф6: `NO_BRAKING → lengthen_straight /
+    /// widen_corner`). A `v_target`-referenced run-out budget check, never a
+    /// lap-existence check (#30's AC7 result). Detected in
+    /// `phase5_runout.rs`.
+    NoBraking {
+        /// The maximal deficient run's first `fastest_lap` point.
+        at: Point,
+    },
 }
 
 /// Connectivity check (AC1): `Some(Issue::Disconnected)` iff `d` does not have
