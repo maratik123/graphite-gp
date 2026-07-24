@@ -18,7 +18,7 @@
 use std::collections::BTreeSet;
 
 use gp_core::geom::{Corridor, DistanceTransform, Point, medial_axis, supercover};
-use gp_core::track::{Centerline, RaceDir, TimingGate};
+use gp_core::track::{Centerline, CenterlineSample, RaceDir, TimingGate};
 
 /// Maximum Manhattan gap (in cells) [`bridge_gaps`] will bridge between two
 /// cross-component medial-axis cells; a wider minimal gap abandons bridging
@@ -58,48 +58,80 @@ fn components(cells: &BTreeSet<Point>) -> Vec<BTreeSet<Point>> {
     comps
 }
 
-/// Bridges cross-component gaps in the medial cell set `medial` (design doc
-/// § "The loop-trim / resample algorithm", step 2).
+/// Bridges gaps in the medial cell set `medial` (design doc § "The loop-trim
+/// / resample algorithm", step 2).
 ///
-/// While more than one 4-connected component remains, finds the
-/// cross-component cell pair `(a, b)` of minimal Manhattan distance
+/// Repeatedly finds the minimal-Manhattan-distance pair of degree-`< 2`
+/// ("leaf") cells `(a, b)` that are not already 4-adjacent, preferring a
+/// cross-component pair over a same-component one whenever both exist, and
+/// inserts every `supercover(a, b)` cell that lies in `d` into the set
 /// (deterministic tie-break: minimal `(a, b)` by `Point`'s derived `Ord`,
-/// `a <= b`) and inserts every `supercover(a, b)` cell that lies in `d` into
-/// the set. Returns `None` (fallback) if `medial` is empty, or if the
-/// smallest remaining cross-component gap ever exceeds [`MAX_BRIDGE_GAP`].
+/// `a <= b`). Stops when fewer than 2 leaves remain.
+///
+/// **Why same-component pairs too, not only cross-component:** merely
+/// reaching one 4-connected component does not imply a *closed* loop — a
+/// ring's last corner gap can bridge its two flanking strips into the same
+/// component (via the other 3 corners) while leaving that last gap's own two
+/// leaf cells unconnected, cross-component-blind bridging would then declare
+/// victory one gap early. Preferring cross- over same-component candidates
+/// each round still closes the "easy" gaps between genuinely separate
+/// pieces first, before ever touching a same-component pair.
+///
+/// Returns `None` (fallback) if `medial` is empty, or if the smallest
+/// candidate gap ever exceeds [`MAX_BRIDGE_GAP`]. Also stops (without
+/// panicking or looping) if a chosen candidate's bridge inserts no new cell —
+/// a leftover open path (not a ring) has no more available progress.
 fn bridge_gaps(d: &Corridor, medial: BTreeSet<Point>) -> Option<BTreeSet<Point>> {
     if medial.is_empty() {
         return None;
     }
     let mut cells = medial;
     loop {
-        let comps = components(&cells);
-        if comps.len() <= 1 {
+        let leaves: Vec<Point> = cells
+            .iter()
+            .copied()
+            .filter(|&p| degree(&cells, p) < 2)
+            .collect();
+        if leaves.len() < 2 {
             return Some(cells);
         }
-        let mut best: Option<(i64, Point, Point)> = None;
-        for i in 0..comps.len() {
-            for j in (i.saturating_add(1))..comps.len() {
-                for &a in &comps[i] {
-                    for &b in &comps[j] {
-                        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-                        let cand = (manhattan(a, b), lo, hi);
-                        if best.is_none_or(|cur| cand < cur) {
-                            best = Some(cand);
-                        }
-                    }
+        let comps = components(&cells);
+        let comp_of = |p: Point| comps.iter().position(|c| c.contains(&p));
+
+        let mut cross: Option<(i64, Point, Point)> = None;
+        let mut same: Option<(i64, Point, Point)> = None;
+        for i in 0..leaves.len() {
+            for j in (i.saturating_add(1))..leaves.len() {
+                let (a, b) = (leaves[i], leaves[j]);
+                if a.neighbors4().into_iter().any(|n| n == b) {
+                    continue; // already directly connected; nothing to bridge
+                }
+                let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                let cand = (manhattan(a, b), lo, hi);
+                let slot = if comp_of(a) == comp_of(b) {
+                    &mut same
+                } else {
+                    &mut cross
+                };
+                if slot.is_none_or(|cur| cand < cur) {
+                    *slot = Some(cand);
                 }
             }
         }
-        // comps.len() > 1 guarantees at least one cross-component pair exists.
-        let (dist, a, b) = best.expect("multiple components imply a cross-component pair");
+        let Some((dist, a, b)) = cross.or(same) else {
+            return Some(cells); // no viable leaf pair left to bridge
+        };
         if dist > i64::from(MAX_BRIDGE_GAP) {
             return None;
         }
+        let before = cells.len();
         for p in supercover(a, b) {
             if d.contains(p) {
                 cells.insert(p);
             }
+        }
+        if cells.len() == before {
+            return Some(cells); // this pair's bridge added nothing new; stop
         }
     }
 }
@@ -250,6 +282,143 @@ fn walk_cycle(core: &BTreeSet<Point>, gate: &TimingGate) -> Option<Vec<Point>> {
     if order.len() < 4 { None } else { Some(order) }
 }
 
+/// Arc-length spacing (in cells) between resampled `CenterlineSample`s —
+/// approximately one cell, per the design's "even spacing" requirement (AC2).
+const RESAMPLE_STEP: f32 = 1.0;
+
+/// The integer shoelace signed area `Σ(xᵢ·yᵢ₊₁ − xᵢ₊₁·yᵢ)` of the closed
+/// polygon `order` (design doc step 5). This grid is x-east/y-north
+/// right-handed, so the standard convention holds: `> 0` for a
+/// counter-clockwise ring, `< 0` for clockwise (pinned by
+/// `shoelace_sign_matches_ccw_convention` below). All-`saturating` integer
+/// arithmetic — no raw `+`/`-`/`*` — so no `arithmetic_side_effects` allow is
+/// needed.
+fn shoelace(order: &[Point]) -> i64 {
+    order
+        .iter()
+        .zip(order.iter().skip(1).chain(order.iter().take(1)))
+        .fold(0i64, |sum, (&a, &b)| {
+            let term = i64::from(a.x)
+                .saturating_mul(i64::from(b.y))
+                .saturating_sub(i64::from(b.x).saturating_mul(i64::from(a.y)));
+            sum.saturating_add(term)
+        })
+}
+
+/// Orients the closed cycle `order` to match `race_dir`'s winding sense
+/// (design doc step 5): reverses `order` iff its shoelace sign disagrees with
+/// `race_dir` (`Ccw` ⇔ `> 0`, `Cw` ⇔ `< 0`).
+fn orient(mut order: Vec<Point>, race_dir: RaceDir) -> Vec<Point> {
+    let is_ccw = shoelace(&order) > 0;
+    let wants_ccw = matches!(race_dir, RaceDir::Ccw);
+    if is_ccw != wants_ccw {
+        order.reverse();
+    }
+    order
+}
+
+/// The sub-cell `(f32, f32)` position of cell center `p`.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "grid coordinates are bounded by corridor dimensions, far below \
+              f32's 24-bit exact-integer range"
+)]
+const fn point_pos(p: Point) -> (f32, f32) {
+    (p.x as f32, p.y as f32)
+}
+
+/// The next index after `i` in a `n`-length wraparound cycle.
+const fn next_index(i: usize, n: usize) -> usize {
+    let j = i.saturating_add(1);
+    if j < n { j } else { 0 }
+}
+
+/// The index before `i` in a `n`-length wraparound cycle.
+const fn prev_index(i: usize, n: usize) -> usize {
+    if i == 0 {
+        n.saturating_sub(1)
+    } else {
+        i.saturating_sub(1)
+    }
+}
+
+/// A unit `(f32, f32)` vector along `v`, or the flat fallback `(1.0, 0.0)`
+/// when `v` is degenerate (zero length).
+fn normalize_vec(v: (f32, f32)) -> (f32, f32) {
+    let len = v.0.hypot(v.1);
+    if len > 0.0 {
+        (v.0 / len, v.1 / len)
+    } else {
+        (1.0, 0.0)
+    }
+}
+
+/// Resamples the ordered, closed cycle `order` by arc length (design doc
+/// steps 6-7): emits a `CenterlineSample` every [`RESAMPLE_STEP`] of
+/// accumulated perimeter, seeding `samples[0].s == 0`, then fills each
+/// sample's unit tangent from its wraparound neighbors' positions. `None`
+/// (fallback) if `order` is empty or its perimeter is non-positive/non-finite
+/// (a degenerate, zero-area cycle).
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the sample count is length/RESAMPLE_STEP floored and clamped to \
+              >= 1: a small, grid-realistic, non-negative cell count, exactly \
+              representable in f32 and well within usize range"
+)]
+fn resample(order: &[Point]) -> Option<Centerline> {
+    let positions: Vec<(f32, f32)> = order.iter().map(|&p| point_pos(p)).collect();
+    let n = positions.len();
+    if n == 0 {
+        return None;
+    }
+    let seg_lengths: Vec<f32> = positions
+        .iter()
+        .zip(positions.iter().skip(1).chain(positions.iter().take(1)))
+        .map(|(&(ax, ay), &(bx, by))| (bx - ax).hypot(by - ay))
+        .collect();
+    let length: f32 = seg_lengths.iter().copied().sum();
+    if length.is_sign_negative() || length == 0.0 || !length.is_finite() {
+        return None;
+    }
+    let mut cum = vec![0.0f32; n];
+    for i in 1..n {
+        cum[i] = cum[prev_index(i, n)] + seg_lengths[prev_index(i, n)];
+    }
+
+    let step_count = (length / RESAMPLE_STEP).floor().max(1.0) as usize;
+    let mut samples = Vec::with_capacity(step_count);
+    for i in 0..step_count {
+        let s = i as f32 * RESAMPLE_STEP;
+        let idx = cum
+            .iter()
+            .rposition(|&c| c <= s)
+            .unwrap_or(0)
+            .min(n.saturating_sub(1));
+        let (ax, ay) = positions[idx];
+        let (bx, by) = positions[next_index(idx, n)];
+        let seg = seg_lengths[idx];
+        let t = if seg > 0.0 { (s - cum[idx]) / seg } else { 0.0 };
+        let pos = ((bx - ax).mul_add(t, ax), (by - ay).mul_add(t, ay));
+        samples.push(CenterlineSample {
+            s,
+            pos,
+            tangent: (0.0, 0.0), // filled below, once every sample position exists
+        });
+    }
+
+    let m = samples.len();
+    let sample_positions: Vec<(f32, f32)> = samples.iter().map(|sm| sm.pos).collect();
+    for (i, sample) in samples.iter_mut().enumerate() {
+        let (px, py) = sample_positions[prev_index(i, m)];
+        let (nx, ny) = sample_positions[next_index(i, m)];
+        sample.tangent = normalize_vec((nx - px, ny - py));
+    }
+
+    Some(Centerline { samples, length })
+}
+
 /// Produces the render-only racing centerline for corridor `d` (design doc §2
 /// line 191).
 ///
@@ -259,7 +428,7 @@ fn walk_cycle(core: &BTreeSet<Point>, gate: &TimingGate) -> Option<Vec<Point>> {
 /// Never panics: every failure path (empty medial axis and — once wired —
 /// every later-stage fallback) returns [`Centerline::default()`], which
 /// degrades gracefully under [`Centerline::at`].
-pub fn racing_line(d: &Corridor, gate: &TimingGate, _race_dir: RaceDir) -> Centerline {
+pub fn racing_line(d: &Corridor, gate: &TimingGate, race_dir: RaceDir) -> Centerline {
     let dt = DistanceTransform::compute(d);
     let medial = medial_axis(&dt);
     if medial.is_empty() {
@@ -271,12 +440,11 @@ pub fn racing_line(d: &Corridor, gate: &TimingGate, _race_dir: RaceDir) -> Cente
     let Some(core) = prune_spurs(&bridged) else {
         return Centerline::default();
     };
-    let Some(_cycle) = walk_cycle(&core, gate) else {
+    let Some(cycle) = walk_cycle(&core, gate) else {
         return Centerline::default();
     };
-    // Subtask 5 wires the rest of the pipeline; until then an ordered cycle
-    // also falls back (no producer overclaims yet).
-    Centerline::default()
+    let oriented = orient(cycle, race_dir);
+    resample(&oriented).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -480,5 +648,102 @@ mod tests {
             forward: Side::North,
         };
         assert!(walk_cycle(&open, &gate).is_none());
+    }
+
+    /// Subtask 5 (GO-note 2): the CCW unit square's integer shoelace sums to
+    /// `+2` — pinning the sign convention this grid's x-east/y-north
+    /// handedness implies.
+    #[test]
+    fn shoelace_ccw_unit_square_is_positive_two() {
+        let square = vec![
+            Point::new(0, 0),
+            Point::new(1, 0),
+            Point::new(1, 1),
+            Point::new(0, 1),
+        ];
+        assert_eq!(shoelace(&square), 2);
+    }
+
+    /// Subtask 5 (GO-note 2): the reversed (CW) square sums to `-2` — pinning
+    /// the mapping in both directions, not merely "the two are reversed".
+    #[test]
+    fn shoelace_cw_unit_square_is_negative_two() {
+        let mut square = vec![
+            Point::new(0, 0),
+            Point::new(1, 0),
+            Point::new(1, 1),
+            Point::new(0, 1),
+        ];
+        square.reverse();
+        assert_eq!(shoelace(&square), -2);
+    }
+
+    /// Subtask 5: `orient` reverses (or not) to make the shoelace sign match
+    /// `race_dir` (`Ccw` ⇔ `> 0`, `Cw` ⇔ `< 0`).
+    #[test]
+    fn orient_matches_race_dir_sign() {
+        let ccw_square = vec![
+            Point::new(0, 0),
+            Point::new(1, 0),
+            Point::new(1, 1),
+            Point::new(0, 1),
+        ];
+        assert!(shoelace(&orient(ccw_square.clone(), RaceDir::Ccw)) > 0);
+        assert!(shoelace(&orient(ccw_square, RaceDir::Cw)) < 0);
+    }
+
+    /// The `small_ring` fixture (subtask 3) as a real `Corridor` — a clean,
+    /// already-width-1 4×4 border loop, so its true `medial_axis` is exactly
+    /// `small_ring` itself (no bridging/pruning needed).
+    fn small_ring_corridor() -> Corridor {
+        let cells: Vec<(i32, i32)> = small_ring().into_iter().map(|p| (p.x, p.y)).collect();
+        crate::testfix::corridor((0, 0), 4, 4, &cells)
+    }
+
+    /// The float shoelace signed area of `cl`'s resampled sample polygon —
+    /// mirrors [`shoelace`] but over the `f32` sample positions, to check
+    /// that orientation survives resampling.
+    fn sample_signed_area(cl: &Centerline) -> f64 {
+        cl.samples
+            .iter()
+            .zip(cl.samples.iter().skip(1).chain(cl.samples.iter().take(1)))
+            .map(|(a, b)| {
+                f64::from(b.pos.0)
+                    .mul_add(-f64::from(a.pos.1), f64::from(a.pos.0) * f64::from(b.pos.1))
+            })
+            .sum()
+    }
+
+    /// Subtask 5 (end-to-end): `racing_line` on a clean ring produces
+    /// `samples[0].s == 0`, strictly increasing `s` at ~`RESAMPLE_STEP`
+    /// spacing, unit tangents, and an overall sample-polygon orientation
+    /// matching `race_dir`.
+    #[test]
+    fn racing_line_orients_resamples_and_tangents_a_clean_ring() {
+        let d = small_ring_corridor();
+        let gate = small_ring_gate();
+
+        for race_dir in [RaceDir::Ccw, RaceDir::Cw] {
+            let cl = racing_line(&d, &gate, race_dir);
+            assert!(!cl.samples.is_empty(), "{race_dir:?} must produce samples");
+            assert!(cl.samples[0].s.abs() < f32::EPSILON);
+            for w in cl.samples.windows(2) {
+                assert!(w[1].s > w[0].s, "s must be strictly increasing");
+                assert!(
+                    (w[1].s - w[0].s - RESAMPLE_STEP).abs() < 0.5,
+                    "spacing must be close to RESAMPLE_STEP"
+                );
+            }
+            for sample in &cl.samples {
+                let mag = sample.tangent.0.hypot(sample.tangent.1);
+                assert!((mag - 1.0).abs() < 1e-4, "tangent must be unit-length");
+            }
+
+            let area = sample_signed_area(&cl);
+            match race_dir {
+                RaceDir::Ccw => assert!(area > 0.0, "Ccw sample polygon must wind positive"),
+                RaceDir::Cw => assert!(area < 0.0, "Cw sample polygon must wind negative"),
+            }
+        }
     }
 }
