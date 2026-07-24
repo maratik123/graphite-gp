@@ -1,11 +1,15 @@
 //! Ф4 — static validation (design doc §2): connectivity, single-hole topology,
-//! cross-section width, and finger liveness.
+//! cross-section width, finger liveness, and (Ф6's local-repair task)
+//! `ConcaveChordCut` / `ArmsMerging`.
 //!
 //! Consumes the fine corridor `D`, the width floors, and the S/F chord; runs
-//! four checks in a fixed order and returns a `Vec<Issue>` (empty ⟺ statically
+//! six checks in a fixed order and returns a `Vec<Issue>` (empty ⟺ statically
 //! valid). Two checks reuse the merged `gp_core::geom` helpers verbatim; the
-//! other two are built on the [`DistanceTransform`](DistanceTransform)
-//! / [`medial_axis`](gp_core::geom::medial_axis) primitives.
+//! [`DistanceTransform`](DistanceTransform) / [`medial_axis`](gp_core::geom::medial_axis)
+//! primitives and the `Narrow`/`ConcaveChordCut`/`ArmsMerging` detector bodies
+//! live in the sibling `phase4_defects.rs` (§ Risks R1 backstop — `phase4.rs`
+//! reached the 800-line incl.-tests soft cap once the two new detectors were
+//! wired in).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -144,62 +148,6 @@ pub(crate) fn wall_runs(d: &Corridor, p: Point) -> (usize, usize, usize, usize) 
     )
 }
 
-/// The `Narrow` issue at `p`, or `None` — the DT pre-filter + exact
-/// perpendicular cross-section confirmation (design doc §2 Ф4 Width).
-///
-/// DT pre-filter: skips `p` when `2·dt(p) − 1 ≥ n` — provably wide
-/// (`w(p) ≥ 2·dt(p) − 1 ≥ n`, the DT pre-filter soundness argument). Otherwise
-/// walks the four wall-distances to get `hrun`/`vrun`, and emits iff
-/// `w(p) = min(hrun, vrun) < n` **and** `w(p) ∈ {2·dt(p) − 1, 2·dt(p)}` — the
-/// DT-consistency test that rejects a staircase/taper-edge false positive
-/// (design doc Risks) while still catching a doorway-neck DT valley.
-fn narrow_at(d: &Corridor, dt: &DistanceTransform, p: Point, n: u32) -> Option<Issue> {
-    let n = usize::try_from(n).unwrap_or(usize::MAX);
-    let dt_p = usize::try_from(dt.at(p)).unwrap_or(usize::MAX);
-    let two_dt_minus_1 = dt_p.saturating_mul(2).saturating_sub(1);
-    if two_dt_minus_1 >= n {
-        return None;
-    }
-
-    let (left, right, up, down) = wall_runs(d, p);
-    let hrun = left.saturating_add(right).saturating_sub(1);
-    let vrun = up.saturating_add(down).saturating_sub(1);
-    let w = hrun.min(vrun);
-    let two_dt = dt_p.saturating_mul(2);
-    if w >= n || (w != two_dt_minus_1 && w != two_dt) {
-        return None;
-    }
-
-    let width = u32::try_from(w).unwrap_or(u32::MAX);
-    if vrun <= hrun {
-        let down_i32 = i32::try_from(down).unwrap_or(i32::MAX);
-        let center = Point::new(p.x, p.y.saturating_sub(down_i32).saturating_add(1));
-        Some(Issue::Narrow {
-            center,
-            axis: Orient::Vertical,
-            width,
-        })
-    } else {
-        let left_i32 = i32::try_from(left).unwrap_or(i32::MAX);
-        let center = Point::new(p.x.saturating_sub(left_i32).saturating_add(1), p.y);
-        Some(Issue::Narrow {
-            center,
-            axis: Orient::Horizontal,
-            width,
-        })
-    }
-}
-
-/// The `Narrow` issues over **all** `D` cells (AC3) — deliberately not
-/// restricted to `medial_axis`'s ridge, since a neck is a DT valley a
-/// local-maximum ridge would miss (design doc Risks, Issue #1).
-fn narrow_issues(d: &Corridor, dt: &DistanceTransform, n: u32) -> Vec<Issue> {
-    box_points(d)
-        .filter(|&p| d.contains(p))
-        .filter_map(|p| narrow_at(d, dt, p, n))
-        .collect()
-}
-
 /// The `NarrowSf` issue on `sf`'s chord, or `None` — no DT sampling needed,
 /// the chord's width is `sf.chord.len()` directly (design doc §2 Ф4 Width).
 fn check_narrow_sf(sf: &StartFinish, m: u32) -> Option<Issue> {
@@ -275,13 +223,17 @@ pub(crate) fn absorbed(finger: &[Point], d: &Corridor, k: i32) -> bool {
         .all(|&c| block_points(c, k).all(|p| d.contains(p)))
 }
 
-/// Runs Ф4's four static-validation checks over `d`, in fixed order.
+/// Runs Ф4's six static-validation checks over `d`, in fixed order.
 ///
-/// Connectivity → topology → width (`Narrow`/`NarrowSf`) → finger liveness;
-/// returns every issue found (empty ⟺ statically valid, design doc §2 Ф4).
+/// Connectivity → topology → width (`Narrow`/`NarrowSf`) → finger liveness →
+/// `ConcaveChordCut` → `ArmsMerging`; returns every issue found (empty ⟺
+/// statically valid, design doc §2 Ф4). The last two (Ф6's local-repair task,
+/// `phase4_defects.rs`) are appended after the original four, each in
+/// ascending `Point` order.
 ///
-/// - `skel` — the coarse skeleton (`skel.hole` drives finger extraction).
-/// - `k` — the coarse-block size, mapping coarse fingers to fine blocks
+/// - `skel` — the coarse skeleton (`skel.hole` drives finger extraction and
+///   `ArmsMerging`'s expanded hole mask).
+/// - `k` — the coarse-block size, mapping coarse fingers/holes to fine blocks
 ///   (Ф2's `k`).
 /// - `n` — the global width floor (`GenParams::min_width`).
 /// - `m` — the S/F width floor (`GenParams::start_finish_width`).
@@ -302,7 +254,7 @@ pub fn phase4_static_checks(
     issues.extend(check_topology(d));
 
     let dt = DistanceTransform::compute(d);
-    issues.extend(narrow_issues(d, &dt, n));
+    issues.extend(crate::phase4_defects::narrow_issues(d, &dt, n));
     issues.extend(check_narrow_sf(sf, m));
 
     for (&tip, finger) in &infield_fingers(skel) {
@@ -310,6 +262,9 @@ pub fn phase4_static_checks(
             issues.push(Issue::LostHairpin { tip });
         }
     }
+
+    issues.extend(crate::phase4_defects::concave_chord_cut_issues(d));
+    issues.extend(crate::phase4_defects::arms_merging_issues(d, skel, k));
 
     issues
 }
@@ -404,13 +359,6 @@ mod tests {
         assert!(set.contains(&Issue::Disconnected));
     }
 
-    /// Collect `narrow_issues` into a `HashSet` (AC7 compares this way; a
-    /// narrow chord's ≤2 centered cells collapse to one entry).
-    fn narrow_set(d: &Corridor, n: u32) -> HashSet<Issue> {
-        let dt = DistanceTransform::compute(d);
-        narrow_issues(d, &dt, n).into_iter().collect()
-    }
-
     /// A minimal `StartFinish` fixture: `chord` at the given `(x, y)`
     /// points, oriented `orient`, with a placeholder single-cell gate (the
     /// gate is not read by the width check).
@@ -424,102 +372,6 @@ mod tests {
             chord,
             orient,
         }
-    }
-
-    #[test]
-    fn narrow_clean_ring_has_no_issues() {
-        // A thickness-2 frame: every cross-section is exactly 2 cells wide, so
-        // n=2 (strict `<`) never fires.
-        let mut d = Corridor::filled(Point::new(0, 0), 9, 9);
-        for y in 2..7 {
-            for x in 2..7 {
-                d.set(Point::new(x, y), false);
-            }
-        }
-        assert!(narrow_set(&d, 2).is_empty());
-    }
-
-    #[test]
-    fn narrow_sharp_single_cross_section_neck_fires_once() {
-        // A 3-row-tall corridor pinched to a single-row neck at x=3 (n=3):
-        // exactly one Narrow, centered on the neck cell.
-        let mut drivable = Vec::new();
-        for x in 0..7 {
-            if x == 3 {
-                drivable.push((x, 2));
-            } else {
-                for y in 1..4 {
-                    drivable.push((x, y));
-                }
-            }
-        }
-        let d = corridor((0, 0), 7, 5, &drivable);
-        let issues = narrow_set(&d, 3);
-        assert_eq!(
-            issues,
-            HashSet::from([Issue::Narrow {
-                center: Point::new(3, 2),
-                axis: Orient::Vertical,
-                width: 1,
-            }]),
-        );
-    }
-
-    #[test]
-    fn narrow_doorway_neck_is_caught_by_completeness() {
-        // Two 5x5 rooms joined by a sub-n width-3 doorway corridor (n=4): the
-        // neck's DT is a valley (its along-flow neighbors in the wider rooms
-        // have strictly greater DT), so a ridge-restricted sampler would miss
-        // it — the all-cells scan must still catch it (design doc Risks,
-        // Issue #1 completeness argument).
-        let mut drivable = Vec::new();
-        drivable.extend((0..5).flat_map(|x| (0..5).map(move |y| (x, y))));
-        drivable.extend((10..15).flat_map(|x| (0..5).map(move |y| (x, y))));
-        drivable.extend((5..10).flat_map(|x| (1..4).map(move |y| (x, y))));
-        let d = corridor((0, 0), 15, 5, &drivable);
-        let issues = narrow_set(&d, 4);
-        assert!(
-            issues.iter().any(|issue| matches!(
-                issue,
-                Issue::Narrow {
-                    width: 3,
-                    axis: Orient::Vertical,
-                    ..
-                }
-            )),
-            "expected a width-3 Narrow in the doorway, got {issues:?}"
-        );
-    }
-
-    #[test]
-    fn narrow_staircase_taper_edge_is_not_a_false_positive() {
-        // A wide (height-6) corridor, n=4, with a diagonal staircase taper
-        // carved from the top-left corner over 3 rows: row y=0 loses x<3,
-        // y=1 loses x<2, y=2 loses x<1. This genuinely exercises the
-        // DT-consistency clause — unlike a shallow rectangular notch, whose
-        // per-column height never dips below n so the clause is never
-        // reached (the original, vacuous version of this fixture).
-        //
-        // At the cells directly below the staircase's toe (x=0, y∈{3,4,5}):
-        // hrun=14 (the full untouched row length) but vrun=3 (up is capped
-        // by the staircase notch at y<3, x=0; down by the box edge at
-        // y=5) — so w = min(hrun, vrun) = 3 < n = 4, and WITHOUT the
-        // DT-consistency clause this cross-section would be flagged
-        // `Narrow`. But at these cells dt = 1 (each is only 1 step from the
-        // staircase's nearest carved-out cell / box edge — a genuinely
-        // *centered* width-3 run would have dt = 2), so
-        // `w = 3 ∉ {2·dt−1, 2·dt} = {1, 2}` — the canonical design-doc Risks
-        // case (§ Risks, "w=3, dt=1") — and the clause correctly rejects
-        // it: the corridor's true perpendicular width (height 6) stays ≥ n
-        // throughout.
-        let mut drivable: Vec<(Coord, Coord)> =
-            (0..14).flat_map(|x| (0..6).map(move |y| (x, y))).collect();
-        drivable.retain(|&(x, y)| !((y == 0 && x < 3) || (y == 1 && x < 2) || (y == 2 && x < 1)));
-        let d = corridor((0, 0), 14, 6, &drivable);
-        assert!(
-            narrow_set(&d, 4).is_empty(),
-            "the staircase taper edge must not report a false Narrow"
-        );
     }
 
     #[test]
@@ -665,8 +517,10 @@ mod tests {
     }
 
     #[test]
-    fn ac7_sharp_neck_yields_exactly_narrow() {
-        // Pinch the left frame arm to a single drivable column at y=10.
+    fn ac7_sharp_neck_yields_narrow_and_concave_chord_cuts() {
+        // Pinch the left frame arm to a single drivable column at y=10 — the
+        // carved row also leaves degree-1 teeth at (1,10) and (3,10)
+        // flanking the surviving driving cell (2,10) (design.md § Risks R7).
         let mut d = base_ring_d();
         for x in [0, 1, 3, 4, 5] {
             d.set(Point::new(x, 10), false);
@@ -678,23 +532,41 @@ mod tests {
             .collect();
         assert_eq!(
             issues,
-            HashSet::from([Issue::Narrow {
-                center: Point::new(2, 10),
-                axis: Orient::Horizontal,
-                width: 1,
-            }]),
+            HashSet::from([
+                Issue::Narrow {
+                    center: Point::new(2, 10),
+                    axis: Orient::Horizontal,
+                    width: 1,
+                },
+                Issue::ConcaveChordCut {
+                    tooth: Point::new(1, 10)
+                },
+                Issue::ConcaveChordCut {
+                    tooth: Point::new(3, 10)
+                },
+            ]),
         );
     }
 
     #[test]
-    fn ac7_disk_merge_yields_exactly_bad_topology() {
+    fn ac7_disk_merge_yields_bad_topology_and_arms_merging() {
+        // A fully-drivable 21x21 makes all of H drivable, so ArmsMerging
+        // fires alongside BadTopology (design.md § Risks R7).
         let d = Corridor::filled(Point::new(0, 0), 21, 21);
         let skel = plain_hole_skel();
         let sf = clean_sf();
         let issues: HashSet<Issue> = phase4_static_checks(&d, &skel, 3, 3, 4, &sf)
             .into_iter()
             .collect();
-        assert_eq!(issues, HashSet::from([Issue::BadTopology]));
+        assert_eq!(
+            issues,
+            HashSet::from([
+                Issue::BadTopology,
+                Issue::ArmsMerging {
+                    bridge: Point::new(6, 6)
+                },
+            ]),
+        );
     }
 
     #[test]
@@ -716,7 +588,9 @@ mod tests {
     }
 
     #[test]
-    fn ac7_filled_finger_yields_exactly_lost_hairpin() {
+    fn ac7_filled_finger_yields_lost_hairpin_and_arms_merging() {
+        // The filled finger footprint is drivable inside H, so ArmsMerging
+        // also fires alongside LostHairpin (design.md § Risks R7).
         let d = base_ring_d();
         let skel = hole_with_finger_skel();
         let sf = clean_sf();
@@ -725,9 +599,14 @@ mod tests {
             .collect();
         assert_eq!(
             issues,
-            HashSet::from([Issue::LostHairpin {
-                tip: Point::new(5, 3),
-            }]),
+            HashSet::from([
+                Issue::LostHairpin {
+                    tip: Point::new(5, 3),
+                },
+                Issue::ArmsMerging {
+                    bridge: Point::new(15, 9)
+                },
+            ]),
         );
     }
 
