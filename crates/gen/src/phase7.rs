@@ -6,8 +6,8 @@
 //! corner, and spur branches on infield-finger / hairpin tracks (its own
 //! rustdoc names these as `racing_line`'s job). [`racing_line`] turns that set
 //! into one closed, arc-length-parameterised, `race_dir`-oriented loop:
-//! bridge cross-component gaps (4-connectivity + [`supercover`]) → prune
-//! degree-1 spurs → walk a straightest-continuation cycle anchored at
+//! bridge cross-component gaps (a minimal 4-connected rectilinear path) →
+//! prune degree-1 spurs → walk a straightest-continuation cycle anchored at
 //! `gate`'s forward face → orient by integer shoelace winding vs `race_dir`
 //! → resample by arc length → wraparound unit tangents. Every failure path
 //! (empty medial axis, an unbridgeable gap, an empty post-prune core, or a
@@ -17,7 +17,7 @@
 
 use std::collections::BTreeSet;
 
-use gp_core::geom::{Corridor, DistanceTransform, Point, medial_axis, supercover};
+use gp_core::geom::{Corridor, DistanceTransform, Point, medial_axis};
 use gp_core::track::{Centerline, CenterlineSample, RaceDir, TimingGate};
 
 /// Maximum Manhattan gap (in cells) [`bridge_gaps`] will bridge between two
@@ -31,6 +31,81 @@ const MAX_BRIDGE_GAP: i32 = 6;
 /// concern regardless of the (bounded, grid-realistic) input magnitudes.
 fn manhattan(a: Point, b: Point) -> i64 {
     i64::from(a.x.abs_diff(b.x)).saturating_add(i64::from(a.y.abs_diff(b.y)))
+}
+
+/// A minimal 4-connected rectilinear path from `a` to `b`, inclusive of both
+/// endpoints (`manhattan(a, b) + 1` cells): every `x` step first when
+/// `x_first`, else every `y` step first.
+fn rectilinear_path(a: Point, b: Point, x_first: bool) -> Vec<Point> {
+    let mut path = Vec::with_capacity(1);
+    let mut cur = a;
+    path.push(cur);
+    let step_x = |cur: &mut Point, path: &mut Vec<Point>| {
+        while cur.x != b.x {
+            cur.x = if b.x > cur.x {
+                cur.x.saturating_add(1)
+            } else {
+                cur.x.saturating_sub(1)
+            };
+            path.push(*cur);
+        }
+    };
+    let step_y = |cur: &mut Point, path: &mut Vec<Point>| {
+        while cur.y != b.y {
+            cur.y = if b.y > cur.y {
+                cur.y.saturating_add(1)
+            } else {
+                cur.y.saturating_sub(1)
+            };
+            path.push(*cur);
+        }
+    };
+    if x_first {
+        step_x(&mut cur, &mut path);
+        step_y(&mut cur, &mut path);
+    } else {
+        step_y(&mut cur, &mut path);
+        step_x(&mut cur, &mut path);
+    }
+    path
+}
+
+/// The bridging path [`bridge_gaps`] inserts between leaf cells `a` and `b`.
+///
+/// Tries the `x`-then-`y` [`rectilinear_path`] first and the `y`-then-`x`
+/// path second, preferring whichever lies **entirely** within `d`
+/// (deterministic: `x`-then-`y` wins a tie). Falls back to the `x`-then-`y`
+/// path (its cells still individually filtered by `d.contains` at the call
+/// site) if neither lies entirely within `d` — this only under- rather than
+/// over-connects, never introduces a cell outside `d`.
+///
+/// **Why not [`gp_core::geom::supercover`]:** `supercover`'s closed-square
+/// touch test is exactly right for a moving car's chord (design doc §3 C4),
+/// but over a corridor **thicker** than one cell (the realistic case —
+/// generated tracks are `>= n` cells wide, design doc §1) a diagonal corner
+/// gap's `supercover(a, b)` touches a small *blob* of cells, not a thin path,
+/// and that blob can touch the existing medial ridge at more than one point —
+/// creating a degree-3/4 junction that [`prune_spurs`] (degree-`< 2`-only)
+/// cannot remove and that can dead-end [`walk_cycle`]'s non-backtracking
+/// search (found via this module's own AC7 annulus test: `supercover`-
+/// bridging left 12 degree-`> 2` cells around the ring's 4 corners, and the
+/// walk failed to close). A minimal single-width rectilinear path only ever
+/// adds one new neighbor to each of its interior cells, so it cannot
+/// introduce that branching — **why try both axis orders:** a single fixed
+/// order (e.g. always `x`-then-`y`) can route through a `¬D` cell (e.g. the
+/// annulus's own centre hole) that the *other* order would have gone around,
+/// even though a valid in-`D` 4-connected path exists (also found via the
+/// AC7 annulus test).
+fn bridge_path(d: &Corridor, a: Point, b: Point) -> Vec<Point> {
+    let x_first = rectilinear_path(a, b, true);
+    if x_first.iter().all(|&p| d.contains(p)) {
+        return x_first;
+    }
+    let y_first = rectilinear_path(a, b, false);
+    if y_first.iter().all(|&p| d.contains(p)) {
+        return y_first;
+    }
+    x_first
 }
 
 /// The 4-connected components of `cells`, as a `Vec` of disjoint `BTreeSet`s.
@@ -64,8 +139,9 @@ fn components(cells: &BTreeSet<Point>) -> Vec<BTreeSet<Point>> {
 /// Repeatedly finds the minimal-Manhattan-distance pair of degree-`< 2`
 /// ("leaf") cells `(a, b)` that are not already 4-adjacent, preferring a
 /// cross-component pair over a same-component one whenever both exist, and
-/// inserts every `supercover(a, b)` cell that lies in `d` into the set
-/// (deterministic tie-break: minimal `(a, b)` by `Point`'s derived `Ord`,
+/// inserts every cell [`bridge_path`] returns for `(d, a, b)` that lies in
+/// `d` into the set (deterministic tie-break: minimal `(a, b)` by `Point`'s
+/// derived `Ord`,
 /// `a <= b`). Stops when fewer than 2 leaves remain.
 ///
 /// **Why same-component pairs too, not only cross-component:** merely
@@ -125,7 +201,7 @@ fn bridge_gaps(d: &Corridor, medial: BTreeSet<Point>) -> Option<BTreeSet<Point>>
             return None;
         }
         let before = cells.len();
-        for p in supercover(a, b) {
+        for p in bridge_path(d, a, b) {
             if d.contains(p) {
                 cells.insert(p);
             }

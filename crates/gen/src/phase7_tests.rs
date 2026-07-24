@@ -341,3 +341,106 @@ fn ac5_gp_ai_never_references_centerline() {
         "gp-ai must not reference Centerline/.centerline: {offenders:?}"
     );
 }
+
+/// Subtask 7 (AC7, primary fixture): the odd-thickness annulus ring's
+/// centerline closes, `s` is monotone and ~evenly spaced, and tangents are
+/// unit-length and `race_dir`-aligned (overall winding sign positive for
+/// `Ccw`).
+#[test]
+fn ac7_annulus_closes_monotone_and_race_dir_aligned() {
+    let d = crate::testfix::annulus_corridor();
+    let gate = crate::testfix::annulus_gate();
+    let cl = racing_line(&d, &gate, RaceDir::Ccw);
+
+    assert!(
+        !cl.samples.is_empty(),
+        "the annulus must produce a closed loop"
+    );
+    assert!(cl.samples[0].s.abs() < f32::EPSILON);
+    for w in cl.samples.windows(2) {
+        assert!(w[1].s > w[0].s, "s must be strictly increasing");
+        assert!(
+            (w[1].s - w[0].s - RESAMPLE_STEP).abs() < 0.5,
+            "spacing must be close to RESAMPLE_STEP"
+        );
+    }
+    for sample in &cl.samples {
+        let mag = sample.tangent.0.hypot(sample.tangent.1);
+        assert!((mag - 1.0).abs() < 1e-4, "tangent must be unit-length");
+    }
+    assert!(
+        sample_signed_area(&cl) > 0.0,
+        "Ccw sample polygon must wind positive"
+    );
+}
+
+/// Subtask 7 (AC1): the `trap_ring` fixture (a clean border ring plus a
+/// dangling interior spur) trims to a single non-branching loop — no sample
+/// sits on the pruned spur's cells (`x == 6`, `y ∈ 1..=5`).
+#[test]
+fn ac1_prunes_spur_to_a_single_non_branching_loop() {
+    let (d, sf, _grid) = crate::testfix::trap_ring();
+    let gate = sf.gate;
+    let cl = racing_line(&d, &gate, RaceDir::Ccw);
+
+    assert!(
+        !cl.samples.is_empty(),
+        "the ring must still close despite the spur"
+    );
+    for sample in &cl.samples {
+        let (x, y) = sample.pos;
+        let on_spur = (x - 6.0).abs() < 0.5 && (1.0..=5.0).contains(&y);
+        assert!(!on_spur, "sample at ({x}, {y}) sits on the pruned spur");
+    }
+}
+
+/// Subtask 7 (AC2): the closed loop wraps — `at(length) ≡ at(0)` and
+/// `at(length + x) ≡ at(x)`.
+#[test]
+fn ac2_wraps_around_the_closed_loop() {
+    let d = small_ring_corridor();
+    let gate = small_ring_gate();
+    let cl = racing_line(&d, &gate, RaceDir::Ccw);
+
+    let at0 = cl.at(0.0).expect("must have samples");
+    let at_len = cl.at(cl.length).expect("must wrap at length");
+    assert!((at0.pos.0 - at_len.pos.0).abs() < 1e-3);
+    assert!((at0.pos.1 - at_len.pos.1).abs() < 1e-3);
+
+    let x = 1.5;
+    let a = cl.at(x).expect("must sample at x");
+    let b = cl.at(cl.length + x).expect("must sample at length + x");
+    assert!((a.pos.0 - b.pos.0).abs() < 1e-3);
+    assert!((a.pos.1 - b.pos.1).abs() < 1e-3);
+}
+
+/// Whether `a` and `b` are field-by-field bit-identical (AC6).
+#[allow(
+    clippy::float_cmp,
+    reason = "AC6 explicitly requires byte-identical repeats of a fully \
+              deterministic pipeline (medial_axis/bridge/prune/walk are all \
+              integer-only; resample/tangent math runs the same fixed \
+              arithmetic on the same inputs both times) - an epsilon would \
+              mask a real determinism regression, which is exactly what this \
+              test exists to catch"
+)]
+fn centerlines_match_exactly(a: &Centerline, b: &Centerline) -> bool {
+    a.length == b.length
+        && a.samples.len() == b.samples.len()
+        && a.samples
+            .iter()
+            .zip(b.samples.iter())
+            .all(|(sa, sb)| sa.s == sb.s && sa.pos == sb.pos && sa.tangent == sb.tangent)
+}
+
+/// Subtask 7 (AC6): repeated `racing_line` runs on the same `(d, gate,
+/// race_dir)` produce a field-by-field identical `Centerline`.
+#[test]
+fn ac6_racing_line_is_deterministic() {
+    let d = crate::testfix::annulus_corridor();
+    let gate = crate::testfix::annulus_gate();
+    let cl1 = racing_line(&d, &gate, RaceDir::Ccw);
+    let cl2 = racing_line(&d, &gate, RaceDir::Ccw);
+    assert!(!cl1.samples.is_empty(), "must produce a real loop");
+    assert!(centerlines_match_exactly(&cl1, &cl2));
+}

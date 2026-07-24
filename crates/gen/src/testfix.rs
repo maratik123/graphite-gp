@@ -49,6 +49,16 @@ pub(crate) fn annulus_corridor() -> Corridor {
     d
 }
 
+/// The annulus ring's timing gate: behind the top strip's `(5, 1)` cell,
+/// forward `East` — an anchor near the top strip's midpoint for
+/// `racing_line`'s gate-anchored walk start.
+pub(crate) fn annulus_gate() -> TimingGate {
+    TimingGate {
+        behind: vec![Point::new(5, 1)],
+        forward: Side::East,
+    }
+}
+
 /// Shorthand `CarState` constructor for test fixtures.
 pub(crate) const fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
     CarState { x, y, vx, vy }
