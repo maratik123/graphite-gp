@@ -1,9 +1,9 @@
 //! Ф6 — the single-pass local-repair driver: public types, the crate-local
-//! dispatch vocabulary, `recheck_scope`, the severity ordering
-//! (`issue_rank`/`issue_sort_key`), the per-label `dispatch` function, and
-//! the top-level [`phase6_local_repair`] entry point (design doc §2 Ф6,
-//! `[C3]`; `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md`
-//! § Approach, § Decision 4).
+//! dispatch vocabulary, `recheck_scope`, the derived [`DispatchLabel`]
+//! severity ordering, the per-label `dispatch` function, and the top-level
+//! [`phase6_local_repair`] entry point (design doc §2 Ф6, `[C3]`;
+//! `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md` § Approach,
+//! § Decision 4).
 
 use gp_core::geom::{Corridor, Point, Wall};
 use gp_core::track::{RaceDir, StartFinish, StartGrid, TrackMetrics};
@@ -166,73 +166,17 @@ pub(crate) enum DeclineReason {
 /// payload of its own (design.md § Approach; the `Issue` enum has no
 /// `DynamicallyDisconnected` variant — #30 settled that the dynamic verdict
 /// rides `OracleResult::NotLappable` instead).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum DispatchLabel {
-    /// A statically or dynamically detected [`Issue`].
+    /// A statically or dynamically detected [`Issue`]. Sorts by `Issue`'s
+    /// derived severity order (`phase4.rs`'s variant declaration order:
+    /// `Disconnected` highest, `NoBraking` lowest).
     Issue(Issue),
-    /// The dynamic frontier-gap arm, driven by `ctx.stall_walls`.
+    /// The dynamic frontier-gap arm, driven by `ctx.stall_walls`. Declared
+    /// last, so the derived `Ord` sorts it strictly after every
+    /// `Issue(_)` — the most global add, benefiting from every earlier
+    /// repair.
     DynamicStall,
-}
-
-/// The axis-order rank of an [`gp_core::geom::Orient`] for [`issue_sort_key`]
-/// — `Horizontal` before `Vertical`. Neither `Orient` nor `Issue` derives
-/// `Ord` (a `gp-core`/`phase4.rs` change, out of scope), so this crate-local
-/// key gives the sort a total order, mirroring `phase5b::wall_sort_key`.
-const fn axis_rank(axis: gp_core::geom::Orient) -> u8 {
-    match axis {
-        gp_core::geom::Orient::Horizontal => 0,
-        gp_core::geom::Orient::Vertical => 1,
-    }
-}
-
-/// The fixed severity rank of `Issue` `i`, `0` (highest) to `7` (design.md
-/// § Decision 4's rank table) — **not** `phase4_static_checks`' emission
-/// order, so a future Ф4 refactor cannot silently change Ф6's outcome.
-#[must_use]
-pub(crate) const fn issue_rank(i: Issue) -> u8 {
-    match i {
-        Issue::Disconnected => 0,
-        Issue::BadTopology => 1,
-        Issue::LostHairpin { .. } => 2,
-        Issue::ArmsMerging { .. } => 3,
-        Issue::ConcaveChordCut { .. } => 4,
-        Issue::Narrow { .. } => 5,
-        Issue::NarrowSf { .. } => 6,
-        Issue::NoBraking { .. } => 7,
-    }
-}
-
-/// The total sort key for `label`: `(rank, payload Point, axis rank, width)`
-/// (design.md § Decision 4), rank `8` for [`DispatchLabel::DynamicStall`]
-/// (runs last — the most global add, benefiting from every earlier repair).
-/// A `DispatchLabel::Issue` payload with no natural `Point`/axis/width
-/// (`Disconnected`/`BadTopology`) keys on the zero point — both decline
-/// before any arm reads a payload, so their relative order among themselves
-/// is immaterial.
-pub(crate) const fn issue_sort_key(label: DispatchLabel) -> (u8, Point, u8, u32) {
-    match label {
-        DispatchLabel::DynamicStall => (8, Point::new(0, 0), 0, 0),
-        DispatchLabel::Issue(i) => {
-            let rank = issue_rank(i);
-            match i {
-                Issue::Disconnected | Issue::BadTopology => (rank, Point::new(0, 0), 0, 0),
-                Issue::LostHairpin { tip } => (rank, tip, 0, 0),
-                Issue::ArmsMerging { bridge } => (rank, bridge, 0, 0),
-                Issue::ConcaveChordCut { tooth } => (rank, tooth, 0, 0),
-                Issue::NoBraking { at } => (rank, at, 0, 0),
-                Issue::Narrow {
-                    center,
-                    axis,
-                    width,
-                }
-                | Issue::NarrowSf {
-                    center,
-                    axis,
-                    width,
-                } => (rank, center, axis_rank(axis), width),
-            }
-        }
-    }
 }
 
 /// Dispatches one `label` against the working corridor `working`
@@ -304,8 +248,8 @@ fn dispatch_dynamic_stall(
 /// "single pass").
 ///
 /// Builds the dispatch list — every `issues` entry plus one
-/// `DispatchLabel::DynamicStall` — sorts it by `issue_sort_key` (fixed
-/// severity order, design.md § Decision 4), then walks it once: each
+/// `DispatchLabel::DynamicStall` — sorts it via `DispatchLabel`'s derived
+/// `Ord` (fixed severity order, design.md § Decision 4), then walks it once: each
 /// `dispatch` call sees the corridor as edited by every prior commit in
 /// the pass, and a committed edit is applied to the working corridor before
 /// the next label is dispatched. Returns [`RepairOutcome::Failed`] iff
@@ -315,7 +259,7 @@ fn dispatch_dynamic_stall(
 pub fn phase6_local_repair(ctx: &RepairContext<'_>, issues: &[Issue]) -> RepairOutcome {
     let mut labels: Vec<DispatchLabel> = issues.iter().copied().map(DispatchLabel::Issue).collect();
     labels.push(DispatchLabel::DynamicStall);
-    labels.sort_by_key(|&l| issue_sort_key(l));
+    labels.sort();
 
     let mut working = ctx.d.clone();
     let mut edits = Vec::new();
@@ -379,53 +323,101 @@ mod tests {
     }
 
     #[test]
-    fn issue_rank_matches_the_pinned_severity_table() {
-        assert_eq!(issue_rank(Issue::Disconnected), 0);
-        assert_eq!(issue_rank(Issue::BadTopology), 1);
-        assert_eq!(
-            issue_rank(Issue::LostHairpin {
+    fn issue_ord_matches_the_pinned_severity_table() {
+        // AC2: derived Ord orders Issue by the pinned severity table
+        // (design.md § Decision 4) — the same rank 0 (highest) .. 7
+        // (lowest) the deleted severity-rank table asserted, now via
+        // variant declaration order.
+        assert!(Issue::Disconnected < Issue::BadTopology);
+        assert!(
+            Issue::BadTopology
+                < Issue::LostHairpin {
+                    tip: Point::new(0, 0)
+                }
+        );
+        assert!(
+            Issue::LostHairpin {
                 tip: Point::new(0, 0)
-            }),
-            2
-        );
-        assert_eq!(
-            issue_rank(Issue::ArmsMerging {
+            } < Issue::ArmsMerging {
                 bridge: Point::new(0, 0)
-            }),
-            3
+            }
         );
-        assert_eq!(
-            issue_rank(Issue::ConcaveChordCut {
+        assert!(
+            Issue::ArmsMerging {
+                bridge: Point::new(0, 0)
+            } < Issue::ConcaveChordCut {
                 tooth: Point::new(0, 0)
-            }),
-            4
+            }
         );
-        assert_eq!(
-            issue_rank(Issue::Narrow {
+        assert!(
+            Issue::ConcaveChordCut {
+                tooth: Point::new(0, 0)
+            } < Issue::Narrow {
                 center: Point::new(0, 0),
                 axis: Orient::Horizontal,
                 width: 1,
-            }),
-            5
+            }
         );
-        assert_eq!(
-            issue_rank(Issue::NarrowSf {
+        assert!(
+            Issue::Narrow {
                 center: Point::new(0, 0),
                 axis: Orient::Horizontal,
                 width: 1,
-            }),
-            6
+            } < Issue::NarrowSf {
+                center: Point::new(0, 0),
+                axis: Orient::Horizontal,
+                width: 1,
+            }
         );
-        assert_eq!(
-            issue_rank(Issue::NoBraking {
+        assert!(
+            Issue::NarrowSf {
+                center: Point::new(0, 0),
+                axis: Orient::Horizontal,
+                width: 1,
+            } < Issue::NoBraking {
                 at: Point::new(0, 0)
-            }),
-            7
+            }
         );
     }
 
     #[test]
-    fn issue_sort_key_orders_removes_before_adds_regardless_of_input_order() {
+    fn dynamic_stall_sorts_after_every_issue() {
+        // AC3: DispatchLabel::DynamicStall sorts strictly after every
+        // Issue(_) variant — the old rank-8 "runs last" behaviour, now via
+        // DispatchLabel's derived Ord (DynamicStall declared last).
+        let issues = [
+            Issue::Disconnected,
+            Issue::BadTopology,
+            Issue::LostHairpin {
+                tip: Point::new(0, 0),
+            },
+            Issue::ArmsMerging {
+                bridge: Point::new(0, 0),
+            },
+            Issue::ConcaveChordCut {
+                tooth: Point::new(0, 0),
+            },
+            Issue::Narrow {
+                center: Point::new(0, 0),
+                axis: Orient::Horizontal,
+                width: 1,
+            },
+            Issue::NarrowSf {
+                center: Point::new(0, 0),
+                axis: Orient::Horizontal,
+                width: 1,
+            },
+            Issue::NoBraking {
+                at: Point::new(0, 0),
+            },
+        ];
+        for v in issues {
+            assert!(DispatchLabel::Issue(v) < DispatchLabel::DynamicStall);
+        }
+    }
+
+    #[test]
+    fn dispatch_label_ord_orders_removes_before_adds_regardless_of_input_order() {
         let mut labels = [
             DispatchLabel::Issue(Issue::NoBraking {
                 at: Point::new(0, 0),
@@ -436,7 +428,7 @@ mod tests {
             }),
             DispatchLabel::Issue(Issue::Disconnected),
         ];
-        labels.sort_by_key(|&l| issue_sort_key(l));
+        labels.sort();
         assert_eq!(labels[0], DispatchLabel::Issue(Issue::Disconnected));
         assert_eq!(
             labels[1],
@@ -454,20 +446,27 @@ mod tests {
     }
 
     #[test]
-    fn issue_sort_key_breaks_same_rank_ties_by_ascending_payload_point() {
-        let a = Issue::ArmsMerging {
+    fn dispatch_label_ord_breaks_same_rank_ties_by_ascending_payload_point() {
+        let a = DispatchLabel::Issue(Issue::ArmsMerging {
             bridge: Point::new(2, 2),
-        };
-        let b = Issue::ArmsMerging {
+        });
+        let b = DispatchLabel::Issue(Issue::ArmsMerging {
             bridge: Point::new(1, 1),
-        };
-        let mut keys = [
-            issue_sort_key(DispatchLabel::Issue(a)),
-            issue_sort_key(DispatchLabel::Issue(b)),
-        ];
-        keys.sort();
-        assert_eq!(keys[0].1, Point::new(1, 1));
-        assert_eq!(keys[1].1, Point::new(2, 2));
+        });
+        let mut labels = [a, b];
+        labels.sort();
+        assert_eq!(
+            labels[0],
+            DispatchLabel::Issue(Issue::ArmsMerging {
+                bridge: Point::new(1, 1)
+            })
+        );
+        assert_eq!(
+            labels[1],
+            DispatchLabel::Issue(Issue::ArmsMerging {
+                bridge: Point::new(2, 2)
+            })
+        );
     }
 
     // ---- dispatch / phase6_local_repair ------------------------------------

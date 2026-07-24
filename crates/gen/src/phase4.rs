@@ -27,12 +27,36 @@ use crate::coarse::block_points;
 /// Payloads carry the minimum locality the future Ф6 repair phase needs to
 /// re-derive the wall/edge it must move (design doc §2 Ф6: `NARROW →
 /// push_outer_wall_out`, `LOST_HAIRPIN → trim_arm_wall / nudge_finger`).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Issue {
     /// `D` has more than one 4-connected component (AC1).
     Disconnected,
     /// `D`'s complement does not have exactly one bounded hole (AC2).
     BadTopology,
+    /// A coarse infield finger has been absorbed — its separating strip is
+    /// entirely filled, merging its two flanking arms (design doc §1).
+    LostHairpin {
+        /// The finger's coarse tip — the anchor Ф6's `nudge_finger` acts near.
+        tip: Point,
+    },
+    /// A drivable fine cell has intruded into the expanded coarse-hole mask
+    /// `H`, bridging the corridor across the infield and threatening to merge
+    /// its two arms (design doc §2 Ф6: `ARMS_MERGING → trim_arm_wall`).
+    /// Detected in `phase4_defects.rs`.
+    ArmsMerging {
+        /// The drivable intrusion cell Ф6's `trim_arm_wall` makes
+        /// non-drivable — the min-`Point` anchor of its 4-connected
+        /// intrusion component.
+        bridge: Point,
+    },
+    /// A degree-1 non-drivable protrusion into the corridor cuts a concave
+    /// corner the strict supercover predicate refuses to graze past (design
+    /// doc §2 Ф6: `CONCAVE_CHORD_CUT → fill_inner_tooth`). Detected in
+    /// `phase4_defects.rs`.
+    ConcaveChordCut {
+        /// The protruding cell Ф6's `fill_inner_tooth` makes drivable.
+        tooth: Point,
+    },
     /// A perpendicular cross-section of `D` is narrower than the global width
     /// floor `n`.
     Narrow {
@@ -54,30 +78,6 @@ pub enum Issue {
         axis: Orient,
         /// The measured chord width (`sf.chord.len()`).
         width: u32,
-    },
-    /// A coarse infield finger has been absorbed — its separating strip is
-    /// entirely filled, merging its two flanking arms (design doc §1).
-    LostHairpin {
-        /// The finger's coarse tip — the anchor Ф6's `nudge_finger` acts near.
-        tip: Point,
-    },
-    /// A degree-1 non-drivable protrusion into the corridor cuts a concave
-    /// corner the strict supercover predicate refuses to graze past (design
-    /// doc §2 Ф6: `CONCAVE_CHORD_CUT → fill_inner_tooth`). Detected in
-    /// `phase4_defects.rs`.
-    ConcaveChordCut {
-        /// The protruding cell Ф6's `fill_inner_tooth` makes drivable.
-        tooth: Point,
-    },
-    /// A drivable fine cell has intruded into the expanded coarse-hole mask
-    /// `H`, bridging the corridor across the infield and threatening to merge
-    /// its two arms (design doc §2 Ф6: `ARMS_MERGING → trim_arm_wall`).
-    /// Detected in `phase4_defects.rs`.
-    ArmsMerging {
-        /// The drivable intrusion cell Ф6's `trim_arm_wall` makes
-        /// non-drivable — the min-`Point` anchor of its 4-connected
-        /// intrusion component.
-        bridge: Point,
     },
     /// A corner-entry path point has insufficient run-out room to brake from
     /// its attainable entry speed to a speed with a legal successor at the

@@ -17,7 +17,7 @@ use super::{Coord, Corridor, Point, Wall};
 /// The outward direction from a drivable cell toward a non-drivable neighbor
 /// (design doc §1). Variant order mirrors [`Point::neighbors4`]: east, west,
 /// north, south.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, strum::EnumIter)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, strum::EnumIter)]
 pub enum Side {
     /// The +x side — toward the eastern neighbor.
     East,
@@ -392,6 +392,23 @@ mod tests {
     /// Collect `walls_from_boundary` into a `HashSet` (edge order is an impl detail).
     fn wall_set(d: &Corridor) -> HashSet<Wall> {
         walls_from_boundary(d).into_iter().collect()
+    }
+
+    #[test]
+    fn side_ord_orders_east_west_north_south() {
+        // AC9: derived Ord orders East < West < North < South — the side rank
+        // East=0, West=1, North=2, South=3 that phase6 wall ordering relies on,
+        // now term-for-term from the derive.
+        assert!(Side::East < Side::West);
+        assert!(Side::West < Side::North);
+        assert!(Side::North < Side::South);
+
+        let mut sides = vec![Side::South, Side::North, Side::West, Side::East];
+        sides.sort();
+        assert_eq!(
+            sides,
+            vec![Side::East, Side::West, Side::North, Side::South]
+        );
     }
 
     #[test]

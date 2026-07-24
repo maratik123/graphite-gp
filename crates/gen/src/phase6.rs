@@ -59,7 +59,7 @@
 //!
 //! # Tie-break refinement left un-adopted
 //!
-//! The mapper's max-growth-then-`wall_sort_key` tie-break was considered
+//! The mapper's max-growth-then-derived-`Wall`-order tie-break was considered
 //! against a "prefer the edge nearest the medial axis" quality refinement
 //! (spec § Open questions). Not adopted: it would need a
 //! [`gp_core::geom::DistanceTransform`] computed per candidate, for a
@@ -73,7 +73,7 @@ use gp_core::sim::CarState;
 use gp_core::track::{RaceDir, StartFinish, StartGrid};
 
 use crate::phase5::ORACLE_V1_CEIL;
-use crate::phase5b::{fastest_lap_through_live, live_at, wall_neighbor, wall_sort_key};
+use crate::phase5b::{fastest_lap_through_live, live_at, wall_neighbor};
 
 /// The progress metric (spec § Progress metric): the phase-0 reachable
 /// **cell** set `P0` at the fixed `V_ceil = 1` ceiling, post-race-start,
@@ -124,7 +124,7 @@ pub enum RepairCandidate {
 /// of `d` (never trusting the diagnostic — AC10), scratch-applies the
 /// corresponding add-edit, and keeps the candidate only if it **strictly**
 /// grows `|P0|` at `V_ceil = 1`. Among surviving candidates, picks the one
-/// with **max growth**, ties broken by **min `wall_sort_key`** — a
+/// with **max growth**, ties broken by **min derived `Wall` order** — a
 /// function of the candidate *set*, not the input slice's order, so the
 /// result is order-independent (AC11) even for an unsorted or shuffled
 /// `stall_walls`. No surviving candidate yields
@@ -166,9 +166,7 @@ pub fn map_frontier_gap_to_edge(
         best = Some(match best {
             None => (grown, w),
             Some((best_grown, best_w)) => {
-                if grown > best_grown
-                    || (grown == best_grown && wall_sort_key(w) < wall_sort_key(best_w))
-                {
+                if grown > best_grown || (grown == best_grown && w < best_w) {
                     (grown, w)
                 } else {
                     (best_grown, best_w)
@@ -355,8 +353,8 @@ mod tests {
         // (3, 0)'s North side is also an admissible candidate on the broken
         // ring: its off-D neighbor (3, 1) is in-box and non-drivable, so it
         // passes the mapper's admissibility filter -- this test pins that
-        // `max grown` (not `wall_sort_key`, which would pick (3,0) < (4,1))
-        // is the rule that selects (4,1)North.
+        // `max grown` (not the derived Wall order, which would pick
+        // (3,0) < (4,1)) is the rule that selects (4,1)North.
         let (d, sf, grid, _) = broken_ring_diagnostic();
 
         let severed = Wall {
@@ -388,7 +386,7 @@ mod tests {
         );
 
         // Both candidates admissible; the mapper must still pick the
-        // higher-growth one, not (3,0) via wall_sort_key ascending order.
+        // higher-growth one, not (3,0) via the derived Wall ascending order.
         let both = [lesser, severed];
         assert_eq!(
             map_frontier_gap_to_edge(&d, &grid, &sf, RaceDir::Ccw, &both),

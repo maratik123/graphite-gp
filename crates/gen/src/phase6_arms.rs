@@ -13,7 +13,7 @@ use strum::IntoEnumIterator;
 
 use crate::phase4_defects::{axis_width, is_concave_chord_cut};
 use crate::phase5_runout::{end_of_ray, sink_to_sink_deficit, travel_dir};
-use crate::phase5b::{wall_neighbor, wall_sort_key};
+use crate::phase5b::wall_neighbor;
 use crate::phase6_repair::{ArmOutcome, CommittedEdit, DeclineReason, RepairArm, recheck_scope};
 
 /// Whether `p` lies inside `d`'s own bounding box (in-box, independent of
@@ -37,8 +37,8 @@ pub(crate) fn in_box(d: &Corridor, p: Point) -> bool {
 /// when there is no such wall (design.md § The five arms, "add on cell
 /// `q`"): `q` must be in-box, currently `¬D`, and have at least one
 /// 4-neighbor already in `D`. Among the walls `w` with `w.cell ∈ D` and
-/// `wall_neighbor(w) == Some(q)`, picks the min [`wall_sort_key`] — the
-/// canonical wall when several identify the same flip.
+/// `wall_neighbor(w) == Some(q)`, picks the min by [`Wall`]'s derived `Ord`
+/// — the canonical wall when several identify the same flip.
 pub(crate) fn add_edit_wall(d: &Corridor, q: Point) -> Option<Wall> {
     if !in_box(d, q) || d.contains(q) {
         return None;
@@ -49,7 +49,7 @@ pub(crate) fn add_edit_wall(d: &Corridor, q: Point) -> Option<Wall> {
             let cell = Point::new(q.x.checked_sub(dx)?, q.y.checked_sub(dy)?);
             d.contains(cell).then_some(Wall { cell, side })
         })
-        .min_by_key(|&w| wall_sort_key(w))
+        .min()
 }
 
 /// The canonical wall naming the remove-edit that makes `c` non-drivable, or
@@ -58,7 +58,7 @@ pub(crate) fn add_edit_wall(d: &Corridor, q: Point) -> Option<Wall> {
 /// neighbor is `¬D`/out-of-box. `c` with **no** such side is `D`-interior —
 /// removing it would punch a new hole, so `None` (the caller returns
 /// `NoEdit(NoCandidate)`) rather than proposing a non-boundary flip. Among
-/// the admissible sides, picks the min [`wall_sort_key`].
+/// the admissible sides, picks the min by [`Wall`]'s derived `Ord`.
 pub(crate) fn remove_edit_wall(d: &Corridor, c: Point) -> Option<Wall> {
     if !d.contains(c) {
         return None;
@@ -68,7 +68,7 @@ pub(crate) fn remove_edit_wall(d: &Corridor, c: Point) -> Option<Wall> {
             wall_neighbor(Wall { cell: c, side }).is_none_or(|neighbor| !d.contains(neighbor))
         })
         .map(|side| Wall { cell: c, side })
-        .min_by_key(|&w| wall_sort_key(w))
+        .min()
 }
 
 /// Applies one dual-edge edit to a scratch copy of `d` (design.md § The five
@@ -114,7 +114,7 @@ const fn axis_positive_dir(axis: Orient) -> (i32, i32) {
 /// `push_outer_wall_out`): tries both of the narrow chord's cap walls
 /// (`{center, -axis}` and `{far_end, +axis}`, `far_end` re-derived by
 /// walking `end_of_ray` from `center`), picks the admissible candidate with
-/// max [`axis_width`] gain (tie broken by min [`wall_sort_key`]).
+/// max [`axis_width`] gain (tie broken by min [`Wall`]'s derived `Ord`).
 ///
 /// Re-validates `center ∈ D` against the working corridor first (the
 /// "never trust the diagnostic" discipline) — a staled payload declines
@@ -156,9 +156,7 @@ pub(crate) fn push_outer_wall_out(d: &Corridor, center: Point, axis: Orient) -> 
         best = Some(match best {
             None => (gain, w, cell),
             Some((best_gain, best_w, best_cell)) => {
-                if gain > best_gain
-                    || (gain == best_gain && wall_sort_key(w) < wall_sort_key(best_w))
-                {
+                if gain > best_gain || (gain == best_gain && w < best_w) {
                     (gain, w, cell)
                 } else {
                     (best_gain, best_w, best_cell)
@@ -236,7 +234,8 @@ const fn perpendicular_sides(dir: (i32, i32)) -> [Side; 2] {
 /// `lengthen_straight` and `widen_corner` candidates are generated,
 /// evaluated under the **same** metric ([`sink_to_sink_deficit`] on a
 /// scratch copy), and the winner is chosen by max deficit reduction → arm
-/// rank (`LengthenStraight` before `WidenCorner`) → min [`wall_sort_key`].
+/// rank (`LengthenStraight` before `WidenCorner`) → min [`Wall`]'s derived
+/// `Ord`.
 ///
 /// Re-validates `c ∈ metrics.fastest_lap` and `c ∈ d` against the working
 /// corridor and metrics first — a stale payload (an earlier edit already
@@ -302,7 +301,7 @@ pub(crate) fn run_out_repair(
             Some((br, bar, bw, ba, bc)) => {
                 if reduction > br
                     || (reduction == br && arm_rank < bar)
-                    || (reduction == br && arm_rank == bar && wall_sort_key(w) < wall_sort_key(bw))
+                    || (reduction == br && arm_rank == bar && w < bw)
                 {
                     (reduction, arm_rank, w, arm, cell)
                 } else {
@@ -350,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn add_edit_wall_picks_the_canonical_min_wall_sort_key() {
+    fn add_edit_wall_picks_the_canonical_min_wall() {
         let d = strip();
         // (0,0)'s only D-neighbor is (1,0) via West -- one candidate.
         let w = add_edit_wall(&d, Point::new(0, 0)).expect("must find a candidate");
@@ -377,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_edit_wall_picks_the_canonical_min_wall_sort_key() {
+    fn remove_edit_wall_picks_the_canonical_min_wall() {
         // (1,0) is D-boundary: West neighbor (0,0) is ¬D.
         let d = strip();
         let w = remove_edit_wall(&d, Point::new(1, 0)).expect("must find a candidate");

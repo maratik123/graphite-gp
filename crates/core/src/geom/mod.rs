@@ -60,7 +60,7 @@ impl Point {
 /// Carried by chords such as the start/finish line
 /// ([`StartFinish`](crate::track::StartFinish)); walls instead carry a 4-way
 /// [`Side`].
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Orient {
     /// Horizontal — spanning east–west.
     Horizontal,
@@ -73,7 +73,7 @@ pub enum Orient {
 /// Anchored to the drivable cell it borders plus which [`Side`] of that cell the
 /// edge sits on. Walls are *derived* from the corridor boundary (design doc §1),
 /// never authored by hand.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Wall {
     /// The drivable cell this edge borders.
     pub cell: Point,
@@ -619,6 +619,59 @@ mod tests {
                 Point::new(0, 5),
                 Point::new(1, 0),
                 Point::new(1, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn orient_ord_orders_horizontal_before_vertical() {
+        // AC1: derived Ord orders Horizontal before Vertical — the ordinal
+        // Horizontal -> 0, Vertical -> 1 that phase6 axis tie-breaking relies
+        // on, now term-for-term from the derive.
+        assert!(Orient::Horizontal < Orient::Vertical);
+        assert_eq!(
+            Orient::Horizontal.cmp(&Orient::Horizontal),
+            std::cmp::Ordering::Equal
+        );
+
+        let mut orients = vec![Orient::Vertical, Orient::Horizontal];
+        orients.sort();
+        assert_eq!(orients, vec![Orient::Horizontal, Orient::Vertical]);
+    }
+
+    #[test]
+    fn wall_ord_orders_by_cell_then_side_rank() {
+        // AC10: derived Ord orders by cell (x then y) first, then side rank
+        // (East < West < North < South) — i.e. (w.cell, side rank of w.side),
+        // the total order phase6 wall dispatch relies on.
+        let w = |x, y, side| Wall {
+            cell: Point::new(x, y),
+            side,
+        };
+        assert!(w(0, 0, Side::East) < w(0, 0, Side::West));
+        assert!(w(0, 0, Side::West) < w(0, 0, Side::North));
+        assert!(w(0, 0, Side::North) < w(0, 0, Side::South));
+        assert!(w(0, 0, Side::South) < w(0, 1, Side::East));
+        assert!(w(0, 1, Side::East) < w(1, 0, Side::East));
+
+        let mut walls = vec![
+            w(1, 0, Side::East),
+            w(0, 1, Side::East),
+            w(0, 0, Side::South),
+            w(0, 0, Side::North),
+            w(0, 0, Side::West),
+            w(0, 0, Side::East),
+        ];
+        walls.sort();
+        assert_eq!(
+            walls,
+            vec![
+                w(0, 0, Side::East),
+                w(0, 0, Side::West),
+                w(0, 0, Side::North),
+                w(0, 0, Side::South),
+                w(0, 1, Side::East),
+                w(1, 0, Side::East),
             ]
         );
     }
