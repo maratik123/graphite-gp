@@ -246,9 +246,39 @@ mod tests {
         assert!(!runout.is_empty());
     }
 
-    // ---- AC4/AC5: end-to-end determinism + invariants -------------------
+    // ---- AC4/AC5/AC8: end-to-end determinism + invariants ---------------
 
+    /// AC4 well-formedness check shared by the AC5(a)/AC5(b)/AC8 tests below:
+    /// `samples` non-empty, `samples[0].s == 0`, strictly increasing `s`, the
+    /// loop wraps (`at(length) ~ at(0)`), and `length > 0.0` with at least the
+    /// minimum 4-connected grid cycle (4 samples).
+    fn assert_well_formed_centerline(cl: &gp_core::track::Centerline) {
+        assert!(!cl.samples.is_empty(), "centerline must have samples");
+        assert!(cl.samples.len() >= 4, "minimum 4-connected grid cycle");
+        assert!(cl.length > 0.0, "centerline must have positive length");
+        assert!(
+            cl.samples[0].s.abs() < f32::EPSILON,
+            "first sample must seed s == 0"
+        );
+        for w in cl.samples.windows(2) {
+            assert!(w[1].s > w[0].s, "s must be strictly increasing");
+        }
+        let at0 = cl.at(0.0).expect("must sample at s=0");
+        let at_len = cl.at(cl.length).expect("must wrap at s=length");
+        assert!(
+            (at0.pos.0 - at_len.pos.0).abs() < 1e-3 && (at0.pos.1 - at_len.pos.1).abs() < 1e-3,
+            "the loop must wrap: at(0) ~ at(length)"
+        );
+    }
+
+    /// AC5(a), heavy: a larger-budget config run twice for full-artifact
+    /// determinism + invariants, including the now-reinstated non-empty,
+    /// well-formed centerline (AC4/AC8). `#[ignore]`d — measured at ~467s in
+    /// debug on this machine (§ progress decisions log), far above the
+    /// default-suite budget; run manually/nightly.
     #[test]
+    #[ignore = "heavy: ~467s debug wall time for a 64-seed/32-repair-budget \
+                sweep — AC5(b) below covers the always-on default-suite case"]
     fn generate_e2e_accepts_a_self_consistent_deterministic_track() {
         let p = params(1, 64, 32);
 
@@ -275,12 +305,37 @@ mod tests {
             assert_eq!(a1.s_field.scalar_at(cell), Some(0));
         }
         assert!(!a1.walls.is_empty());
-        // Non-empty-centerline assertion intentionally NOT here: it fails
-        // until the A1 medial_axis fix + Ф7 bridge-guard land (subtasks 5-7)
-        // and is reinstated in subtask 8's AC5(b)/AC8 e2e tests.
+        assert_well_formed_centerline(&a1.centerline);
         let mut deduped = a1.start_grid.positions.clone();
         deduped.sort();
         deduped.dedup();
         assert_eq!(deduped.len(), a1.start_grid.positions.len());
+    }
+
+    /// AC5(b), cheap: the always-on default-suite config — accepts on the
+    /// first seed draw, deterministic across two runs, non-empty
+    /// well-formed centerline (AC4).
+    #[test]
+    fn generate_e2e_cheap_default_suite_has_a_non_empty_centerline() {
+        let p = params(6, 1, 8);
+
+        let a1 = generate(p).expect("bs=6 seed=6 seed_budget=1 repair_budget=8 must accept");
+        let a2 = generate(p).expect("second run must also accept");
+
+        assert_eq!(format!("{a1:?}"), format!("{a2:?}"), "determinism (AC5)");
+        assert_well_formed_centerline(&a1.centerline);
+    }
+
+    /// AC8 regression: running the accepted artifact's own corridor/gate/
+    /// `race_dir` directly through `racing_line` (not the hand-built annulus)
+    /// still yields a non-empty, well-formed centerline — the A1
+    /// `medial_axis` fix + Ф7 bridge guard hold on a real generated
+    /// corridor.
+    #[test]
+    fn ac8_racing_line_regression_on_a_real_generated_corridor() {
+        let p = params(6, 1, 8);
+        let a = generate(p).expect("bs=6 seed=6 seed_budget=1 repair_budget=8 must accept");
+        let cl = racing_line(&a.corridor, &a.sf.gate, a.race_dir);
+        assert_well_formed_centerline(&cl);
     }
 }
