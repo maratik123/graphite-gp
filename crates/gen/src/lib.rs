@@ -25,6 +25,7 @@ mod phase6;
 mod phase6_arms;
 mod phase6_remove;
 mod phase6_repair;
+mod phase7;
 #[cfg(test)]
 mod testfix;
 
@@ -41,6 +42,7 @@ pub use phase5_runout::phase5_runout_checks;
 pub use phase5b::*;
 pub use phase6::*;
 pub use phase6_repair::*;
+pub use phase7::*;
 
 /// Generation parameters (design doc §2).
 #[derive(Clone, Copy, Debug)]

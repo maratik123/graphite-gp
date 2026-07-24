@@ -11,9 +11,53 @@
 
 use std::collections::BTreeSet;
 
-use gp_core::geom::{Corridor, Orient, Point, Side};
+use gp_core::geom::{Coord, Corridor, Orient, Point, Side};
 use gp_core::sim::CarState;
 use gp_core::track::{StartFinish, StartGrid, TimingGate};
+
+/// Build a corridor over `[origin, origin + (w, h))` with the given `(x, y)`
+/// cells marked drivable — the shared 4-arg builder consumed by phase7 (GO-note
+/// 1, `2026-07-24-gp-gen-phase7-centerline.design.md` § Decomposition): the
+/// same shape already duplicated at `phase4.rs:279` and
+/// `phase4_defects.rs:196`, so phase7 reuses this copy rather than adding a
+/// 3rd.
+pub(crate) fn corridor(
+    origin: (Coord, Coord),
+    w: usize,
+    h: usize,
+    drivable: &[(Coord, Coord)],
+) -> Corridor {
+    let mut d = Corridor::new(Point::new(origin.0, origin.1), w, h);
+    for &(x, y) in drivable {
+        d.set(Point::new(x, y), true);
+    }
+    d
+}
+
+/// An 11×11 filled square minus a centred 5×5 hole (`x, y ∈ 3..8`) — the
+/// odd-thickness annulus shape whose medial axis is 4 disjoint corner-gapped
+/// strips (`gp_core::geom::distance` tests this shape's exact medial set).
+/// Ф7's `bridge_gaps`/AC7 fixtures reuse this shape to exercise real
+/// diagonal-corner bridging.
+pub(crate) fn annulus_corridor() -> Corridor {
+    let mut d = Corridor::filled(Point::new(0, 0), 11, 11);
+    for y in 3..8 {
+        for x in 3..8 {
+            d.set(Point::new(x, y), false);
+        }
+    }
+    d
+}
+
+/// The annulus ring's timing gate: behind the top strip's `(5, 1)` cell,
+/// forward `East` — an anchor near the top strip's midpoint for
+/// `racing_line`'s gate-anchored walk start.
+pub(crate) fn annulus_gate() -> TimingGate {
+    TimingGate {
+        behind: vec![Point::new(5, 1)],
+        forward: Side::East,
+    }
+}
 
 /// Shorthand `CarState` constructor for test fixtures.
 pub(crate) const fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {
