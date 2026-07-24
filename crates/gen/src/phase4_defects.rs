@@ -31,12 +31,6 @@ use crate::phase4::{box_points, wall_runs};
 /// `Vertical` reads the vertical run (`up + down − 1`), `Horizontal` reads the
 /// horizontal run (`left + right − 1`) — mirroring this module's own
 /// [`narrow_at`] width derivation over the same `wall_runs` primitive.
-#[allow(
-    dead_code,
-    reason = "no production caller until push_outer_wall_out wires it in at subtask 10 \
-              (Group B) — sited here at subtask 1 per the design's module-layout decision \
-              (design.md § Approach); already exercised by this module's own tests"
-)]
 pub(crate) fn axis_width(d: &Corridor, p: Point, axis: Orient) -> u32 {
     let (left, right, up, down) = wall_runs(d, p);
     let run = match axis {
@@ -128,7 +122,7 @@ fn in_box(d: &Corridor, p: Point) -> bool {
 /// whose complement component is the unbounded outfield
 /// (`ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md` § The
 /// five arms, `fill_inner_tooth`'s local hole-preservation guard).
-fn is_concave_chord_cut(d: &Corridor, c: Point) -> bool {
+pub(crate) fn is_concave_chord_cut(d: &Corridor, c: Point) -> bool {
     let non_drivable: Vec<Point> = c
         .neighbors4()
         .into_iter()
