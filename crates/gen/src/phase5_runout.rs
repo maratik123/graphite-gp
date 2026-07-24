@@ -268,7 +268,7 @@ pub(crate) fn deficit_at(
 /// not `live`; recomputing `live` per candidate would be the global oracle
 /// run `[C3]` exists to avoid) — it can only inflate `attainable`, hence the
 /// deficit, hence over-report `NoBraking`, never mask a genuine one.
-fn low_speed_states_at(p: Point) -> Vec<CarState> {
+pub(crate) fn low_speed_states_at(p: Point) -> Vec<CarState> {
     (-1..=1)
         .flat_map(|vx| {
             (-1..=1).map(move |vy| CarState {
@@ -279,6 +279,36 @@ fn low_speed_states_at(p: Point) -> Vec<CarState> {
             })
         })
         .collect()
+}
+
+/// The sink-to-sink deficit at path point `c` (design.md § Decision 2) — the
+/// same computation [`phase5_runout_checks`] runs per path point, exposed
+/// standalone so the Ф6 run-out repair arms (`phase6_arms.rs`) can
+/// re-measure it on a scratch-edited `d` under the exact seeding/barrier
+/// pair the detector used. `None` when `c` is not a `metrics.fastest_lap`
+/// point (the caller's payload no longer holds against the working
+/// corridor — a `StalePayload` decline).
+pub(crate) fn sink_to_sink_deficit(
+    d: &Corridor,
+    metrics: &TrackMetrics,
+    c: Point,
+    v_target: i32,
+) -> Option<i32> {
+    let path = &metrics.fastest_lap;
+    let idx = path.iter().position(|&p| p == c)?;
+    let sinks = sink_indices(metrics);
+    let sink_points: HashSet<Point> = sinks.iter().filter_map(|&i| path.get(i).copied()).collect();
+    let u = sinks.range(..=idx).next_back().copied().unwrap_or(0);
+    let v_ceil = v_target.max(1);
+    let flood = match path.get(u) {
+        Some(&seed_cell) => window_speed(d, &low_speed_states_at(seed_cell), &sink_points, v_ceil),
+        None => WindowFlood {
+            states: HashSet::new(),
+            peak: HashMap::new(),
+        },
+    };
+    let dir = travel_dir(path, idx);
+    Some(deficit_at(d, &flood, c, dir, v_target))
 }
 
 /// The `NoBraking` issues along `metrics.fastest_lap` (design doc §2 Ф6,

@@ -13,13 +13,13 @@
 )]
 
 use gp_core::geom::{Corridor, Orient, Point, Side, Wall};
+use gp_core::track::TrackMetrics;
 use strum::IntoEnumIterator;
 
 use crate::phase4_defects::{axis_width, is_concave_chord_cut};
-use crate::phase5_runout::end_of_ray;
+use crate::phase5_runout::{end_of_ray, sink_to_sink_deficit, travel_dir};
 use crate::phase5b::{wall_neighbor, wall_sort_key};
-use crate::phase6_repair::{ArmOutcome, recheck_scope};
-use crate::phase6_repair::{CommittedEdit, DeclineReason, RepairArm};
+use crate::phase6_repair::{ArmOutcome, CommittedEdit, DeclineReason, RepairArm, recheck_scope};
 
 /// Whether `p` lies inside `d`'s own bounding box (in-box, independent of
 /// drivability) — `Corridor` exposes no public box-membership test distinct
@@ -211,6 +211,123 @@ pub(crate) fn fill_inner_tooth(d: &Corridor, tooth: Point) -> ArmOutcome {
         drivable: true,
         recheck: recheck_scope(RepairArm::FillInnerTooth),
     })
+}
+
+/// The [`Side`] `dir` points toward, or `None` for a non-cardinal (`(0, 0)`
+/// or diagonal) direction — [`travel_dir`] never returns a diagonal, but
+/// this stays total over any `(i32, i32)` input.
+const fn side_of(dir: (i32, i32)) -> Option<Side> {
+    match dir {
+        (1, 0) => Some(Side::East),
+        (-1, 0) => Some(Side::West),
+        (0, 1) => Some(Side::North),
+        (0, -1) => Some(Side::South),
+        _ => None,
+    }
+}
+
+/// The two [`Side`]s perpendicular to `dir` — `North`/`South` when `dir` is
+/// horizontal, `East`/`West` when `dir` is vertical (design.md § Decision 3,
+/// `widen_corner`'s candidate derivation).
+const fn perpendicular_sides(dir: (i32, i32)) -> [Side; 2] {
+    if dir.1 == 0 {
+        [Side::North, Side::South]
+    } else {
+        [Side::East, Side::West]
+    }
+}
+
+/// The joint `NoBraking` repair arm (design.md § Decision 3): both
+/// `lengthen_straight` and `widen_corner` candidates are generated,
+/// evaluated under the **same** metric ([`sink_to_sink_deficit`] on a
+/// scratch copy), and the winner is chosen by max deficit reduction → arm
+/// rank (`LengthenStraight` before `WidenCorner`) → min [`wall_sort_key`].
+///
+/// Re-validates `c ∈ metrics.fastest_lap` and `c ∈ d` against the working
+/// corridor and metrics first — a stale payload (an earlier edit already
+/// touched `c`, or `c` is no longer deficient) declines rather than acting.
+pub(crate) fn run_out_repair(
+    d: &Corridor,
+    metrics: &TrackMetrics,
+    v_target: i32,
+    c: Point,
+) -> ArmOutcome {
+    if !d.contains(c) {
+        return ArmOutcome::NoEdit(DeclineReason::StalePayload);
+    }
+    let Some(working_deficit) = sink_to_sink_deficit(d, metrics, c, v_target) else {
+        return ArmOutcome::NoEdit(DeclineReason::StalePayload);
+    };
+    if working_deficit <= 0 {
+        return ArmOutcome::NoEdit(DeclineReason::StalePayload);
+    }
+    let dir = travel_dir(&metrics.fastest_lap, {
+        let Some(idx) = metrics.fastest_lap.iter().position(|&p| p == c) else {
+            return ArmOutcome::NoEdit(DeclineReason::StalePayload);
+        };
+        idx
+    });
+    let Some(prim_side) = side_of(dir) else {
+        return ArmOutcome::NoEdit(DeclineReason::StalePayload);
+    };
+    let end = end_of_ray(d, c, dir);
+
+    let mut candidates = vec![(
+        RepairArm::LengthenStraight,
+        0u8,
+        Wall {
+            cell: end,
+            side: prim_side,
+        },
+    )];
+    for side in perpendicular_sides(dir) {
+        candidates.push((RepairArm::WidenCorner, 1u8, Wall { cell: end, side }));
+    }
+
+    let mut admissible = false;
+    let mut best: Option<(i32, u8, Wall, RepairArm, Point)> = None;
+    for (arm, arm_rank, w) in candidates {
+        let Some(q) = wall_neighbor(w) else { continue };
+        if !in_box(d, q) || d.contains(q) {
+            continue;
+        }
+        admissible = true;
+        let Some((scratch, cell)) = apply_edit(d, w, true) else {
+            continue;
+        };
+        let Some(new_deficit) = sink_to_sink_deficit(&scratch, metrics, c, v_target) else {
+            continue;
+        };
+        if new_deficit >= working_deficit {
+            continue;
+        }
+        let reduction = working_deficit.saturating_sub(new_deficit);
+        best = Some(match best {
+            None => (reduction, arm_rank, w, arm, cell),
+            Some((br, bar, bw, ba, bc)) => {
+                if reduction > br
+                    || (reduction == br && arm_rank < bar)
+                    || (reduction == br && arm_rank == bar && wall_sort_key(w) < wall_sort_key(bw))
+                {
+                    (reduction, arm_rank, w, arm, cell)
+                } else {
+                    (br, bar, bw, ba, bc)
+                }
+            }
+        });
+    }
+
+    match best {
+        Some((_, _, w, arm, cell)) => ArmOutcome::Edit(CommittedEdit {
+            arm,
+            wall: w,
+            cell,
+            drivable: true,
+            recheck: recheck_scope(arm),
+        }),
+        None if admissible => ArmOutcome::NoEdit(DeclineReason::MetricNotImproved),
+        None => ArmOutcome::NoEdit(DeclineReason::NoCandidate),
+    }
 }
 
 #[cfg(test)]
@@ -417,5 +534,118 @@ mod tests {
             fill_inner_tooth(&d, Point::new(0, 2)),
             ArmOutcome::NoEdit(DeclineReason::StalePayload)
         ));
+    }
+
+    // ---- run_out_repair -----------------------------------------------
+
+    use crate::testfix::brake_deficit_corridor;
+    use gp_core::geom::Point as P;
+
+    #[test]
+    fn lengthen_straight_wins_on_brake_deficit_corridor() {
+        let (d, path, _sinks) = brake_deficit_corridor();
+        let metrics = TrackMetrics {
+            fastest_lap: path.clone(),
+            ..Default::default()
+        };
+        let c = path[10];
+        assert_eq!(c, P::new(10, 0));
+
+        let ArmOutcome::Edit(edit) = run_out_repair(&d, &metrics, 3, c) else {
+            panic!("expected an Edit on brake_deficit_corridor");
+        };
+        assert_eq!(edit.arm, RepairArm::LengthenStraight);
+        assert_eq!(
+            edit.wall,
+            Wall {
+                cell: P::new(11, 0),
+                side: Side::East,
+            }
+        );
+        assert_eq!(edit.cell, P::new(12, 0));
+        assert!(edit.drivable);
+        assert_eq!(edit.recheck, crate::phase6_repair::RecheckScope::SinkToSink);
+    }
+
+    /// Direct proof that `widen_corner`'s lever (`corner_speed`) can
+    /// strictly increase (AC4/binding rule 3: every arm's metric must
+    /// actually be able to improve under its own edit). Uses
+    /// `window_speed`/`corner_speed` directly rather than the full
+    /// `run_out_repair` dispatch: seeded straight at the exact state that
+    /// exercises the mechanism (agnostic to how the flood was seeded, the
+    /// same property the AC3 counter-scope relies on).
+    ///
+    /// A single drivable cell `(1, 0)`, isolated (no other cell in the box
+    /// is drivable pre-edit). Seeding a state there with `vy = 2` gives it
+    /// **zero** legal successors pre-edit (every action overshoots the
+    /// empty box); widening `(1, 1)` (`North` of `(1, 0)`) makes `South`
+    /// (decelerate `vy: 2 -> 1`, landing exactly on the new cell) legal,
+    /// so `corner_speed` jumps from `0` (the seed doesn't qualify at all)
+    /// to `2` (`vnorm` of the qualifying state).
+    #[test]
+    fn widen_corner_lever_strictly_increases_corner_speed() {
+        use crate::phase5_runout::{corner_speed, window_speed};
+        use std::collections::HashSet as HSet;
+
+        let end = P::new(1, 0);
+        let seed = crate::testfix::car(1, 0, 0, 2);
+
+        let mut d_pre = Corridor::new(P::new(0, 0), 3, 3);
+        d_pre.set(end, true);
+        let flood_pre = window_speed(&d_pre, &[seed], &HSet::new(), 3);
+        assert_eq!(corner_speed(&d_pre, &flood_pre, end), 0);
+
+        let mut d_post = d_pre.clone();
+        d_post.set(P::new(1, 1), true);
+        let flood_post = window_speed(&d_post, &[seed], &HSet::new(), 3);
+        let after = corner_speed(&d_post, &flood_post, end);
+        assert_eq!(
+            after, 2,
+            "widening must let the vy=2 seed decelerate onto the new cell"
+        );
+    }
+
+    #[test]
+    fn run_out_repair_can_pick_widen_corner_when_it_reduces_the_deficit_more() {
+        // A single-column shaft x=3, y in -2..=1, minus the widen target
+        // (3,1). The path is vertical up to c=(3,0) then turns east
+        // (`travel_dir`'s forward-step preference makes dir(c) == East),
+        // so the sink seed at path[0]=(3,-2) has |vy| <= 1 already -- one
+        // North action reaches (3,0) with vx=0, vy=2 in a single hop,
+        // giving a vy-dominant arrival that can only be rescued by a
+        // *perpendicular* (to dir=East) edit: South-decelerating onto the
+        // widened (3,1) cell. East of c is out-of-box, so
+        // lengthen_straight is inadmissible and cannot compete.
+        let mut d = Corridor::new(P::new(3, -2), 1, 4);
+        d.set(P::new(3, -2), true);
+        d.set(P::new(3, -1), true);
+        d.set(P::new(3, 0), true);
+
+        let path = vec![P::new(3, -2), P::new(3, -1), P::new(3, 0), P::new(4, 0)];
+        let metrics = TrackMetrics {
+            fastest_lap: path.clone(),
+            ..Default::default()
+        };
+        let c = path[2];
+        let v_target = 2;
+
+        let working = sink_to_sink_deficit(&d, &metrics, c, v_target).expect("c is a path point");
+        assert!(working > 0, "fixture must fire: deficit was {working}");
+
+        let ArmOutcome::Edit(edit) = run_out_repair(&d, &metrics, v_target, c) else {
+            panic!("expected an Edit; working deficit was {working}");
+        };
+        assert_eq!(edit.arm, RepairArm::WidenCorner);
+        assert_eq!(edit.wall.cell, P::new(3, 0));
+        assert_eq!(edit.wall.side, Side::North);
+        assert_eq!(edit.cell, P::new(3, 1));
+
+        let (scratch, _) = apply_edit(&d, edit.wall, true).expect("edit must apply");
+        let after =
+            sink_to_sink_deficit(&scratch, &metrics, c, v_target).expect("still a path point");
+        assert!(
+            after < working,
+            "deficit must strictly decrease: {working} -> {after}"
+        );
     }
 }
