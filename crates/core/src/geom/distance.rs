@@ -1,12 +1,12 @@
 //! Distance transform + medial axis over the corridor `D` (design doc §2, Ф4).
 //!
 //! Two pure, integer-only, deterministic primitives that Ф4's width check reads
-//! directly and the future Ф7 centerline (`racing_line(medial_axis(D))`,
-//! `docs/design.md` §2 line 191) will consume: a multi-source 4-connected BFS
-//! wall-distance field ([`DistanceTransform`]) and its strict axis-wise ridge
-//! ([`medial_axis`]). Both route through [`Corridor`]'s private index/box
-//! helpers, exactly like [`super::component_count`] and
-//! [`super::bounded_complement_components`].
+//! directly and the Ф7 centerline (`racing_line`, consuming [`medial_axis`],
+//! `docs/design.md` §2 line 191) also consumes: a multi-source 4-connected BFS
+//! wall-distance field ([`DistanceTransform`]) and its DT-ordered,
+//! connectivity-preserving thinning skeleton ([`medial_axis`]). Both route
+//! through [`Corridor`]'s private index/box helpers, exactly like
+//! [`super::component_count`] and [`super::bounded_complement_components`].
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -85,49 +85,196 @@ impl DistanceTransform {
     }
 }
 
-/// The strict axis-wise distance-transform ridge of `dt` (design doc §D2, "гребень
-/// distance-transform").
+/// The 8 Moore-neighborhood cells around `p`, in `E, NE, N, NW, W, SW, S, SE`
+/// order — the axis (4-connected) neighbors sit at the even indices
+/// `0`/`2`/`4`/`6`. Saturating offsets keep this total for any `Point`,
+/// including at `i32::MAX`/`i32::MIN`.
+const fn neighbors8(p: Point) -> [Point; 8] {
+    [
+        Point::new(p.x.saturating_add(1), p.y),
+        Point::new(p.x.saturating_add(1), p.y.saturating_add(1)),
+        Point::new(p.x, p.y.saturating_add(1)),
+        Point::new(p.x.saturating_sub(1), p.y.saturating_add(1)),
+        Point::new(p.x.saturating_sub(1), p.y),
+        Point::new(p.x.saturating_sub(1), p.y.saturating_sub(1)),
+        Point::new(p.x, p.y.saturating_sub(1)),
+        Point::new(p.x.saturating_add(1), p.y.saturating_sub(1)),
+    ]
+}
+
+/// Whether `a`/`b` are one 4-connected (Manhattan) step apart.
+const fn is_4adjacent(a: Point, b: Point) -> bool {
+    a.x.abs_diff(b.x).saturating_add(a.y.abs_diff(b.y)) == 1
+}
+
+/// Whether `a`/`b` are one 8-connected (Chebyshev) step apart.
+const fn is_8adjacent(a: Point, b: Point) -> bool {
+    let dx = a.x.abs_diff(b.x);
+    let dy = a.y.abs_diff(b.y);
+    dx <= 1 && dy <= 1 && (dx == 1 || dy == 1)
+}
+
+/// The 4-connected degree of `p` within `s` — the number of `p`'s 4-neighbors
+/// that are themselves members of `s`.
+fn degree4(s: &BTreeSet<Point>, p: Point) -> usize {
+    p.neighbors4().into_iter().filter(|q| s.contains(q)).count()
+}
+
+/// Whether `p` is a *simple* point of `s` — deletable without changing `s`'s
+/// local (4,8)-connectivity topology (§ module doc's thinning algorithm).
 ///
-/// A `D` cell `p` is a medial cell iff it is a **strict** local maximum of the
-/// distance transform along at least one axis: `dt(p) > dt(p ± x̂)` (both
-/// horizontal neighbors) **or** `dt(p) > dt(p ± ŷ)` (both vertical neighbors),
-/// reading `dt == 0` for any `¬D` / out-of-box neighbor. Strict inequality is
-/// load-bearing: the along-flow axis of a straight corridor is a distance-transform
-/// **plateau** (constant `dt`), so a non-strict `≥` would admit every cell and
-/// collapse the ridge to the whole corridor.
+/// Computed entirely within the 3×3 window around `p` ([`neighbors8`]), via an
+/// explicit, allocation-free flood fill over the fixed 8-slot window — not a
+/// remembered crossing-number formula. Split `A` = window cells in `s`, `B` =
+/// window cells not in `s` (out-of-box cells count as `B`). `p` is simple iff:
 ///
-/// A **neck is always on this ridge**: at a narrow cross-section's center cell the
-/// two perpendicular walls are close, so `dt` is a strict local max *across* the
-/// neck — the ridge stays 4-connected through a constriction rather than leaving a
-/// gap there (unlike a pure local-maximum definition, which a neck's along-flow
-/// DT-valley would exclude).
+/// 1. `A`'s 4-connected components (adjacency computed only within the
+///    window) that contain at least one of `p`'s axis neighbors number
+///    exactly one, **and**
+/// 2. `B` is non-empty and forms exactly one 8-connected component (also
+///    computed only within the window).
+fn is_simple(s: &BTreeSet<Point>, p: Point) -> bool {
+    let window = neighbors8(p);
+    let member = window.map(|q| s.contains(&q));
+
+    let mut visited = [false; 8];
+    let mut axis_touching_components: u32 = 0;
+    for start in 0..8 {
+        if !member[start] || visited[start] {
+            continue;
+        }
+        let mut touches_axis = false;
+        let mut stack = [0usize; 8];
+        let mut top = 0usize;
+        stack[top] = start;
+        top = top.saturating_add(1);
+        visited[start] = true;
+        while top > 0 {
+            top = top.saturating_sub(1);
+            let cur = stack[top];
+            if cur % 2 == 0 {
+                touches_axis = true;
+            }
+            for next in 0..8 {
+                if member[next] && !visited[next] && is_4adjacent(window[cur], window[next]) {
+                    visited[next] = true;
+                    stack[top] = next;
+                    top = top.saturating_add(1);
+                }
+            }
+        }
+        if touches_axis {
+            axis_touching_components = axis_touching_components.saturating_add(1);
+        }
+    }
+    if axis_touching_components != 1 {
+        return false;
+    }
+
+    let background = member.map(|m| !m);
+    if !background.into_iter().any(|b| b) {
+        return false;
+    }
+    let mut visited_bg = [false; 8];
+    let mut background_components: u32 = 0;
+    for start in 0..8 {
+        if !background[start] || visited_bg[start] {
+            continue;
+        }
+        let mut stack = [0usize; 8];
+        let mut top = 0usize;
+        stack[top] = start;
+        top = top.saturating_add(1);
+        visited_bg[start] = true;
+        while top > 0 {
+            top = top.saturating_sub(1);
+            let cur = stack[top];
+            for next in 0..8 {
+                if background[next] && !visited_bg[next] && is_8adjacent(window[cur], window[next])
+                {
+                    visited_bg[next] = true;
+                    stack[top] = next;
+                    top = top.saturating_add(1);
+                }
+            }
+        }
+        background_components = background_components.saturating_add(1);
+    }
+    background_components == 1
+}
+
+/// Whether `p` is an *anchored end point* of `s` under `dt` — a genuine
+/// medial branch tip that thinning must never delete.
+///
+/// `p` has exactly one 4-neighbor in `s` **and** `dt(p) >= dt(q)` for every
+/// `q` in `p`'s 8-neighborhood. An unanchored degree-1 cell (a boundary
+/// artefact whose `dt` is dominated by a neighbor) is **not** anchored, so
+/// thinning still peels it back to the ridge.
+fn is_anchored_endpoint(s: &BTreeSet<Point>, dt: &DistanceTransform, p: Point) -> bool {
+    if degree4(s, p) != 1 {
+        return false;
+    }
+    let dp = dt.at(p);
+    neighbors8(p).into_iter().all(|q| dp >= dt.at(q))
+}
+
+/// The distance-ordered, connectivity-preserving thinning skeleton of `dt`
+/// (design doc §D2, "гребень distance-transform … ветвящийся геометрический
+/// объект").
+///
+/// `D` is recovered from `dt` alone (`p ∈ D ⟺ dt.at(p) > 0`). Foreground is
+/// **4-connected**, background **8-connected** — the complementary `(4, 8)`
+/// digital-topology pair every consumer of this skeleton already assumes
+/// (`racing_line`'s `components`/`degree`/`walk_cycle`, all 4-conn).
+///
+/// Algorithm: repeatedly delete the lowest-`dt` *simple* cell (`is_simple`)
+/// that is not an *anchored end point* (`is_anchored_endpoint`), until none
+/// remains deletable. The deletion order is a `BTreeSet<(u32, Point)>`
+/// min-first queue — a total integer order, no hashing, no float, no
+/// address- or iteration-order dependence — so the result is a pure,
+/// deterministic function of `dt`, identical on every run and platform
+/// (`compute_and_medial_axis_are_deterministic`).
+///
+/// Deleting a simple point preserves the (4,8)-homotopy type (component
+/// counts of both foreground and background), and anchoring only *forbids*
+/// deletions — so for a corridor that is 4-connected with exactly one
+/// bounded hole (Ф4's `Disconnected`/`BadTopology` gate), the resulting
+/// skeleton is connected and carries exactly one cycle. A constriction's
+/// cross-section is crossed by construction (connectivity is preserved), so a
+/// 1-cell neck's center cell — the neck's own cross-section — is always on
+/// the skeleton.
+///
+/// "No 2×2 block of skeleton cells" (thinness) is an *empirical* property of
+/// this thinning, not a proven guarantee: a pinwheel-attached 2×2 (four arms
+/// leaving diagonally opposite corners) makes all four cells non-simple and
+/// would survive. It has not been observed on any in-tree or generated
+/// fixture; a caller that hits it degrades gracefully (`racing_line`'s
+/// `walk_cycle` fallback), not a panic.
 ///
 /// Returns a [`BTreeSet`] for deterministic, cross-platform iteration order
 /// ([`Point`]'s derived `Ord`, `x`-then-`y`).
-///
-/// This primitive ships the two responsibilities the future Ф7 centerline
-/// (`racing_line`, `docs/design.md` §2 line 191) still owns: thinning an
-/// even-width 2-cell ridge band to a single strand, and bridging a residual
-/// 1-cell diagonal gap at a rectilinear corner. Both are out of scope here.
 pub fn medial_axis(dt: &DistanceTransform) -> BTreeSet<Point> {
-    let rect = dt.rect();
-    let mut out = BTreeSet::new();
-    for p in rect.points() {
-        let dp = dt.at(p);
-        if dp == 0 {
+    let mut s: BTreeSet<Point> = dt.rect().points().filter(|&p| dt.at(p) > 0).collect();
+    let mut queue: BTreeSet<(u32, Point)> = s.iter().map(|&p| (dt.at(p), p)).collect();
+
+    while let Some((_, p)) = queue.pop_first() {
+        if !s.contains(&p) {
+            continue; // stale entry — p was already removed
+        }
+        if is_anchored_endpoint(&s, dt, p) {
             continue;
         }
-        let east = Point::new(p.x.saturating_add(1), p.y);
-        let west = Point::new(p.x.saturating_sub(1), p.y);
-        let north = Point::new(p.x, p.y.saturating_add(1));
-        let south = Point::new(p.x, p.y.saturating_sub(1));
-        let x_ridge = dp > dt.at(east) && dp > dt.at(west);
-        let y_ridge = dp > dt.at(north) && dp > dt.at(south);
-        if x_ridge || y_ridge {
-            out.insert(p);
+        if !is_simple(&s, p) {
+            continue;
+        }
+        s.remove(&p);
+        for q in neighbors8(p) {
+            if s.contains(&q) {
+                queue.insert((dt.at(q), q)); // re-examine; BTreeSet dedups
+            }
         }
     }
-    out
+    s
 }
 
 #[cfg(test)]
