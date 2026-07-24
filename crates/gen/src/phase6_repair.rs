@@ -1,26 +1,16 @@
 //! Ф6 — the single-pass local-repair driver: public types, the crate-local
-//! dispatch vocabulary, `recheck_scope`, and the severity ordering
-//! (`issue_rank`/`issue_sort_key`) (design doc §2 Ф6, `[C3]`;
-//! `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md` § Approach,
-//! § Decision 4).
-//!
-//! The dispatch driver itself (`dispatch`, `phase6_local_repair`) is built in
-//! `Group B` subtasks 9-13; this module carries the shapes every arm and the
-//! driver agree on, plus the two pure crate-local helpers (`recheck_scope`,
-//! `issue_rank`/`issue_sort_key`) that do not depend on any arm body.
-#![allow(
-    dead_code,
-    reason = "the pub(crate) dispatch vocabulary (ArmOutcome, DeclineReason, DispatchLabel) \
-              and helpers (recheck_scope, issue_rank, issue_sort_key) have no production caller \
-              until subtask 13's dispatch driver wires them in — every item here is already \
-              exercised by this module's own tests"
-)]
+//! dispatch vocabulary, `recheck_scope`, the severity ordering
+//! (`issue_rank`/`issue_sort_key`), the per-label `dispatch` function, and
+//! the top-level [`phase6_local_repair`] entry point (design doc §2 Ф6,
+//! `[C3]`; `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md`
+//! § Approach, § Decision 4).
 
 use gp_core::geom::{Corridor, Point, Wall};
 use gp_core::track::{RaceDir, StartFinish, StartGrid, TrackMetrics};
 
 use crate::CoarseSkeleton;
 use crate::Issue;
+use crate::phase6::RepairCandidate;
 
 /// Everything Ф6's single pass needs beyond the working corridor and issue list.
 ///
@@ -138,6 +128,12 @@ pub(crate) enum ArmOutcome {
     /// The arm produced and committed an edit.
     Edit(CommittedEdit),
     /// No edit was committed, for the stated reason.
+    #[allow(
+        dead_code,
+        reason = "the DeclineReason payload is diagnostic surface for tests asserting which \
+                  decline fired per label — phase6_local_repair itself only branches on \
+                  Edit-vs-NoEdit, it never reads why a decline happened"
+    )]
     NoEdit(DeclineReason),
 }
 
@@ -232,6 +228,104 @@ pub(crate) const fn issue_sort_key(label: DispatchLabel) -> (u8, Point, u8, u32)
                 } => (rank, center, axis_rank(axis), width),
             }
         }
+    }
+}
+
+/// Dispatches one `label` against the working corridor `working`
+/// (design.md § Approach): total over every [`DispatchLabel`] — the two
+/// decline labels reach a defined `NotRepairable`, every other label routes
+/// to its arm, re-validating its own precondition on `working` first (the
+/// "never trust the diagnostic" discipline — a payload an earlier edit
+/// already staled declines rather than acting). `ctx` supplies the oracle
+/// input (`metrics`/`stall_walls`) the run-out and dynamic arms need;
+/// either being `None` declines with `MissingOracleInput`.
+pub(crate) fn dispatch(
+    ctx: &RepairContext<'_>,
+    working: &Corridor,
+    label: DispatchLabel,
+) -> ArmOutcome {
+    match label {
+        DispatchLabel::Issue(Issue::Disconnected | Issue::BadTopology) => {
+            ArmOutcome::NoEdit(DeclineReason::NotRepairable)
+        }
+        DispatchLabel::Issue(Issue::LostHairpin { tip }) => {
+            crate::phase6_remove::nudge_finger(working, ctx.skel, ctx.k, tip)
+        }
+        DispatchLabel::Issue(Issue::ArmsMerging { bridge }) => {
+            crate::phase6_remove::trim_arm_wall(working, ctx.skel, ctx.k, bridge)
+        }
+        DispatchLabel::Issue(Issue::ConcaveChordCut { tooth }) => {
+            crate::phase6_arms::fill_inner_tooth(working, tooth)
+        }
+        DispatchLabel::Issue(
+            Issue::Narrow { center, axis, .. } | Issue::NarrowSf { center, axis, .. },
+        ) => crate::phase6_arms::push_outer_wall_out(working, center, axis),
+        DispatchLabel::Issue(Issue::NoBraking { at }) => ctx.metrics.map_or(
+            ArmOutcome::NoEdit(DeclineReason::MissingOracleInput),
+            |metrics| crate::phase6_arms::run_out_repair(working, metrics, ctx.v_target, at),
+        ),
+        DispatchLabel::DynamicStall => ctx.stall_walls.map_or(
+            ArmOutcome::NoEdit(DeclineReason::MissingOracleInput),
+            |walls| dispatch_dynamic_stall(ctx, working, walls),
+        ),
+    }
+}
+
+/// The dynamic (Ф5b stall) arm: maps `walls` to a verified frontier-gap edge
+/// via [`map_frontier_gap_to_edge`](crate::phase6::map_frontier_gap_to_edge)
+/// (#30, unchanged semantics) and applies it — the mapper already verifies
+/// strict `|P0|` growth internally, so this is not re-verified (design.md §
+/// The five arms, `map_frontier_gap_to_edge` row).
+fn dispatch_dynamic_stall(
+    ctx: &RepairContext<'_>,
+    working: &Corridor,
+    walls: &[Wall],
+) -> ArmOutcome {
+    match crate::phase6::map_frontier_gap_to_edge(working, ctx.grid, ctx.sf, ctx.race_dir, walls) {
+        RepairCandidate::Edge(w) => match crate::phase6_arms::apply_edit(working, w, true) {
+            Some((_, cell)) => ArmOutcome::Edit(CommittedEdit {
+                arm: RepairArm::MapFrontierGap,
+                wall: w,
+                cell,
+                drivable: true,
+                recheck: recheck_scope(RepairArm::MapFrontierGap),
+            }),
+            None => ArmOutcome::NoEdit(DeclineReason::NoCandidate),
+        },
+        RepairCandidate::NoCandidate => ArmOutcome::NoEdit(DeclineReason::NoCandidate),
+    }
+}
+
+/// The single-pass Ф6 local-repair entry point (design doc §2 Ф6; KD2
+/// "single pass").
+///
+/// Builds the dispatch list — every `issues` entry plus one
+/// `DispatchLabel::DynamicStall` — sorts it by `issue_sort_key` (fixed
+/// severity order, design.md § Decision 4), then walks it once: each
+/// `dispatch` call sees the corridor as edited by every prior commit in
+/// the pass, and a committed edit is applied to the working corridor before
+/// the next label is dispatched. Returns [`RepairOutcome::Failed`] iff
+/// **zero** edits were committed across the whole pass (AC4) — never an
+/// unchanged `D` reported as success.
+#[must_use]
+pub fn phase6_local_repair(ctx: &RepairContext<'_>, issues: &[Issue]) -> RepairOutcome {
+    let mut labels: Vec<DispatchLabel> = issues.iter().copied().map(DispatchLabel::Issue).collect();
+    labels.push(DispatchLabel::DynamicStall);
+    labels.sort_by_key(|&l| issue_sort_key(l));
+
+    let mut working = ctx.d.clone();
+    let mut edits = Vec::new();
+    for label in labels {
+        if let ArmOutcome::Edit(edit) = dispatch(ctx, &working, label) {
+            working.set(edit.cell, edit.drivable);
+            edits.push(edit);
+        }
+    }
+
+    if edits.is_empty() {
+        RepairOutcome::Failed
+    } else {
+        RepairOutcome::Repaired { d: working, edits }
     }
 }
 
@@ -386,5 +480,276 @@ mod tests {
         keys.sort();
         assert_eq!(keys[0].1, Point::new(1, 1));
         assert_eq!(keys[1].1, Point::new(2, 2));
+    }
+
+    // ---- dispatch / phase6_local_repair ------------------------------------
+
+    use crate::testfix::{crash_pocket_fixture, ring_corridor, ring_grid, ring_sf};
+    use crate::{OracleResult, phase5_full_oracle};
+    use gp_core::track::TimingGate;
+
+    fn empty_skel() -> CoarseSkeleton {
+        CoarseSkeleton {
+            ring: std::collections::BTreeSet::new(),
+            hole: std::collections::BTreeSet::new(),
+            dir: RaceDir::Cw,
+        }
+    }
+
+    fn minimal_ctx<'a>(
+        d: &'a Corridor,
+        skel: &'a CoarseSkeleton,
+        grid: &'a StartGrid,
+        sf: &'a StartFinish,
+    ) -> RepairContext<'a> {
+        RepairContext {
+            d,
+            skel,
+            k: 3,
+            n: 1,
+            m: 1,
+            grid,
+            sf,
+            race_dir: RaceDir::Cw,
+            v_target: 1,
+            metrics: None,
+            stall_walls: None,
+        }
+    }
+
+    #[test]
+    fn dispatch_is_total_over_all_nine_labels_no_panic() {
+        let d = ring_corridor();
+        let skel = empty_skel();
+        let grid = ring_grid();
+        let sf = ring_sf();
+        let ctx = minimal_ctx(&d, &skel, &grid, &sf);
+
+        let labels = [
+            DispatchLabel::Issue(Issue::Disconnected),
+            DispatchLabel::Issue(Issue::BadTopology),
+            DispatchLabel::Issue(Issue::LostHairpin {
+                tip: Point::new(0, 0),
+            }),
+            DispatchLabel::Issue(Issue::ArmsMerging {
+                bridge: Point::new(0, 0),
+            }),
+            DispatchLabel::Issue(Issue::ConcaveChordCut {
+                tooth: Point::new(0, 0),
+            }),
+            DispatchLabel::Issue(Issue::Narrow {
+                center: Point::new(0, 0),
+                axis: Orient::Horizontal,
+                width: 1,
+            }),
+            DispatchLabel::Issue(Issue::NarrowSf {
+                center: Point::new(0, 0),
+                axis: Orient::Horizontal,
+                width: 1,
+            }),
+            DispatchLabel::Issue(Issue::NoBraking {
+                at: Point::new(0, 0),
+            }),
+            DispatchLabel::DynamicStall,
+        ];
+        for label in labels {
+            let _ = dispatch(&ctx, &d, label);
+        }
+    }
+
+    #[test]
+    fn dispatch_declines_disconnected_and_bad_topology_as_not_repairable() {
+        let d = ring_corridor();
+        let skel = empty_skel();
+        let grid = ring_grid();
+        let sf = ring_sf();
+        let ctx = minimal_ctx(&d, &skel, &grid, &sf);
+
+        assert!(matches!(
+            dispatch(&ctx, &d, DispatchLabel::Issue(Issue::Disconnected)),
+            ArmOutcome::NoEdit(DeclineReason::NotRepairable)
+        ));
+        assert!(matches!(
+            dispatch(&ctx, &d, DispatchLabel::Issue(Issue::BadTopology)),
+            ArmOutcome::NoEdit(DeclineReason::NotRepairable)
+        ));
+    }
+
+    #[test]
+    fn ac4_failed_iff_zero_edits_committed() {
+        let d = ring_corridor();
+        let skel = empty_skel();
+        let grid = ring_grid();
+        let sf = ring_sf();
+        let ctx = minimal_ctx(&d, &skel, &grid, &sf);
+
+        let issues = [Issue::Disconnected, Issue::BadTopology];
+        assert!(matches!(
+            phase6_local_repair(&ctx, &issues),
+            RepairOutcome::Failed
+        ));
+    }
+
+    #[test]
+    fn ac4_repaired_edits_are_non_empty_and_the_returned_d_reflects_them() {
+        // A single ConcaveChordCut tooth: fill_inner_tooth must commit.
+        let mut d = Corridor::filled(Point::new(0, 0), 9, 9);
+        for x in 4..=6 {
+            for y in 4..=6 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        d.set(Point::new(3, 5), false); // degree-1 tooth
+        let skel = empty_skel();
+        let grid = ring_grid();
+        let sf = ring_sf();
+        let ctx = minimal_ctx(&d, &skel, &grid, &sf);
+
+        let issues = [Issue::ConcaveChordCut {
+            tooth: Point::new(3, 5),
+        }];
+        let RepairOutcome::Repaired { d: repaired, edits } = phase6_local_repair(&ctx, &issues)
+        else {
+            panic!("expected Repaired");
+        };
+        assert!(!edits.is_empty());
+        for edit in &edits {
+            assert_eq!(repaired.contains(edit.cell), edit.drivable);
+            assert_ne!(d.contains(edit.cell), edit.drivable);
+        }
+    }
+
+    #[test]
+    fn ac7_dynamic_arm_wires_map_frontier_gap_to_edge_with_unchanged_semantics() {
+        let mut d = ring_corridor();
+        d.set(Point::new(4, 2), false);
+        let sf = ring_sf();
+        let grid = ring_grid();
+        let OracleResult::NotLappable { stall_walls } =
+            phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw)
+        else {
+            panic!("expected NotLappable");
+        };
+        let skel = empty_skel();
+        let ctx = RepairContext {
+            d: &d,
+            skel: &skel,
+            k: 1,
+            n: 1,
+            m: 1,
+            grid: &grid,
+            sf: &sf,
+            race_dir: RaceDir::Ccw,
+            v_target: 1,
+            metrics: None,
+            stall_walls: Some(&stall_walls),
+        };
+
+        let RepairOutcome::Repaired { edits, .. } = phase6_local_repair(&ctx, &[]) else {
+            panic!("expected Repaired via the dynamic arm alone");
+        };
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].arm, RepairArm::MapFrontierGap);
+        assert_eq!(
+            edits[0].wall,
+            Wall {
+                cell: Point::new(4, 1),
+                side: Side::North,
+            }
+        );
+    }
+
+    #[test]
+    fn ac7_no_candidate_routes_to_no_edit_no_candidate() {
+        let (d, sf, grid) = crash_pocket_fixture();
+        let OracleResult::NotLappable { stall_walls } =
+            phase5_full_oracle(&d, &grid, &sf, RaceDir::Ccw)
+        else {
+            panic!("expected NotLappable");
+        };
+        assert!(!stall_walls.is_empty());
+        let skel = empty_skel();
+        let ctx = RepairContext {
+            d: &d,
+            skel: &skel,
+            k: 1,
+            n: 1,
+            m: 1,
+            grid: &grid,
+            sf: &sf,
+            race_dir: RaceDir::Ccw,
+            v_target: 1,
+            metrics: None,
+            stall_walls: Some(&stall_walls),
+        };
+        assert!(matches!(
+            dispatch(&ctx, &d, DispatchLabel::DynamicStall),
+            ArmOutcome::NoEdit(DeclineReason::NoCandidate)
+        ));
+    }
+
+    #[test]
+    fn severity_order_processes_removes_before_adds_regardless_of_input_order() {
+        // One ArmsMerging (remove, rank 3) and one ConcaveChordCut (add,
+        // rank 4) sharing ONE bounded complement component (a dumbbell hole
+        // y:3..=12) so the global flood-fill recheck (bounded_complement_
+        // components == 1) holds throughout -- H (the coarse hole mask,
+        // block((1,1),3) = x:3..6,y:3..6) covers only the upper lobe, so
+        // ArmsMerging's own scope stays local to that lobe.
+        let mut d = Corridor::filled(Point::new(0, 0), 9, 17);
+        for x in 3..=5 {
+            for y in 3..=12 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        d.set(Point::new(4, 4), true); // ArmsMerging bridge (in H's upper lobe)
+        d.set(Point::new(2, 11), false); // ConcaveChordCut tooth, off H, in the lower lobe
+        let skel = CoarseSkeleton {
+            ring: std::collections::BTreeSet::new(),
+            hole: std::collections::BTreeSet::from([Point::new(1, 1)]),
+            dir: RaceDir::Cw,
+        };
+        let grid = StartGrid { positions: vec![] };
+        let sf = StartFinish {
+            chord: vec![Point::new(0, 0)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![Point::new(0, 0)],
+                forward: Side::East,
+            },
+        };
+        let ctx = RepairContext {
+            d: &d,
+            skel: &skel,
+            k: 3,
+            n: 1,
+            m: 1,
+            grid: &grid,
+            sf: &sf,
+            race_dir: RaceDir::Cw,
+            v_target: 1,
+            metrics: None,
+            stall_walls: None,
+        };
+
+        let arms_merging = Issue::ArmsMerging {
+            bridge: Point::new(4, 4),
+        };
+        let concave = Issue::ConcaveChordCut {
+            tooth: Point::new(2, 11),
+        };
+
+        for issues in [[arms_merging, concave], [concave, arms_merging]] {
+            let RepairOutcome::Repaired { edits, .. } = phase6_local_repair(&ctx, &issues) else {
+                panic!("expected Repaired");
+            };
+            assert_eq!(edits.len(), 2, "both issues must commit: {edits:?}");
+            assert_eq!(
+                edits[0].arm,
+                RepairArm::TrimArmWall,
+                "remove must be processed before add regardless of input order"
+            );
+            assert_eq!(edits[1].arm, RepairArm::FillInnerTooth);
+        }
     }
 }
