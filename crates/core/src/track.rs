@@ -57,6 +57,22 @@ impl TimingGate {
                 .is_some_and(|ahead| (behind == a && ahead == b) || (behind == b && ahead == a))
         })
     }
+
+    /// The forward face — `{ behind[i] + forward.delta() }` — the drivable
+    /// cells one step ahead of the gate's `behind` cross-section, on the
+    /// `+race_dir` side.
+    ///
+    /// These are the BFS seed cells for the s-field producer: distance `0`
+    /// here, growing the long way around the loop to reach its maximum at
+    /// `behind`. Overflow-filtered exactly as [`separates`](Self::separates)'s
+    /// `ahead_of` — a `behind` cell whose `+forward` step would overflow `i32`
+    /// contributes no seed rather than panicking.
+    pub fn forward_face(&self) -> impl Iterator<Item = Point> + '_ {
+        let (dx, dy) = self.forward.delta();
+        self.behind
+            .iter()
+            .filter_map(move |p| Some(Point::new(p.x.checked_add(dx)?, p.y.checked_add(dy)?)))
+    }
 }
 
 /// The unit `(f32, f32)` direction of `side`, via a literal `match` — no
@@ -392,6 +408,55 @@ mod tests {
         let (a, b) = (Point::new(1, 1), Point::new(2, 1));
         assert!(gate.separates(a, b));
         assert!(gate.separates(b, a));
+    }
+
+    #[test]
+    fn forward_face_shifts_behind_by_forward_delta() {
+        let gate = TimingGate {
+            behind: vec![Point::new(1, 1)],
+            forward: Side::East,
+        };
+        assert_eq!(
+            gate.forward_face().collect::<Vec<_>>(),
+            vec![Point::new(2, 1)]
+        );
+    }
+
+    #[test]
+    fn forward_face_shifts_by_each_side_delta() {
+        let behind = vec![Point::new(1, 1)];
+        let face = |forward| {
+            TimingGate {
+                behind: behind.clone(),
+                forward,
+            }
+            .forward_face()
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(face(Side::East), vec![Point::new(2, 1)]);
+        assert_eq!(face(Side::West), vec![Point::new(0, 1)]);
+        assert_eq!(face(Side::North), vec![Point::new(1, 2)]);
+        assert_eq!(face(Side::South), vec![Point::new(1, 0)]);
+    }
+
+    #[test]
+    fn forward_face_empty_when_behind_is_empty() {
+        let gate = TimingGate {
+            behind: vec![],
+            forward: Side::East,
+        };
+        assert!(gate.forward_face().next().is_none());
+    }
+
+    #[test]
+    fn forward_face_filters_overflowing_seed() {
+        // A `behind` cell at i32::MAX with forward East: the +1 step
+        // overflows i32, so the seed is filtered out rather than panicking.
+        let gate = TimingGate {
+            behind: vec![Point::new(i32::MAX, 1)],
+            forward: Side::East,
+        };
+        assert!(gate.forward_face().next().is_none());
     }
 
     // ---- StartGrid (subtask 2) ----------------------------------------
