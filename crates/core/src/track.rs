@@ -818,8 +818,8 @@ mod tests {
         }
         // A projection-based centerline definition would fold arm A's (0,3)
         // and arm B's (4,3) onto a similar "distance from center" value
-        // despite being 7 apart along the true path — the BFS keeps them
-        // distinct.
+        // despite being 4 apart along the true path (s = 2 vs s = 6) — the
+        // BFS keeps them distinct.
         assert_ne!(
             field.scalar_at(Point::new(0, 3)),
             field.scalar_at(Point::new(4, 3))
