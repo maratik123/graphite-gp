@@ -60,7 +60,7 @@ impl Point {
 /// Carried by chords such as the start/finish line
 /// ([`StartFinish`](crate::track::StartFinish)); walls instead carry a 4-way
 /// [`Side`].
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Orient {
     /// Horizontal — spanning east–west.
     Horizontal,
@@ -621,6 +621,22 @@ mod tests {
                 Point::new(1, 1),
             ]
         );
+    }
+
+    #[test]
+    fn orient_ord_orders_horizontal_before_vertical() {
+        // AC1: derived Ord orders Horizontal before Vertical — the old
+        // axis_rank table (Horizontal -> 0, Vertical -> 1), now term-for-term
+        // from the derive.
+        assert!(Orient::Horizontal < Orient::Vertical);
+        assert_eq!(
+            Orient::Horizontal.cmp(&Orient::Horizontal),
+            std::cmp::Ordering::Equal
+        );
+
+        let mut orients = vec![Orient::Vertical, Orient::Horizontal];
+        orients.sort();
+        assert_eq!(orients, vec![Orient::Horizontal, Orient::Vertical]);
     }
 
     #[test]
