@@ -33,6 +33,18 @@ const fn should_run_oracle(static_issues: &[Issue], liveness: bool) -> bool {
     static_issues.is_empty() && liveness
 }
 
+/// Accept gate (AC6): a `Lappable` oracle verdict is only half the bar — the
+/// run-out budget check (`phase5_runout_checks`) must come back clean too.
+/// A non-empty result carries `NoBraking` issues, which are routed to Ф6 as a
+/// repair iteration rather than silently accepted.
+///
+/// Extracted as a named predicate (mirroring [`should_run_oracle`]) so the
+/// accept condition is exercised directly by a unit test instead of only
+/// through a multi-minute end-to-end generation run.
+const fn should_accept(runout_issues: &[Issue]) -> bool {
+    runout_issues.is_empty()
+}
+
 /// Assembles the accepted corridor + its fixed per-seed context (`sf`,
 /// `grid`, `race_dir`) and the accepting oracle run's `metrics` into a fully
 /// populated [`TrackArtifact`] (design § Artifact assembly).
@@ -112,7 +124,7 @@ pub fn generate(params: GenParams) -> Result<TrackArtifact, GenerationError> {
                 match phase5_full_oracle(&d, &grid, &sf, race_dir) {
                     OracleResult::Lappable(metrics) => {
                         let runout = phase5_runout_checks(&d, &metrics, v_target);
-                        if runout.is_empty() {
+                        if should_accept(&runout) {
                             return Ok(build_artifact(d, sf, grid, race_dir, metrics));
                         }
                         issues = runout;
@@ -239,11 +251,18 @@ mod tests {
     // ---- AC6: run-out routing / accept guard ----------------------------
 
     #[test]
-    fn no_braking_issue_fails_the_accept_guard() {
-        let runout = [Issue::NoBraking {
+    fn should_accept_declines_on_a_no_braking_issue() {
+        // Exercises the *production* accept gate (`generate`'s `should_accept`
+        // call at the `Lappable` arm), not a local vec: a non-empty run-out
+        // check must route to Ф6 instead of being accepted.
+        assert!(!should_accept(&[Issue::NoBraking {
             at: gp_core::geom::Point::new(0, 0),
-        }];
-        assert!(!runout.is_empty());
+        }]));
+    }
+
+    #[test]
+    fn should_accept_allows_a_clean_run_out_check() {
+        assert!(should_accept(&[]));
     }
 
     // ---- AC4/AC5/AC8: end-to-end determinism + invariants ---------------
@@ -324,6 +343,16 @@ mod tests {
 
         assert_eq!(format!("{a1:?}"), format!("{a2:?}"), "determinism (AC5)");
         assert_well_formed_centerline(&a1.centerline);
+        // The design's Risks section rules that a `width_min < n` red is a
+        // REAL signal (the `Narrow` gate only fires on a DT-consistent neck),
+        // never to be silenced — so it is asserted in the always-on test too,
+        // not only inside the `#[ignore]`d AC5(a).
+        assert!(
+            a1.width_min >= p.min_width(),
+            "width_min {} must be >= n = ceil(m/2) = {}",
+            a1.width_min,
+            p.min_width()
+        );
     }
 
     /// AC8 regression: running the accepted artifact's own corridor/gate/
@@ -331,10 +360,17 @@ mod tests {
     /// still yields a non-empty, well-formed centerline — the A1
     /// `medial_axis` fix + Ф7 bridge guard hold on a real generated
     /// corridor.
+    ///
+    /// **Seed 9, deliberately — not the AC5(b) seed.** Seed 6's corridor is
+    /// insensitive to the Ф7 bridge guard (`racing_line` yields 310 samples
+    /// with or without it), so pinning AC8 there would regression-guard only
+    /// the `gp-core` A1 half of the fix. Reverting the
+    /// `components(&medial).len() > 1` guard takes seed 9 from **364 samples
+    /// to 0**, so this test fails if either half of the fix regresses.
     #[test]
     fn ac8_racing_line_regression_on_a_real_generated_corridor() {
-        let p = params(6, 1, 8);
-        let a = generate(p).expect("bs=6 seed=6 seed_budget=1 repair_budget=8 must accept");
+        let p = params(9, 1, 8);
+        let a = generate(p).expect("bs=6 seed=9 seed_budget=1 repair_budget=8 must accept");
         let cl = racing_line(&a.corridor, &a.sf.gate, a.race_dir);
         assert_well_formed_centerline(&cl);
     }

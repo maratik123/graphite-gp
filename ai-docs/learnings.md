@@ -399,3 +399,12 @@ Append-only correction/validation log — the feed for `/improve`. See AGENTS.md
 **Rule:** A test count (or any measured tally) in a subagent's return summary is a **claim, not a record** — never transcribe it into a durable doc. Run the per-crate `cargo test -p <crate> --lib` (or `--doc`) yourself and write the number you observed *in this turn*. The reconcile-against-durable-record rule (AGENTS.md § Workflow) is what caught this: a new count must agree with the existing README/status baseline, and a contradiction is a signal to re-measure, not to overwrite. Generalise: whenever two durable surfaces (a subagent summary and the README baseline) disagree on a number, the resolution is a fresh measurement, never picking one.
 **Kind:** correction
 **Escalated?** no
+
+### 2026-07-25 — process — Don't duplicate a running delegate's investigation; steer it instead
+
+**What happened:** During `/task 34` Step 8, the `code-writer` was mid-investigation of a slow generation sweep and kept ending its turn to wait. I concluded it was stuck and launched my own competing seed sweep in a scratch integration test — while its diagnostic was still running. Both runs then competed for CPU, making each slower, and I had duplicated work the delegate was already doing. The user corrected me: *"agent actually not finished"*. I killed my sweep, removed my scratch file, and instead sent the delegate the ground truth I had (the precise failing assertion) plus a decision rule, which let it converge.
+
+**Rule:** While a delegate is still running, do NOT start a parallel investigation of the same question — it duplicates effort and steals CPU from the delegate, slowing the very work you are impatient about. A delegate ending its turn to wait on a long job is *waiting*, not *stuck*. When a delegate seems slow: (a) verify what it is actually doing (`ps`, its committed output) before judging; (b) if it lacks information you already have, `SendMessage` it that information plus an explicit decision rule; (c) only take over after stopping it, and say so. Reserve independent re-derivation for *verifying a returned claim* (Pattern 1), which is a different activity from racing a delegate that has not returned yet.
+
+**Kind:** correction
+**Escalated?** no

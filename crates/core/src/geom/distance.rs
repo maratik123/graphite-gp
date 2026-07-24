@@ -397,10 +397,11 @@ mod tests {
         let medial = medial_axis(&dt);
 
         // Verbatim 32-cell predicted set (design doc § A1 subtask 5/6): the
-        // west strip (x=1) is thinned back to y in 2..=8, the west corner
-        // survives as a square 4-cell notch at x=2 (y in {1,2,8,9}), the
-        // north/south strips at x in 3..=8 stay 1-cell each (y in {1,9}),
-        // and the east strip (x=9) keeps its full square corners.
+        // west strip (x=1) is thinned back to y in 2..=8, x=2 keeps two
+        // separate 2-cell corner notches (y in {1,2} and y in {8,9}) — not one
+        // contiguous block — the north/south strips at x in 3..=8 stay 1-cell
+        // each (y in {1,9}), and the east strip (x=9) keeps its full square
+        // corners.
         let mut expected = BTreeSet::new();
         for y in 2..=8 {
             expected.insert(Point::new(1, y));
