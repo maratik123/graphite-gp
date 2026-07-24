@@ -625,9 +625,9 @@ mod tests {
 
     #[test]
     fn orient_ord_orders_horizontal_before_vertical() {
-        // AC1: derived Ord orders Horizontal before Vertical — the old
-        // axis_rank table (Horizontal -> 0, Vertical -> 1), now term-for-term
-        // from the derive.
+        // AC1: derived Ord orders Horizontal before Vertical — the ordinal
+        // Horizontal -> 0, Vertical -> 1 that phase6 axis tie-breaking relies
+        // on, now term-for-term from the derive.
         assert!(Orient::Horizontal < Orient::Vertical);
         assert_eq!(
             Orient::Horizontal.cmp(&Orient::Horizontal),
@@ -640,10 +640,10 @@ mod tests {
     }
 
     #[test]
-    fn wall_ord_matches_wall_sort_key_order() {
+    fn wall_ord_orders_by_cell_then_side_rank() {
         // AC10: derived Ord orders by cell (x then y) first, then side rank
-        // (East < West < North < South) — term-for-term equal to the old
-        // wall_sort_key(w) = (w.cell, side_rank(w.side)).
+        // (East < West < North < South) — i.e. (w.cell, side rank of w.side),
+        // the total order phase6 wall dispatch relies on.
         let w = |x, y, side| Wall {
             cell: Point::new(x, y),
             side,

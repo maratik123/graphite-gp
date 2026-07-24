@@ -396,9 +396,9 @@ mod tests {
 
     #[test]
     fn side_ord_orders_east_west_north_south() {
-        // AC9: derived Ord orders East < West < North < South — the old
-        // wall_sort_key side rank (East=0, West=1, North=2, South=3), now
-        // term-for-term from the derive.
+        // AC9: derived Ord orders East < West < North < South — the side rank
+        // East=0, West=1, North=2, South=3 that phase6 wall ordering relies on,
+        // now term-for-term from the derive.
         assert!(Side::East < Side::West);
         assert!(Side::West < Side::North);
         assert!(Side::North < Side::South);
