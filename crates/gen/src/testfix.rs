@@ -217,6 +217,28 @@ pub(crate) fn brake_deficit_corridor() -> (Corridor, Vec<Point>, BTreeSet<usize>
     (d, path, sinks)
 }
 
+/// AC1 helper (Ф6 local-repair): asserts that `after` differs from `before`
+/// in **exactly one** cell's drivability, over `before`'s own bounding box
+/// (every arm's `apply_edit` clones `before` verbatim, so the two share a
+/// box by construction), and that the differing cell is `expected_cell` at
+/// `expected_drivable`.
+pub(crate) fn assert_single_cell_flip(
+    before: &Corridor,
+    after: &Corridor,
+    expected_cell: Point,
+    expected_drivable: bool,
+) {
+    let diffs: Vec<Point> = crate::phase4::box_points(before)
+        .filter(|&p| before.contains(p) != after.contains(p))
+        .collect();
+    assert_eq!(
+        diffs,
+        vec![expected_cell],
+        "expected exactly one cell to flip drivability"
+    );
+    assert_eq!(after.contains(expected_cell), expected_drivable);
+}
+
 /// The AC2 tier-2 fallback witness: a single-cell corridor
 /// (`Corridor::filled(Point::new(2, 0), 1, 1)`) with the `ring_sf`-shaped
 /// gate at `(2, 0)`. No cell ahead of the gate exists, so no forward

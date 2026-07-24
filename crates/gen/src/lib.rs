@@ -15,6 +15,7 @@ mod phase5;
 mod phase5_runout;
 mod phase5b;
 mod phase6;
+mod phase6_arms;
 mod phase6_repair;
 #[cfg(test)]
 mod testfix;
