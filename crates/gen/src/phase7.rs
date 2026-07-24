@@ -746,4 +746,46 @@ mod tests {
             }
         }
     }
+
+    /// Recursively collects every `.rs` file under `dir`.
+    fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// AC5: no `gp-ai` source file references the (render-only) `Centerline`
+    /// type or the `.centerline` field — a case-sensitive source scan, so the
+    /// doc-comment prose's lowercase "centerline" mentions don't false-positive
+    /// (design doc § "AC5 enforcement mechanism"). Lives in `gp-gen`
+    /// (Miri-`--exclude`d, `#[134]`), so this file-reading test needs no
+    /// `#[cfg_attr(miri, ignore)]`.
+    #[test]
+    fn ac5_gp_ai_never_references_centerline() {
+        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../ai/src"));
+        let mut files = Vec::new();
+        collect_rs_files(root, &mut files);
+        assert!(!files.is_empty(), "expected to find gp-ai source files");
+
+        let offenders: Vec<String> = files
+            .into_iter()
+            .filter_map(|path| {
+                let contents = std::fs::read_to_string(&path).ok()?;
+                (contents.contains("Centerline") || contents.contains(".centerline"))
+                    .then(|| path.display().to_string())
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "gp-ai must not reference Centerline/.centerline: {offenders:?}"
+        );
+    }
 }
