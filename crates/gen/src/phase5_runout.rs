@@ -606,4 +606,108 @@ mod tests {
             "the deficient run must not be anchored at the sink itself"
         );
     }
+
+    // ---- AC3: the discriminating fixture ---------------------------------
+
+    use crate::testfix::brake_deficit_corridor;
+
+    /// `deficit_at(c, East)` on `d` under the **sink-to-sink** scope: seeds
+    /// are the `|v| ≤ 1` superset at `path[0]`, barriers are `{path[0]}` —
+    /// the production detection/recheck scoping (design.md § Decision 2).
+    fn sink_deficit(d: &Corridor, path: &[Point], c: Point, v_target: i32) -> i32 {
+        let seed_cell = path[0];
+        let barriers = HashSet::from([seed_cell]);
+        let flood = window_speed(
+            d,
+            &low_speed_states_at(seed_cell),
+            &barriers,
+            v_target.max(1),
+        );
+        deficit_at(d, &flood, c, travel_dir(path, 10), v_target)
+    }
+
+    /// `deficit_at(c, East)` under the AC3 counter-scope: a **fixed-radius**
+    /// window seeded by the single at-rest state `N` path-steps upstream of
+    /// `c`, barriered at that same cell — **not** the production scope. The
+    /// barrier is mandatory (design.md § Decision 2, § Risks R13): with
+    /// `barriers = ∅` the flood would legally back up and re-accelerate,
+    /// collapsing this "radius" reading onto the sink-to-sink one.
+    fn radius_deficit(
+        d: &Corridor,
+        path: &[Point],
+        c: Point,
+        v_target: i32,
+        upstream: Point,
+    ) -> i32 {
+        let barriers = HashSet::from([upstream]);
+        let flood = window_speed(
+            d,
+            &[car(upstream.x, upstream.y, 0, 0)],
+            &barriers,
+            v_target.max(1),
+        );
+        deficit_at(d, &flood, c, travel_dir(path, 10), v_target)
+    }
+
+    #[test]
+    fn ac3_radius_recheck_wrongly_reports_fixed_while_sink_to_sink_reports_deficient() {
+        let (d_pre, path, _sinks) = brake_deficit_corridor();
+        let mut d_post = d_pre.clone();
+        d_post.set(Point::new(12, 0), true);
+
+        let c = path[10]; // (10, 0)
+        assert_eq!(c, Point::new(10, 0));
+        let upstream = Point::new(7, 0); // N=3 path-steps upstream of c
+
+        let v_target = 3;
+
+        let sink_pre = sink_deficit(&d_pre, &path, c, v_target);
+        let sink_post = sink_deficit(&d_post, &path, c, v_target);
+        let radius_pre = radius_deficit(&d_pre, &path, c, v_target, upstream);
+        let radius_post = radius_deficit(&d_post, &path, c, v_target, upstream);
+
+        assert_eq!(sink_pre, 4, "sink-to-sink deficit pre-edit");
+        assert_eq!(sink_post, 3, "sink-to-sink deficit post-edit");
+        assert_eq!(radius_pre, 1, "radius-3 deficit pre-edit");
+        assert_eq!(radius_post, 0, "radius-3 deficit post-edit");
+
+        // The discriminating requirement: post-edit, the radius recheck
+        // reports "fixed" while sink-to-sink correctly reports "still
+        // deficient" -- both under the SAME window_speed function, differing
+        // only in seeding.
+        assert!(
+            radius_post <= 0,
+            "radius recheck must report fixed post-edit"
+        );
+        assert!(
+            sink_post > 0,
+            "sink-to-sink recheck must still report deficient post-edit"
+        );
+        assert!(
+            sink_post < sink_pre,
+            "the edit must strictly decrease the sink-to-sink deficit (committed, per-arm metric)"
+        );
+
+        // design.md's explicit ask: attainable((10,0)) == 2 under the
+        // barriered radius counter-scope pre-edit.
+        let barriers = HashSet::from([upstream]);
+        let flood = window_speed(&d_pre, &[car(upstream.x, upstream.y, 0, 0)], &barriers, 3);
+        assert_eq!(flood.peak.get(&c).copied(), Some(2));
+    }
+
+    #[test]
+    fn ac3_non_vacuity_a_correct_repair_clears_the_sink_to_sink_deficit() {
+        let (d_pre, path, _sinks) = brake_deficit_corridor();
+        let mut d_post = d_pre.clone();
+        d_post.set(Point::new(12, 0), true);
+
+        let c = path[10];
+        let v_target = 2;
+
+        let pre = sink_deficit(&d_pre, &path, c, v_target);
+        let post = sink_deficit(&d_post, &path, c, v_target);
+
+        assert_eq!(pre, 1, "must fire pre-edit");
+        assert_eq!(post, 0, "the repair must clear the deficit post-edit");
+    }
 }
