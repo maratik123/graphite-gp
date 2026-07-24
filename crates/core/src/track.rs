@@ -2,7 +2,7 @@
 //! block 1 (generation) and consumed by blocks 2 (render), 3a (physics) and
 //! 4 (AI).
 
-use crate::geom::{Corridor, Orient, Point, Rect, Side, Wall};
+use crate::geom::{Corridor, Orient, Point, Rect, Side, Wall, barrier_distance_field};
 
 /// Global traversal orientation of the ring, fixed during generation (design
 /// doc §2, Ф1). Everything downstream — the lap counter, AI progress/reward,
@@ -62,8 +62,8 @@ impl TimingGate {
     /// cells one step ahead of the gate's `behind` cross-section, on the
     /// `+race_dir` side.
     ///
-    /// These are the BFS seed cells for the s-field producer: distance `0`
-    /// here, growing the long way around the loop to reach its maximum at
+    /// These are the BFS seed cells for [`SField::from_gate_bfs`]: distance
+    /// `0` here, growing the long way around the loop to reach its maximum at
     /// `behind`. Overflow-filtered exactly as [`separates`](Self::separates)'s
     /// `ahead_of` — a `behind` cell whose `+forward` step would overflow `i32`
     /// contributes no seed rather than panicking.
@@ -151,6 +151,26 @@ impl SField {
     pub fn new(rect: Rect, dist_at: impl Fn(Point) -> Option<u32>) -> Self {
         let dist = rect.points().map(dist_at).collect();
         Self { rect, dist }
+    }
+
+    /// The real BFS producer (design doc §2, N1 / P1 / D2): the 4-connected
+    /// distance field over `d \ gate`, seeded (distance `0`) from
+    /// `gate.forward_face()`, with `gate.separates` as the impassable barrier
+    /// in both directions.
+    ///
+    /// `rect` mirrors `d`'s own bounding box (via [`Corridor::rect`]), so
+    /// `dist.len() == rect.area()` holds by construction — the invariant
+    /// [`scalar_at`](Self::scalar_at) / [`gradient_at`](Self::gradient_at)
+    /// rely on. Every in-`D` cell is `Some(distance)`; every `¬D` cell, and
+    /// any in-`D` cell the cut leaves unreachable from the forward face, is
+    /// `None`. Deterministic: identical `(d, gate)` inputs yield an identical
+    /// field.
+    pub fn from_gate_bfs(d: &Corridor, gate: &TimingGate) -> Self {
+        let dist = barrier_distance_field(d, gate.forward_face(), |a, b| gate.separates(a, b));
+        Self {
+            rect: d.rect(),
+            dist,
+        }
     }
 
     /// The scalar distance `s` at `p`, or `None` if `p` is outside the band.
@@ -580,6 +600,240 @@ mod tests {
         assert_eq!(
             field.tangent_at(&gate, Point::new(1, 1)),
             Some(FLAT_FALLBACK)
+        );
+    }
+
+    // ---- SField::from_gate_bfs (Ф7 s-field, subtask 4) ------------------
+
+    /// Build a corridor over the box `[origin, origin + (w, h))` with the
+    /// given `(x, y)` cells marked drivable (mirrors the `geom` test helper of
+    /// the same name/shape).
+    fn corridor(
+        origin: (crate::geom::Coord, crate::geom::Coord),
+        w: usize,
+        h: usize,
+        drivable: &[(crate::geom::Coord, crate::geom::Coord)],
+    ) -> Corridor {
+        let mut d = Corridor::new(Point::new(origin.0, origin.1), w, h);
+        for &(x, y) in drivable {
+            d.set(Point::new(x, y), true);
+        }
+        d
+    }
+
+    /// The 8-cell 3×3 ring `{(1,1),(2,1),(3,1),(1,2),(3,2),(1,3),(2,3),(3,3)}`
+    /// (center `(2,2)` excluded) — the AC6 hand-computed fixture, with a gate
+    /// behind `(1,1)` forward `East` (cut edge `(1,1)–(2,1)`, forward face
+    /// `{(2,1)}`).
+    fn ring_gate_fixture() -> (Corridor, TimingGate) {
+        let ring = [
+            (1, 1),
+            (2, 1),
+            (3, 1),
+            (1, 2),
+            (3, 2),
+            (1, 3),
+            (2, 3),
+            (3, 3),
+        ];
+        let d = corridor((0, 0), 5, 5, &ring);
+        let gate = TimingGate {
+            behind: vec![Point::new(1, 1)],
+            forward: Side::East,
+        };
+        (d, gate)
+    }
+
+    #[test]
+    fn from_gate_bfs_matches_hand_computed_ring_distances() {
+        // AC6: exact distances the long way around the 8-cycle, cell-by-cell.
+        let (d, gate) = ring_gate_fixture();
+        let field = SField::from_gate_bfs(&d, &gate);
+        let expected = [
+            ((2, 1), 0),
+            ((3, 1), 1),
+            ((3, 2), 2),
+            ((3, 3), 3),
+            ((2, 3), 4),
+            ((1, 3), 5),
+            ((1, 2), 6),
+            ((1, 1), 7),
+        ];
+        for ((x, y), s) in expected {
+            assert_eq!(
+                field.scalar_at(Point::new(x, y)),
+                Some(s),
+                "cell ({x}, {y})"
+            );
+        }
+        // The cell across the cut reads the long-way max (7), not 1 — proves
+        // the barrier (AC1).
+        assert_eq!(field.scalar_at(Point::new(1, 1)), Some(7));
+    }
+
+    #[test]
+    fn from_gate_bfs_ac1_ac2_seed_max_and_total_coverage() {
+        // AC1/AC2: forward-face seed is 0, the behind cross-section is the
+        // max, every in-D cell is Some, (2,2) (¬D) is None, and dist.len() ==
+        // rect.area() (the SField invariant).
+        let (d, gate) = ring_gate_fixture();
+        let field = SField::from_gate_bfs(&d, &gate);
+        assert_eq!(field.scalar_at(Point::new(2, 1)), Some(0));
+        assert_eq!(field.scalar_at(Point::new(1, 1)), Some(7));
+        for (x, y) in [
+            (1, 1),
+            (2, 1),
+            (3, 1),
+            (1, 2),
+            (3, 2),
+            (1, 3),
+            (2, 3),
+            (3, 3),
+        ] {
+            assert!(field.scalar_at(Point::new(x, y)).is_some());
+        }
+        assert_eq!(field.scalar_at(Point::new(2, 2)), None);
+        assert_eq!(field.dist.len(), field.rect.size.area());
+    }
+
+    #[test]
+    fn from_gate_bfs_ac3_no_forward_fold_except_the_gate_step() {
+        // AC3: walking the ring in race_dir order from the seed, every
+        // forward unit step has Δs >= 0, except the single L -> 0 reset at
+        // the gate.
+        let (d, gate) = ring_gate_fixture();
+        let field = SField::from_gate_bfs(&d, &gate);
+        let order = [
+            (2, 1),
+            (3, 1),
+            (3, 2),
+            (3, 3),
+            (2, 3),
+            (1, 3),
+            (1, 2),
+            (1, 1),
+            (2, 1), // closing gate step: 7 -> 0
+        ];
+        for w in order.windows(2) {
+            let s0 = field.scalar_at(Point::new(w[0].0, w[0].1)).unwrap();
+            let s1 = field.scalar_at(Point::new(w[1].0, w[1].1)).unwrap();
+            let is_gate_step = w[0] == (1, 1) && w[1] == (2, 1);
+            if is_gate_step {
+                assert_eq!((s0, s1), (7, 0), "the gate step must be the 7 -> 0 reset");
+            } else {
+                assert!(
+                    i64::from(s1) - i64::from(s0) >= 0,
+                    "forward step {w:?} decreased s: {s0} -> {s1}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_gate_bfs_ac4_only_discontinuity_is_the_gate_reset() {
+        // AC4: every non-gate adjacent forward pair differs by exactly 1; the
+        // sole exception is the 7 -> 0 gate step.
+        let (d, gate) = ring_gate_fixture();
+        let field = SField::from_gate_bfs(&d, &gate);
+        let order = [
+            (2, 1),
+            (3, 1),
+            (3, 2),
+            (3, 3),
+            (2, 3),
+            (1, 3),
+            (1, 2),
+            (1, 1),
+            (2, 1),
+        ];
+        for w in order.windows(2) {
+            let s0 = field.scalar_at(Point::new(w[0].0, w[0].1)).unwrap();
+            let s1 = field.scalar_at(Point::new(w[1].0, w[1].1)).unwrap();
+            let is_gate_step = w[0] == (1, 1) && w[1] == (2, 1);
+            if is_gate_step {
+                assert_eq!((s0, s1), (7, 0));
+            } else {
+                assert_eq!(s1, s0 + 1, "non-gate step {w:?} is not a unit increase");
+            }
+        }
+    }
+
+    #[test]
+    fn from_gate_bfs_ac5_hairpin_is_single_valued_no_projection_fold() {
+        // AC5: a U-shaped (hairpin) corridor where a nearest-point-on-
+        // centerline projection would fold the two parallel arms onto the
+        // same s; the BFS instead assigns each arm cell a distinct, strictly
+        // increasing distance along the true corridor path through the
+        // pocket. Shape (x horizontal 0..=4, y vertical 0..=3):
+        //   arm A: (0,1),(0,2),(0,3)
+        //   pocket bottom: (0,3),(1,3),(2,3),(3,3),(4,3)
+        //   arm B: (4,0),(4,1),(4,2),(4,3)
+        // Gate `behind` = (0,0), a cell deliberately *outside* D (¬D, so the
+        // implied cut edge never matches a real D-D BFS step); its
+        // `forward_face` (North) is (0,1) — the mouth of arm A — which seeds
+        // the BFS with no path disconnected.
+        let hairpin: Vec<(crate::geom::Coord, crate::geom::Coord)> = vec![
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 3),
+            (2, 3),
+            (3, 3),
+            (4, 3),
+            (4, 2),
+            (4, 1),
+            (4, 0),
+        ];
+        let d = corridor((0, 0), 5, 4, &hairpin);
+        let gate = TimingGate {
+            behind: vec![Point::new(0, 0)],
+            forward: Side::North,
+        };
+        let field = SField::from_gate_bfs(&d, &gate);
+        // Each cell is single-valued (structural: Option<u32>) and Some.
+        let path = [
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 3),
+            (2, 3),
+            (3, 3),
+            (4, 3),
+            (4, 2),
+            (4, 1),
+            (4, 0),
+        ];
+        let mut prev = None;
+        for (x, y) in path {
+            let s = field.scalar_at(Point::new(x, y));
+            assert!(s.is_some(), "cell ({x}, {y}) must be reachable");
+            if let Some(prev_s) = prev {
+                assert_eq!(
+                    s.unwrap(),
+                    prev_s + 1,
+                    "s must strictly increase along the true path, no fold"
+                );
+            }
+            prev = s;
+        }
+        // A projection-based centerline definition would fold arm A's (0,3)
+        // and arm B's (4,3) onto a similar "distance from center" value
+        // despite being 7 apart along the true path — the BFS keeps them
+        // distinct.
+        assert_ne!(
+            field.scalar_at(Point::new(0, 3)),
+            field.scalar_at(Point::new(4, 3))
+        );
+    }
+
+    #[test]
+    fn from_gate_bfs_is_deterministic() {
+        // AC6: rerunning the producer on identical inputs yields identical
+        // output.
+        let (d, gate) = ring_gate_fixture();
+        assert_eq!(
+            SField::from_gate_bfs(&d, &gate).dist,
+            SField::from_gate_bfs(&d, &gate).dist
         );
     }
 
