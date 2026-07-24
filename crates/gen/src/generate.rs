@@ -1,0 +1,377 @@
+//! `generate()` — the Block-1 capstone that wires the already-landed phases
+//! Ф1→Ф7 into the outer generation loop of `docs/design.md` §2
+//! (`generate_track` pseudocode). No phase behaviour or signature changes —
+//! orchestration + [`gp_core::track::TrackArtifact`] assembly only
+//! (`ai-docs/plans/2026-07-24-gp-gen-generate-pipeline.design.md`).
+
+use gp_core::geom::{Corridor, Wall, walls_from_boundary};
+use gp_core::track::{RaceDir, SField, StartFinish, StartGrid, TrackArtifact, TrackMetrics};
+use thiserror::Error;
+
+use crate::{
+    CoarseSkeleton, GenParams, Issue, OracleResult, Phase3Output, RepairContext, RepairOutcome,
+    oracle_liveness_v1, phase1_coarse_ring, phase2_rasterize, phase3_start_finish,
+    phase4_static_checks, phase5_full_oracle, phase5_runout_checks, phase6_local_repair,
+    racing_line,
+};
+
+/// `generate`'s failure value — the design-doc `GENERATION_FAILED` sentinel.
+#[derive(Debug, Error)]
+pub enum GenerationError {
+    /// The outer seed-budget loop (`params.seed_budget` draws from the
+    /// continuing `generation_rng` stream) was spent without ever reaching
+    /// the accept path.
+    #[error("track generation failed: seed budget exhausted without an acceptable track")]
+    SeedBudgetExhausted,
+}
+
+/// Cheap-then-expensive gate (AC1): the expensive Vmax oracle
+/// (`phase5_full_oracle`) is worth running only once both cheap checks are
+/// clean — no outstanding Ф4 static issue, and the V=1 liveness probe already
+/// finds a lap.
+const fn should_run_oracle(static_issues: &[Issue], liveness: bool) -> bool {
+    static_issues.is_empty() && liveness
+}
+
+/// Accept gate (AC6): a `Lappable` oracle verdict is only half the bar — the
+/// run-out budget check (`phase5_runout_checks`) must come back clean too.
+/// A non-empty result carries `NoBraking` issues, which are routed to Ф6 as a
+/// repair iteration rather than silently accepted.
+///
+/// Extracted as a named predicate (mirroring [`should_run_oracle`]) so the
+/// accept condition is exercised directly by a unit test instead of only
+/// through a multi-minute end-to-end generation run.
+const fn should_accept(runout_issues: &[Issue]) -> bool {
+    runout_issues.is_empty()
+}
+
+/// Assembles the accepted corridor + its fixed per-seed context (`sf`,
+/// `grid`, `race_dir`) and the accepting oracle run's `metrics` into a fully
+/// populated [`TrackArtifact`] (design § Artifact assembly).
+///
+/// Move-order: every field that borrows `&d` / `&sf.gate` (`walls`,
+/// `s_field`, `centerline`, `width_min`) is computed **before** `d`/`sf`/
+/// `grid`/`metrics` are moved into the struct.
+fn build_artifact(
+    d: Corridor,
+    sf: StartFinish,
+    grid: StartGrid,
+    race_dir: RaceDir,
+    metrics: TrackMetrics,
+) -> TrackArtifact {
+    let walls = walls_from_boundary(&d);
+    let s_field = SField::from_gate_bfs(&d, &sf.gate);
+    let centerline = racing_line(&d, &sf.gate, race_dir);
+    let width_min = crate::phase4_defects::corridor_min_width(&d);
+
+    TrackArtifact {
+        corridor: d,
+        walls,
+        sf,
+        race_dir,
+        s_field,
+        start_grid: grid,
+        centerline,
+        metrics,
+        width_min,
+    }
+}
+
+/// Run the full generation pipeline (design doc §2, Ф1–Ф7) and return a
+/// validated, passability-certified track.
+///
+/// Outer seed-budget loop (`params.seed_budget` iterations) over a single
+/// continuing RNG stream (`params.generation_rng()`, constructed once —
+/// replay-determinism contract, #49): each iteration draws a fresh skeleton
+/// (Ф1), rasterizes + seats the start/finish (Ф2/Ф3), then runs an inner
+/// repair loop (`params.repair_budget` iterations) that gates the expensive
+/// oracle behind the cheap static + liveness checks (AC1), routes
+/// `NotLappable` stall diagnostics or run-out `NoBraking` issues into Ф6
+/// (AC2/AC6), and accepts on a `Lappable` result with an empty run-out check.
+/// A repair iteration that makes no progress (`RepairOutcome::Failed`) drops
+/// to the next seed. Falling through both loops without accepting returns
+/// `Err(GenerationError::SeedBudgetExhausted)` (AC3) — no infinite loop,
+/// zero production panics on any `GenParams` (AC7).
+///
+/// # Errors
+///
+/// Returns [`GenerationError::SeedBudgetExhausted`] if `params.seed_budget`
+/// seed draws are spent without ever reaching an accept path (every seed's
+/// inner repair loop ran out of `params.repair_budget` iterations, or the
+/// oracle never certified a lappable, run-out-clean track).
+pub fn generate(params: GenParams) -> Result<TrackArtifact, GenerationError> {
+    let mut rng = params.generation_rng();
+    let n_u32 = params.min_width();
+    let phase2_n = i32::try_from(n_u32).unwrap_or(i32::MAX);
+    let m = params.start_finish_width();
+    let k = params.block_size;
+    let v_target = params.v_ceiling;
+
+    for _ in 0..params.seed_budget {
+        let skel: CoarseSkeleton = phase1_coarse_ring(params.min_straight, &mut rng);
+        let race_dir = skel.dir;
+        let corridor = phase2_rasterize(&skel, k, phase2_n);
+        let Phase3Output { mut d, sf, grid } = phase3_start_finish(corridor, &skel, m, v_target);
+
+        for _ in 0..params.repair_budget {
+            let mut issues = phase4_static_checks(&d, &skel, k, n_u32, m, &sf);
+            let liveness = oracle_liveness_v1(&d, &grid, &sf, race_dir);
+
+            let mut oracle_metrics: Option<TrackMetrics> = None;
+            let mut oracle_stall: Option<Vec<Wall>> = None;
+
+            if should_run_oracle(&issues, liveness) {
+                match phase5_full_oracle(&d, &grid, &sf, race_dir) {
+                    OracleResult::Lappable(metrics) => {
+                        let runout = phase5_runout_checks(&d, &metrics, v_target);
+                        if should_accept(&runout) {
+                            return Ok(build_artifact(d, sf, grid, race_dir, metrics));
+                        }
+                        issues = runout;
+                        oracle_metrics = Some(metrics);
+                    }
+                    OracleResult::NotLappable { stall_walls } => {
+                        oracle_stall = Some(stall_walls);
+                    }
+                }
+            }
+
+            let ctx = RepairContext {
+                d: &d,
+                skel: &skel,
+                k,
+                n: n_u32,
+                m,
+                grid: &grid,
+                sf: &sf,
+                race_dir,
+                v_target,
+                metrics: oracle_metrics.as_ref(),
+                stall_walls: oracle_stall.as_deref(),
+            };
+            let outcome = phase6_local_repair(&ctx, &issues);
+            match outcome {
+                RepairOutcome::Repaired { d: nd, .. } => d = nd,
+                RepairOutcome::Failed => break,
+            }
+        }
+    }
+
+    Err(GenerationError::SeedBudgetExhausted)
+}
+
+#[cfg(test)]
+mod tests {
+    use gp_core::rng::Seeds;
+
+    use super::*;
+
+    fn params(seed: u64, seed_budget: u32, repair_budget: u32) -> GenParams {
+        GenParams {
+            cars: 4,
+            min_straight: 3,
+            v_ceiling: 5,
+            block_size: 6,
+            seeds: Seeds {
+                generation: seed,
+                ..Default::default()
+            },
+            seed_budget,
+            repair_budget,
+        }
+    }
+
+    // ---- AC1: cheap-then-expensive gate --------------------------------
+
+    #[test]
+    fn should_run_oracle_declines_on_outstanding_static_issue() {
+        assert!(!should_run_oracle(
+            &[Issue::Disconnected],
+            /* liveness */ true
+        ));
+    }
+
+    #[test]
+    fn should_run_oracle_declines_on_dead_liveness() {
+        assert!(!should_run_oracle(&[], /* liveness */ false));
+    }
+
+    #[test]
+    fn should_run_oracle_runs_when_both_cheap_checks_are_clean() {
+        assert!(should_run_oracle(&[], /* liveness */ true));
+    }
+
+    #[test]
+    fn a_disconnected_corridor_yields_a_non_empty_static_check() {
+        // Grounds should_run_oracle's false branch in a real phase4_static_checks
+        // call, not just the predicate in isolation.
+        let mut rng = params(1, 1, 1).generation_rng();
+        let skel = phase1_coarse_ring(3, &mut rng);
+        // An empty corridor box (no thickening) is disconnected/topologically
+        // broken relative to the skeleton's ring.
+        let d = Corridor::new(gp_core::geom::Point::new(0, 0), 1, 1);
+        let issues = phase4_static_checks(
+            &d,
+            &skel,
+            6,
+            2,
+            4,
+            &StartFinish {
+                chord: vec![],
+                orient: gp_core::geom::Orient::Horizontal,
+                gate: gp_core::track::TimingGate {
+                    behind: vec![],
+                    forward: gp_core::geom::Side::East,
+                },
+            },
+        );
+        assert!(!issues.is_empty());
+    }
+
+    // ---- AC3: GENERATION_FAILED path ------------------------------------
+
+    #[test]
+    fn zero_seed_budget_fails_promptly() {
+        let p = params(1, 0, 8);
+        assert!(matches!(
+            generate(p),
+            Err(GenerationError::SeedBudgetExhausted)
+        ));
+    }
+
+    #[test]
+    fn zero_repair_budget_fails_promptly() {
+        let p = params(1, 8, 0);
+        assert!(matches!(
+            generate(p),
+            Err(GenerationError::SeedBudgetExhausted)
+        ));
+    }
+
+    // ---- AC6: run-out routing / accept guard ----------------------------
+
+    #[test]
+    fn should_accept_declines_on_a_no_braking_issue() {
+        // Exercises the *production* accept gate (`generate`'s `should_accept`
+        // call at the `Lappable` arm), not a local vec: a non-empty run-out
+        // check must route to Ф6 instead of being accepted.
+        assert!(!should_accept(&[Issue::NoBraking {
+            at: gp_core::geom::Point::new(0, 0),
+        }]));
+    }
+
+    #[test]
+    fn should_accept_allows_a_clean_run_out_check() {
+        assert!(should_accept(&[]));
+    }
+
+    // ---- AC4/AC5/AC8: end-to-end determinism + invariants ---------------
+
+    /// AC4 well-formedness check shared by the AC5(a)/AC5(b)/AC8 tests below:
+    /// `samples` non-empty, `samples[0].s == 0`, strictly increasing `s`, the
+    /// loop wraps (`at(length) ~ at(0)`), and `length > 0.0` with at least the
+    /// minimum 4-connected grid cycle (4 samples).
+    fn assert_well_formed_centerline(cl: &gp_core::track::Centerline) {
+        assert!(!cl.samples.is_empty(), "centerline must have samples");
+        assert!(cl.samples.len() >= 4, "minimum 4-connected grid cycle");
+        assert!(cl.length > 0.0, "centerline must have positive length");
+        assert!(
+            cl.samples[0].s.abs() < f32::EPSILON,
+            "first sample must seed s == 0"
+        );
+        for w in cl.samples.windows(2) {
+            assert!(w[1].s > w[0].s, "s must be strictly increasing");
+        }
+        let at0 = cl.at(0.0).expect("must sample at s=0");
+        let at_len = cl.at(cl.length).expect("must wrap at s=length");
+        assert!(
+            (at0.pos.0 - at_len.pos.0).abs() < 1e-3 && (at0.pos.1 - at_len.pos.1).abs() < 1e-3,
+            "the loop must wrap: at(0) ~ at(length)"
+        );
+    }
+
+    /// AC5(a), heavy: a larger-budget config run twice for full-artifact
+    /// determinism + invariants, including the now-reinstated non-empty,
+    /// well-formed centerline (AC4/AC8). `#[ignore]`d — measured at ~467s in
+    /// debug on this machine (§ progress decisions log), far above the
+    /// default-suite budget; run manually/nightly.
+    #[test]
+    #[ignore = "heavy: ~467s debug wall time for a 64-seed/32-repair-budget \
+                sweep — AC5(b) below covers the always-on default-suite case"]
+    fn generate_e2e_accepts_a_self_consistent_deterministic_track() {
+        let p = params(1, 64, 32);
+
+        let a1 = generate(p).expect("a working (seed, seed_budget, repair_budget) triple");
+        let a2 = generate(p).expect("second run must also accept");
+
+        assert_eq!(format!("{a1:?}"), format!("{a2:?}"), "determinism (AC5)");
+
+        assert!(
+            oracle_liveness_v1(&a1.corridor, &a1.start_grid, &a1.sf, a1.race_dir),
+            "a lap must exist on the returned artifact"
+        );
+        assert!(
+            u32::try_from(a1.sf.width()).unwrap_or(u32::MAX) >= p.start_finish_width(),
+            "S/F chord width must be >= m"
+        );
+        assert!(
+            a1.width_min >= p.min_width(),
+            "width_min must be >= n = ceil(m/2), got {}",
+            a1.width_min
+        );
+        assert_eq!(a1.s_field.rect, a1.corridor.rect());
+        for cell in a1.sf.gate.forward_face() {
+            assert_eq!(a1.s_field.scalar_at(cell), Some(0));
+        }
+        assert!(!a1.walls.is_empty());
+        assert_well_formed_centerline(&a1.centerline);
+        let mut deduped = a1.start_grid.positions.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(deduped.len(), a1.start_grid.positions.len());
+    }
+
+    /// AC5(b), cheap: the always-on default-suite config — accepts on the
+    /// first seed draw, deterministic across two runs, non-empty
+    /// well-formed centerline (AC4).
+    #[test]
+    fn generate_e2e_cheap_default_suite_has_a_non_empty_centerline() {
+        let p = params(6, 1, 8);
+
+        let a1 = generate(p).expect("bs=6 seed=6 seed_budget=1 repair_budget=8 must accept");
+        let a2 = generate(p).expect("second run must also accept");
+
+        assert_eq!(format!("{a1:?}"), format!("{a2:?}"), "determinism (AC5)");
+        assert_well_formed_centerline(&a1.centerline);
+        // The design's Risks section rules that a `width_min < n` red is a
+        // REAL signal (the `Narrow` gate only fires on a DT-consistent neck),
+        // never to be silenced — so it is asserted in the always-on test too,
+        // not only inside the `#[ignore]`d AC5(a).
+        assert!(
+            a1.width_min >= p.min_width(),
+            "width_min {} must be >= n = ceil(m/2) = {}",
+            a1.width_min,
+            p.min_width()
+        );
+    }
+
+    /// AC8 regression: running the accepted artifact's own corridor/gate/
+    /// `race_dir` directly through `racing_line` (not the hand-built annulus)
+    /// still yields a non-empty, well-formed centerline — the A1
+    /// `medial_axis` fix + Ф7 bridge guard hold on a real generated
+    /// corridor.
+    ///
+    /// **Seed 9, deliberately — not the AC5(b) seed.** Seed 6's corridor is
+    /// insensitive to the Ф7 bridge guard (`racing_line` yields 310 samples
+    /// with or without it), so pinning AC8 there would regression-guard only
+    /// the `gp-core` A1 half of the fix. Reverting the
+    /// `components(&medial).len() > 1` guard takes seed 9 from **364 samples
+    /// to 0**, so this test fails if either half of the fix regresses.
+    #[test]
+    fn ac8_racing_line_regression_on_a_real_generated_corridor() {
+        let p = params(9, 1, 8);
+        let a = generate(p).expect("bs=6 seed=9 seed_budget=1 repair_budget=8 must accept");
+        let cl = racing_line(&a.corridor, &a.sf.gate, a.race_dir);
+        assert_well_formed_centerline(&cl);
+    }
+}

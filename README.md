@@ -91,15 +91,25 @@ generic multi-seed, barrier-aware 4-connected BFS (`barrier_distance_field` in
 `geom/graph.rs`) seeded from the gate's forward face, with the timing-gate dual
 edges as impassable barriers so `s` grows the long way around the loop and never
 folds at the antipode; the sole discontinuity is the intended `L→0` reset across
-the gate. It ships as an independently-tested `gp-core` unit since `generate()`
-is still a stub. **Ф7's render-only racing centerline** has landed as well (#33):
+the gate. **Ф7's render-only racing centerline** has landed as well (#33):
 `racing_line(d, gate, race_dir) -> Centerline` in `gp-gen` `phase7.rs` trims the
 medial axis to one closed loop and arc-length-resamples it into
 `core::track::Centerline` for the renderer's ideal line — *render-only*, guarded
 by a source-scan test so no `gp-ai` symbol depends on it (the AI frame comes from
-`∇s`, not this curve). The remaining pipeline is the Ф6 repair *loop* and the Ф7
-output assembly that wires these phases into `generate()`. Block 2 (`gp-render`) is
-**complete** — see below.
+`∇s`, not this curve). **The `generate()` top-level pipeline has now landed too
+(#34), completing block 1's generation path**: `generate(params) -> Result<
+TrackArtifact, GenerationError>` wires Ф1→Ф7 behind a bounded seed budget and an
+inner repair budget (never an unbounded loop), running the cheap Ф4 static checks
++ V=1 liveness every iteration and the expensive Vmax oracle *only* once those are
+clean, routing `NotLappable` stall walls and run-out `NoBraking` issues into Ф6,
+reseeding only when repair makes no progress, and returning
+`Err(GenerationError::SeedBudgetExhausted)` when the seed budget is spent. Landing
+it also exposed and fixed a latent `gp-core` defect: `medial_axis`'s strict
+axis-local-max ridge **shattered into 40–84 disconnected components** on real
+generated corridors (wide DT plateaus), so the centerline came back empty on every
+generated track; it is now a **DT-ordered anchored homotopic thinning** that yields
+one connected, thin skeleton, and `racing_line` bridges only a genuinely
+disconnected medial set. Block 2 (`gp-render`) is **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
 `block:render` issue is closed. The backend is **eframe/egui 0.35**: `gp-game`
@@ -121,8 +131,8 @@ carries **zero production panics**.
 The `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
 segment on `StartFinish`, and `Centerline::at` arc-length sampling — issue #6;
-contract types + read accessors on hand-filled fixtures, the block-1 generator
-that populates them stays `todo!`). `crates/core/src/geom/` implements the exact
+contract types + read accessors landed first on hand-filled fixtures; the
+block-1 generator that populates them is now live via `gp_gen::generate` — #34). `crates/core/src/geom/` implements the exact
 integer `supercover` predicate (full §3 C4 test table) plus the corridor-graph
 helpers — 4-conn flood-fill / connected-component counting,
 `bounded_complement_components` (the §2 Ф4 infield-hole test), in-`D` geodesic
@@ -151,9 +161,10 @@ distinct cells are allowed), and the RNG is a shared per-domain stream handle
 both `gp-core` and `gp-gen`, with a seeded `GenParams::generation_rng()`; the
 per-source engine split (issue #139) keeps `rand_chacha` in `gp-core` for
 AI-learning and adds `rand_xoshiro` for the three Xoshiro sources (`gp-gen` now
-carries only `rand_xoshiro`). The core still carries **zero production panics**. The remaining algorithms (generation
-pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
-`TODO(<block>)` markers.
+carries only `rand_xoshiro`). The core still carries **zero production panics**. The generation pipeline and
+its passability oracle are now landed (blocks 1's Ф1–Ф7 + `generate()`, #34);
+the remaining `todo!()` algorithms are block 4's AI (feature extraction,
+policy). See the `TODO(<block>)` markers.
 
 ## Build
 

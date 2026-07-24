@@ -40,6 +40,25 @@ pub(crate) fn axis_width(d: &Corridor, p: Point, axis: Orient) -> u32 {
     u32::try_from(run).unwrap_or(u32::MAX)
 }
 
+/// The corridor's global minimum cross-section width over every drivable
+/// cell — the plain geometric width `TrackArtifact::width_min` reports
+/// (`generate()`'s artifact assembly), reusing [`axis_width`] rather than
+/// re-deriving [`wall_runs`] inline.
+///
+/// `w(p) = axis_width(d, p, Horizontal).min(axis_width(d, p, Vertical))`,
+/// the same per-cell width metric [`narrow_at`] gates `Issue::Narrow` on
+/// (`narrow_at`'s `w = hrun.min(vrun)`) — but taken as a plain global
+/// minimum, **not** filtered by `narrow_at`'s DT-consistency test. Total: an
+/// empty corridor (no drivable cells, never reached on the accept path)
+/// yields `0`, not a panic.
+pub(crate) fn corridor_min_width(d: &Corridor) -> u32 {
+    box_points(d)
+        .filter(|&p| d.contains(p))
+        .map(|p| axis_width(d, p, Orient::Horizontal).min(axis_width(d, p, Orient::Vertical)))
+        .min()
+        .unwrap_or(0)
+}
+
 /// The `Narrow` issue at `p`, or `None` — the DT pre-filter + exact
 /// perpendicular cross-section confirmation (design doc §2 Ф4 Width).
 ///
@@ -87,8 +106,9 @@ fn narrow_at(d: &Corridor, dt: &DistanceTransform, p: Point, n: u32) -> Option<I
 }
 
 /// The `Narrow` issues over **all** `D` cells (AC3) — deliberately not
-/// restricted to `medial_axis`'s ridge, since a neck is a DT valley a
-/// local-maximum ridge would miss (design doc Risks, Issue #1).
+/// restricted to `medial_axis`'s skeleton: this scan covers every `D` cell
+/// independently of Ф7's skeleton, regardless of which cells `medial_axis`
+/// itself returns (design doc Risks, Issue #1).
 ///
 /// Mechanically moved from `phase4.rs` at subtask 4 (§ Risks R1 backstop) —
 /// no logic change; `phase4_static_checks` calls this via
@@ -279,6 +299,34 @@ mod tests {
             )),
             "expected a width-3 Narrow in the doorway, got {issues:?}"
         );
+    }
+
+    #[test]
+    fn corridor_min_width_uniform_rectangle_equals_its_cross_section() {
+        // A uniform 5-wide, 3-tall rectangle: every interior cell's
+        // horizontal run is 5, vertical run is 3, so the global min is 3.
+        let d = corridor((0, 0), 5, 3, &rect(0, 4, 0, 2));
+        assert_eq!(corridor_min_width(&d), 3);
+    }
+
+    #[test]
+    fn corridor_min_width_reports_the_known_narrow_neck() {
+        // Same sharp single-cross-section neck fixture as
+        // `narrow_sharp_single_cross_section_neck_fires_once`: a 3-row-tall
+        // corridor pinched to a single-row neck at x=3 — global min width is
+        // the neck's own width, 1.
+        let mut drivable = Vec::new();
+        for x in 0..7 {
+            if x == 3 {
+                drivable.push((x, 2));
+            } else {
+                for y in 1..4 {
+                    drivable.push((x, y));
+                }
+            }
+        }
+        let d = corridor((0, 0), 7, 5, &drivable);
+        assert_eq!(corridor_min_width(&d), 1);
     }
 
     #[test]

@@ -1,12 +1,12 @@
 //! Distance transform + medial axis over the corridor `D` (design doc §2, Ф4).
 //!
 //! Two pure, integer-only, deterministic primitives that Ф4's width check reads
-//! directly and the future Ф7 centerline (`racing_line(medial_axis(D))`,
-//! `docs/design.md` §2 line 191) will consume: a multi-source 4-connected BFS
-//! wall-distance field ([`DistanceTransform`]) and its strict axis-wise ridge
-//! ([`medial_axis`]). Both route through [`Corridor`]'s private index/box
-//! helpers, exactly like [`super::component_count`] and
-//! [`super::bounded_complement_components`].
+//! directly and the Ф7 centerline (`racing_line`, consuming [`medial_axis`],
+//! `docs/design.md` §2 line 191) also consumes: a multi-source 4-connected BFS
+//! wall-distance field ([`DistanceTransform`]) and its DT-ordered,
+//! connectivity-preserving thinning skeleton ([`medial_axis`]). Both route
+//! through [`Corridor`]'s private index/box helpers, exactly like
+//! [`super::component_count`] and [`super::bounded_complement_components`].
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -85,49 +85,196 @@ impl DistanceTransform {
     }
 }
 
-/// The strict axis-wise distance-transform ridge of `dt` (design doc §D2, "гребень
-/// distance-transform").
+/// The 8 Moore-neighborhood cells around `p`, in `E, NE, N, NW, W, SW, S, SE`
+/// order — the axis (4-connected) neighbors sit at the even indices
+/// `0`/`2`/`4`/`6`. Saturating offsets keep this total for any `Point`,
+/// including at `i32::MAX`/`i32::MIN`.
+const fn neighbors8(p: Point) -> [Point; 8] {
+    [
+        Point::new(p.x.saturating_add(1), p.y),
+        Point::new(p.x.saturating_add(1), p.y.saturating_add(1)),
+        Point::new(p.x, p.y.saturating_add(1)),
+        Point::new(p.x.saturating_sub(1), p.y.saturating_add(1)),
+        Point::new(p.x.saturating_sub(1), p.y),
+        Point::new(p.x.saturating_sub(1), p.y.saturating_sub(1)),
+        Point::new(p.x, p.y.saturating_sub(1)),
+        Point::new(p.x.saturating_add(1), p.y.saturating_sub(1)),
+    ]
+}
+
+/// Whether `a`/`b` are one 4-connected (Manhattan) step apart.
+const fn is_4adjacent(a: Point, b: Point) -> bool {
+    a.x.abs_diff(b.x).saturating_add(a.y.abs_diff(b.y)) == 1
+}
+
+/// Whether `a`/`b` are one 8-connected (Chebyshev) step apart.
+const fn is_8adjacent(a: Point, b: Point) -> bool {
+    let dx = a.x.abs_diff(b.x);
+    let dy = a.y.abs_diff(b.y);
+    dx <= 1 && dy <= 1 && (dx == 1 || dy == 1)
+}
+
+/// The 4-connected degree of `p` within `s` — the number of `p`'s 4-neighbors
+/// that are themselves members of `s`.
+fn degree4(s: &BTreeSet<Point>, p: Point) -> usize {
+    p.neighbors4().into_iter().filter(|q| s.contains(q)).count()
+}
+
+/// Whether `p` is a *simple* point of `s` — deletable without changing `s`'s
+/// local (4,8)-connectivity topology (§ module doc's thinning algorithm).
 ///
-/// A `D` cell `p` is a medial cell iff it is a **strict** local maximum of the
-/// distance transform along at least one axis: `dt(p) > dt(p ± x̂)` (both
-/// horizontal neighbors) **or** `dt(p) > dt(p ± ŷ)` (both vertical neighbors),
-/// reading `dt == 0` for any `¬D` / out-of-box neighbor. Strict inequality is
-/// load-bearing: the along-flow axis of a straight corridor is a distance-transform
-/// **plateau** (constant `dt`), so a non-strict `≥` would admit every cell and
-/// collapse the ridge to the whole corridor.
+/// Computed entirely within the 3×3 window around `p` ([`neighbors8`]), via an
+/// explicit, allocation-free flood fill over the fixed 8-slot window — not a
+/// remembered crossing-number formula. Split `A` = window cells in `s`, `B` =
+/// window cells not in `s` (out-of-box cells count as `B`). `p` is simple iff:
 ///
-/// A **neck is always on this ridge**: at a narrow cross-section's center cell the
-/// two perpendicular walls are close, so `dt` is a strict local max *across* the
-/// neck — the ridge stays 4-connected through a constriction rather than leaving a
-/// gap there (unlike a pure local-maximum definition, which a neck's along-flow
-/// DT-valley would exclude).
+/// 1. `A`'s 4-connected components (adjacency computed only within the
+///    window) that contain at least one of `p`'s axis neighbors number
+///    exactly one, **and**
+/// 2. `B` is non-empty and forms exactly one 8-connected component (also
+///    computed only within the window).
+fn is_simple(s: &BTreeSet<Point>, p: Point) -> bool {
+    let window = neighbors8(p);
+    let member = window.map(|q| s.contains(&q));
+
+    let mut visited = [false; 8];
+    let mut axis_touching_components: u32 = 0;
+    for start in 0..8 {
+        if !member[start] || visited[start] {
+            continue;
+        }
+        let mut touches_axis = false;
+        let mut stack = [0usize; 8];
+        let mut top = 0usize;
+        stack[top] = start;
+        top = top.saturating_add(1);
+        visited[start] = true;
+        while top > 0 {
+            top = top.saturating_sub(1);
+            let cur = stack[top];
+            if cur % 2 == 0 {
+                touches_axis = true;
+            }
+            for next in 0..8 {
+                if member[next] && !visited[next] && is_4adjacent(window[cur], window[next]) {
+                    visited[next] = true;
+                    stack[top] = next;
+                    top = top.saturating_add(1);
+                }
+            }
+        }
+        if touches_axis {
+            axis_touching_components = axis_touching_components.saturating_add(1);
+        }
+    }
+    if axis_touching_components != 1 {
+        return false;
+    }
+
+    let background = member.map(|m| !m);
+    if !background.into_iter().any(|b| b) {
+        return false;
+    }
+    let mut visited_bg = [false; 8];
+    let mut background_components: u32 = 0;
+    for start in 0..8 {
+        if !background[start] || visited_bg[start] {
+            continue;
+        }
+        let mut stack = [0usize; 8];
+        let mut top = 0usize;
+        stack[top] = start;
+        top = top.saturating_add(1);
+        visited_bg[start] = true;
+        while top > 0 {
+            top = top.saturating_sub(1);
+            let cur = stack[top];
+            for next in 0..8 {
+                if background[next] && !visited_bg[next] && is_8adjacent(window[cur], window[next])
+                {
+                    visited_bg[next] = true;
+                    stack[top] = next;
+                    top = top.saturating_add(1);
+                }
+            }
+        }
+        background_components = background_components.saturating_add(1);
+    }
+    background_components == 1
+}
+
+/// Whether `p` is an *anchored end point* of `s` under `dt` — a genuine
+/// medial branch tip that thinning must never delete.
+///
+/// `p` has exactly one 4-neighbor in `s` **and** `dt(p) >= dt(q)` for every
+/// `q` in `p`'s 8-neighborhood. An unanchored degree-1 cell (a boundary
+/// artefact whose `dt` is dominated by a neighbor) is **not** anchored, so
+/// thinning still peels it back to the ridge.
+fn is_anchored_endpoint(s: &BTreeSet<Point>, dt: &DistanceTransform, p: Point) -> bool {
+    if degree4(s, p) != 1 {
+        return false;
+    }
+    let dp = dt.at(p);
+    neighbors8(p).into_iter().all(|q| dp >= dt.at(q))
+}
+
+/// The distance-ordered, connectivity-preserving thinning skeleton of `dt`
+/// (design doc §D2, "гребень distance-transform … ветвящийся геометрический
+/// объект").
+///
+/// `D` is recovered from `dt` alone (`p ∈ D ⟺ dt.at(p) > 0`). Foreground is
+/// **4-connected**, background **8-connected** — the complementary `(4, 8)`
+/// digital-topology pair every consumer of this skeleton already assumes
+/// (`racing_line`'s `components`/`degree`/`walk_cycle`, all 4-conn).
+///
+/// Algorithm: repeatedly delete the lowest-`dt` *simple* cell (`is_simple`)
+/// that is not an *anchored end point* (`is_anchored_endpoint`), until none
+/// remains deletable. The deletion order is a `BTreeSet<(u32, Point)>`
+/// min-first queue — a total integer order, no hashing, no float, no
+/// address- or iteration-order dependence — so the result is a pure,
+/// deterministic function of `dt`, identical on every run and platform
+/// (`compute_and_medial_axis_are_deterministic`).
+///
+/// Deleting a simple point preserves the (4,8)-homotopy type (component
+/// counts of both foreground and background), and anchoring only *forbids*
+/// deletions — so for a corridor that is 4-connected with exactly one
+/// bounded hole (Ф4's `Disconnected`/`BadTopology` gate), the resulting
+/// skeleton is connected and carries exactly one cycle. A constriction's
+/// cross-section is crossed by construction (connectivity is preserved), so a
+/// 1-cell neck's center cell — the neck's own cross-section — is always on
+/// the skeleton.
+///
+/// "No 2×2 block of skeleton cells" (thinness) is an *empirical* property of
+/// this thinning, not a proven guarantee: a pinwheel-attached 2×2 (four arms
+/// leaving diagonally opposite corners) makes all four cells non-simple and
+/// would survive. It has not been observed on any in-tree or generated
+/// fixture; a caller that hits it degrades gracefully (`racing_line`'s
+/// `walk_cycle` fallback), not a panic.
 ///
 /// Returns a [`BTreeSet`] for deterministic, cross-platform iteration order
 /// ([`Point`]'s derived `Ord`, `x`-then-`y`).
-///
-/// This primitive ships the two responsibilities the future Ф7 centerline
-/// (`racing_line`, `docs/design.md` §2 line 191) still owns: thinning an
-/// even-width 2-cell ridge band to a single strand, and bridging a residual
-/// 1-cell diagonal gap at a rectilinear corner. Both are out of scope here.
 pub fn medial_axis(dt: &DistanceTransform) -> BTreeSet<Point> {
-    let rect = dt.rect();
-    let mut out = BTreeSet::new();
-    for p in rect.points() {
-        let dp = dt.at(p);
-        if dp == 0 {
+    let mut s: BTreeSet<Point> = dt.rect().points().filter(|&p| dt.at(p) > 0).collect();
+    let mut queue: BTreeSet<(u32, Point)> = s.iter().map(|&p| (dt.at(p), p)).collect();
+
+    while let Some((_, p)) = queue.pop_first() {
+        if !s.contains(&p) {
+            continue; // stale entry — p was already removed
+        }
+        if is_anchored_endpoint(&s, dt, p) {
             continue;
         }
-        let east = Point::new(p.x.saturating_add(1), p.y);
-        let west = Point::new(p.x.saturating_sub(1), p.y);
-        let north = Point::new(p.x, p.y.saturating_add(1));
-        let south = Point::new(p.x, p.y.saturating_sub(1));
-        let x_ridge = dp > dt.at(east) && dp > dt.at(west);
-        let y_ridge = dp > dt.at(north) && dp > dt.at(south);
-        if x_ridge || y_ridge {
-            out.insert(p);
+        if !is_simple(&s, p) {
+            continue;
+        }
+        s.remove(&p);
+        for q in neighbors8(p) {
+            if s.contains(&q) {
+                queue.insert((dt.at(q), q)); // re-examine; BTreeSet dedups
+            }
         }
     }
-    out
+    s
 }
 
 #[cfg(test)]
@@ -181,9 +328,12 @@ mod tests {
 
     #[test]
     fn medial_axis_is_thin_centerline_on_straight_band() {
-        // Same 5x3 filled band: the medial axis is exactly the interior of the
-        // middle row (the cross-flow centerline), excluding the two end columns
-        // whose DT ties with a neighbor.
+        // Same 5x3 filled band: DT-ordered thinning peels every cell down to
+        // the interior of the middle row (the cross-flow centerline). The two
+        // end columns are not anchored end points (each is dominated by its
+        // higher-dt neighbor toward the middle) so they thin away too,
+        // leaving exactly the 3-cell interior strand — unchanged from the
+        // old strict-local-max definition on this fixture (§ Test Design).
         let d = Corridor::filled(Point::new(0, 0), 5, 3);
         let dt = DistanceTransform::compute(&d);
         assert_eq!(
@@ -197,8 +347,10 @@ mod tests {
     #[test]
     fn medial_axis_includes_neck_and_is_connected_across_it() {
         // A wide 3-row-tall corridor pinched to a single-row neck at x=3: the
-        // medial axis must include the neck cell and stay 4-connected through it
-        // (the Issue-#1 property a local-maximum-only ridge would break).
+        // medial axis must include the neck cell and stay 4-connected through
+        // it (the topology-preservation guarantee — a constriction's
+        // cross-section is always crossed). Strengthened to the exact set:
+        // unchanged from the old strict-local-max definition on this fixture.
         let mut drivable = Vec::new();
         for x in 0..7 {
             if x == 3 {
@@ -213,23 +365,28 @@ mod tests {
         let dt = DistanceTransform::compute(&d);
         let medial = medial_axis(&dt);
 
+        assert_eq!(
+            medial,
+            cells(&[(1, 2), (2, 2), (3, 2), (4, 2), (5, 2)])
+                .into_iter()
+                .collect::<BTreeSet<_>>(),
+        );
         for p in [Point::new(2, 2), Point::new(3, 2), Point::new(4, 2)] {
             assert!(medial.contains(&p), "{p:?} should be on the ridge");
         }
     }
 
     #[test]
-    fn medial_axis_forms_four_connected_strips_on_annulus() {
+    fn medial_axis_on_annulus_is_one_closed_thin_loop() {
         // An odd-thickness-3 square frame (11x11 outer minus a 5x5 centered
-        // hole): each straight stretch's cross-frame DT profile is 1,2,1, giving
-        // a strict local max at its middle column/row throughout — unlike an
-        // even thickness, whose middle two cells tie and never form a continuous
-        // strip. Each side's ridge is one connected strip (4 total, one per
-        // side); the 4 strips are NOT joined at the corners — a diagonal gap
-        // remains where the along-axis strict-max condition ties across the
-        // corner's 2x2 plateau (design doc Open Q2 "AC5 Ф7-consumer
-        // reconciliation": bridging that residual corner gap is Ф7's job, not
-        // this primitive's).
+        // hole). Under the old strict-local-max definition this fixture's
+        // ridge was 4 disjoint corner-gapped strips (20 cells); DT-ordered
+        // anchored thinning instead produces one connected, thin, 32-cell
+        // loop — the west strip thins back one cell short at each end while
+        // the west corner survives as a square notch, and the other three
+        // corners stay full-square, a deterministic consequence of the
+        // pinned (dt, Point) deletion order (design doc § A1 subtask 5/6
+        // table), not a bug.
         let mut d = Corridor::filled(Point::new(0, 0), 11, 11);
         for y in 3..8 {
             for x in 3..8 {
@@ -239,37 +396,47 @@ mod tests {
         let dt = DistanceTransform::compute(&d);
         let medial = medial_axis(&dt);
 
+        // Verbatim 32-cell predicted set (design doc § A1 subtask 5/6): the
+        // west strip (x=1) is thinned back to y in 2..=8, x=2 keeps two
+        // separate 2-cell corner notches (y in {1,2} and y in {8,9}) — not one
+        // contiguous block — the north/south strips at x in 3..=8 stay 1-cell
+        // each (y in {1,9}), and the east strip (x=9) keeps its full square
+        // corners.
         let mut expected = BTreeSet::new();
-        for x in 3..8 {
+        for y in 2..=8 {
+            expected.insert(Point::new(1, y));
+        }
+        for &y in &[1, 2, 8, 9] {
+            expected.insert(Point::new(2, y));
+        }
+        for x in 3..=8 {
             expected.insert(Point::new(x, 1));
             expected.insert(Point::new(x, 9));
         }
-        for y in 3..8 {
-            expected.insert(Point::new(1, y));
+        for y in 1..=9 {
             expected.insert(Point::new(9, y));
         }
         assert_eq!(medial, expected);
 
-        // Each side's strip is internally 4-connected (a genuine centerline,
-        // not scattered points).
-        let mut top = Corridor::new(Point::new(0, 0), 11, 11);
-        for x in 3..8 {
-            top.set(Point::new(x, 1), true);
+        // The loop is one connected component (a genuine centerline, not
+        // scattered strips).
+        let mut ring = Corridor::new(Point::new(0, 0), 11, 11);
+        for &p in &medial {
+            ring.set(p, true);
         }
         assert_eq!(
-            component_count(&top),
+            component_count(&ring),
             1,
-            "the top strip must be one connected run"
+            "the thinned annulus ridge must be one connected loop"
         );
     }
 
     #[test]
-    fn medial_axis_even_width_band_is_two_cell() {
+    fn medial_axis_even_width_band_is_a_two_cell_thin_skeleton() {
         // A 4x3 filled box: the cross-width (x, 4 cells) is even, so the two
-        // middle columns tie on DT and neither is a strict x-ridge; both still
-        // qualify via the y-axis (the length, 3 rows, is short enough to make the
-        // single middle row a strict y-local-max) — the documented "2-cell ridge
-        // band" Ф7 later thins to a single strand.
+        // middle columns tie on DT; both are anchored end points of the
+        // final skeleton (this fixture is already 1-cell thin along its
+        // short axis) — unchanged from the old strict-local-max definition.
         let d = Corridor::filled(Point::new(0, 0), 4, 3);
         let dt = DistanceTransform::compute(&d);
         assert_eq!(
@@ -278,6 +445,133 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeSet<_>>(),
         );
+    }
+
+    /// AC9 fixture provenance: under the old strict-local-max `medial_axis`
+    /// this 61x61-minus-13x13-hole ring shatters into 32 cells / 32 singleton
+    /// components; DT-ordered anchored thinning instead produces 146 cells in
+    /// 1 component with no 2x2 block and 0 leaves (design doc § A1 subtask
+    /// 5/6 table) — the same class of wide-corridor fragmentation the
+    /// orchestrator's public-API probe measured on real generated corridors
+    /// (40-84 components, `dt_peak` 14-21). Regression-guards the fix this AC9
+    /// fixture exists for.
+    #[cfg_attr(
+        miri,
+        ignore = "cost: 3642 thinning pops over 3552 cells ≈ 8.5 min under Tree Borrows; \
+                  pure-integer, no UB signal the small distance.rs fixtures don't already cover"
+    )]
+    #[test]
+    fn medial_axis_thins_a_wide_ring_to_one_connected_loop() {
+        let mut d = Corridor::filled(Point::new(0, 0), 61, 61);
+        for y in 24..37 {
+            for x in 24..37 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        let dt = DistanceTransform::compute(&d);
+        let medial = medial_axis(&dt);
+
+        assert!(!medial.is_empty(), "the wide ring must not thin to nothing");
+        for &p in &medial {
+            assert!(dt.at(p) > 0, "{p:?} must be a drivable cell");
+            assert!(degree4(&medial, p) >= 1, "{p:?} must have 4-degree >= 1");
+        }
+
+        let mut ring = Corridor::new(Point::new(0, 0), 61, 61);
+        for &p in &medial {
+            ring.set(p, true);
+        }
+        assert_eq!(
+            component_count(&ring),
+            1,
+            "the wide ring's skeleton must be one connected loop"
+        );
+
+        // No 2x2 block of skeleton cells.
+        for &p in &medial {
+            let east = Point::new(p.x.saturating_add(1), p.y);
+            let north = Point::new(p.x, p.y.saturating_add(1));
+            let north_east = Point::new(p.x.saturating_add(1), p.y.saturating_add(1));
+            assert!(
+                !(medial.contains(&east)
+                    && medial.contains(&north)
+                    && medial.contains(&north_east)),
+                "no 2x2 block: {p:?}/{east:?}/{north:?}/{north_east:?}"
+            );
+        }
+    }
+
+    // ---- Predicate unit tests (is_simple / is_anchored_endpoint) --------
+
+    #[test]
+    fn is_simple_rejects_an_isolated_cell() {
+        let p = Point::new(5, 5);
+        let s = BTreeSet::from([p]);
+        assert!(!is_simple(&s, p), "an isolated cell has no A component");
+    }
+
+    #[test]
+    fn is_simple_rejects_an_interior_cell_of_a_filled_block() {
+        // p's entire 3x3 window is in S, so B (background) is empty.
+        let p = Point::new(1, 1);
+        let s: BTreeSet<Point> = (0..3)
+            .flat_map(|x| (0..3).map(move |y| Point::new(x, y)))
+            .collect();
+        assert!(!is_simple(&s, p), "an interior cell's B is empty");
+    }
+
+    #[test]
+    fn is_simple_rejects_a_straight_line_interior_cell() {
+        // p's east/west neighbors are both in S but not adjacent to each
+        // other within the window — two separate A components.
+        let p = Point::new(1, 0);
+        let s = BTreeSet::from([Point::new(0, 0), p, Point::new(2, 0)]);
+        assert!(!is_simple(&s, p), "east/west form two A components");
+    }
+
+    #[test]
+    fn is_simple_accepts_an_l_corner_of_a_two_by_two_block() {
+        // p is one corner of a 2x2 block: its E/NE/N window neighbors form
+        // one A component, and the remaining 5 window cells form one B
+        // component.
+        let p = Point::new(0, 0);
+        let s = BTreeSet::from([p, Point::new(1, 0), Point::new(0, 1), Point::new(1, 1)]);
+        assert!(is_simple(&s, p));
+    }
+
+    #[test]
+    fn is_anchored_endpoint_accepts_a_one_cell_wide_finger_tip() {
+        // A straight 1-wide 5-cell corridor: uniform dt == 1 everywhere, so
+        // the tip (degree4 == 1 in s) is anchored (dp >= every neighbor,
+        // out-of-box neighbors read as 0).
+        let d = Corridor::filled(Point::new(0, 0), 5, 1);
+        let dt = DistanceTransform::compute(&d);
+        let s: BTreeSet<Point> = (0..5).map(|x| Point::new(x, 0)).collect();
+        let tip = Point::new(0, 0);
+        assert!(is_anchored_endpoint(&s, &dt, tip));
+    }
+
+    #[test]
+    fn is_anchored_endpoint_rejects_a_low_dt_degree_one_corner_artefact() {
+        // A 5x5 filled block with a single-cell east tail attached at its
+        // middle row: the tail tip's own dt (1, wall-adjacent on 3 sides) is
+        // dominated by its block-side neighbor's real dt (2, one cell more
+        // interior) — a degree-1 cell that is NOT a genuine medial tip.
+        let mut d = Corridor::new(Point::new(0, 0), 6, 5);
+        for x in 0..5 {
+            for y in 0..5 {
+                d.set(Point::new(x, y), true);
+            }
+        }
+        d.set(Point::new(5, 2), true);
+        let dt = DistanceTransform::compute(&d);
+        assert_eq!(dt.at(Point::new(5, 2)), 1, "tail tip's own dt");
+        assert_eq!(dt.at(Point::new(4, 2)), 2, "tail's block-side neighbor dt");
+
+        let tip = Point::new(5, 2);
+        let s = BTreeSet::from([tip, Point::new(4, 2)]);
+        assert_eq!(degree4(&s, tip), 1, "tip has exactly one 4-neighbor in s");
+        assert!(!is_anchored_endpoint(&s, &dt, tip));
     }
 
     #[test]
