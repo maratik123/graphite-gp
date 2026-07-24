@@ -12,6 +12,7 @@ mod phase3;
 mod phase4;
 mod phase4_defects;
 mod phase5;
+mod phase5_runout;
 mod phase5b;
 mod phase6;
 #[cfg(test)]
