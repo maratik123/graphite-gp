@@ -84,8 +84,17 @@ cell that a geometric sever needs added. The outcome enum's arity was settled by
 an executable proof gate run *before* the shape was locked — the dynamic-only
 stall class is **empty**, structurally (`live` is monotone in `V_ceil`, so a
 no-lap verdict can only be returned at `V_ceil = 1`), so there are two variants
-and no declined arm. The remaining pipeline is the Ф6 repair *loop* and Ф7
-(#31–#34). Block 2 (`gp-render`) is **complete** — see below.
+and no declined arm. **Ф7's s-field producer** has now landed too (#32):
+`SField::from_gate_bfs` in `gp-core` `track.rs` fills the fold-free `0→L`
+progress coordinate `s` — the source of the AI frame `∇s` and reward `Δs` — via a
+generic multi-seed, barrier-aware 4-connected BFS (`barrier_distance_field` in
+`geom/graph.rs`) seeded from the gate's forward face, with the timing-gate dual
+edges as impassable barriers so `s` grows the long way around the loop and never
+folds at the antipode; the sole discontinuity is the intended `L→0` reset across
+the gate. It ships as an independently-tested `gp-core` unit since `generate()`
+is still a stub. The remaining pipeline is the Ф6 repair *loop* and the Ф7 output
+assembly that wires these phases into `generate()`. Block 2 (`gp-render`) is
+**complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
 `block:render` issue is closed. The backend is **eframe/egui 0.35**: `gp-game`
@@ -146,7 +155,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 603 workspace tests green (121 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 232 gp-gen; 2 doc-tests)
+cargo test             # 622 workspace tests green (140 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 232 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,

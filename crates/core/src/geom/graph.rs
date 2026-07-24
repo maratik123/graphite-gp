@@ -298,6 +298,65 @@ pub fn geodesic_layers(d: &Corridor, seed: Point) -> Vec<Vec<Point>> {
     layers
 }
 
+/// Multi-seed, barrier-aware 4-connected BFS distance field over `D`.
+///
+/// Distance `0` at every `seed` in `D` (multiple seeds share the frontier);
+/// grows by `1` per 4-conn step, skipping any step `(p, n)` for which
+/// `barrier(p, n)` is `true` — so a symmetric barrier predicate
+/// (`barrier(a, b) == barrier(b, a)`) blocks traversal in both directions,
+/// never just one. `barrier` is generic — this function names no
+/// higher-level track/gate type, keeping `geom` free of a dependency on
+/// `track`.
+///
+/// Returns a row-major `Vec<Option<u32>>` over `d`'s bounding box —
+/// **`result.len() == d.area()`, one entry per box cell** — mirroring
+/// [`Corridor`]'s own cell layout: `Some(distance)` for reachable in-`D`
+/// cells, `None` for every `¬D` cell and for any in-`D` cell the barrier
+/// leaves unreachable from every seed. A `seed ∉ D` (or out of the box)
+/// contributes nothing. Deterministic (design doc §3a): identical `(d, seeds,
+/// barrier)` inputs yield an identical `Vec`.
+///
+/// Distance is `saturating_add(1)`-total — no `#[allow(clippy::
+/// arithmetic_side_effects)]` — because a `u32` distance is reached only past
+/// ~4·10⁹ cells in a line, unreachable for any grid-realistic corridor.
+pub fn barrier_distance_field(
+    d: &Corridor,
+    seeds: impl IntoIterator<Item = Point>,
+    barrier: impl Fn(Point, Point) -> bool,
+) -> Vec<Option<u32>> {
+    let mut dist = vec![None; d.area()];
+    let mut frontier = Vec::new();
+    for seed in seeds {
+        if let Some(i) = d.index(seed)
+            && d.contains(seed)
+            && dist[i].is_none()
+        {
+            dist[i] = Some(0);
+            frontier.push(seed);
+        }
+    }
+    let mut distance = 0u32;
+    let mut next_frontier = Vec::new();
+    while !frontier.is_empty() {
+        next_frontier.clear();
+        for &p in &frontier {
+            for n in p.neighbors4() {
+                if let Some(i) = d.index(n)
+                    && dist[i].is_none()
+                    && d.contains(n)
+                    && !barrier(p, n)
+                {
+                    dist[i] = Some(distance.saturating_add(1));
+                    next_frontier.push(n);
+                }
+            }
+        }
+        std::mem::swap(&mut frontier, &mut next_frontier);
+        distance = distance.saturating_add(1);
+    }
+    dist
+}
+
 /// The exact set of dual boundary edges (walls) of the corridor `D`.
 ///
 /// For every drivable cell and every [`Side`] whose neighbor is not in `D`,
@@ -699,5 +758,129 @@ mod tests {
         );
         assert_eq!(geodesic_layers(&d, seed), geodesic_layers(&d, seed));
         assert_eq!(walls_from_boundary(&d), walls_from_boundary(&d));
+    }
+
+    // ---- barrier_distance_field (subtask 2) ----------------------------
+
+    /// Collect a `barrier_distance_field` result indexed by the corridor's
+    /// `rect` for readable per-cell assertions.
+    fn dist_at(d: &Corridor, dist: &[Option<u32>], p: Point) -> Option<u32> {
+        d.rect()
+            .index(p)
+            .and_then(|i| dist.get(i).copied().flatten())
+    }
+
+    #[test]
+    fn single_seed_no_barrier_straight_corridor_is_distance_bands() {
+        let d = corridor((0, 0), 6, 3, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
+        let dist = barrier_distance_field(&d, [Point::new(0, 1)], |_, _| false);
+        assert_eq!(dist_at(&d, &dist, Point::new(0, 1)), Some(0));
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 1)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(2, 1)), Some(2));
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 1)), Some(3));
+        // Off-band cell is None.
+        assert_eq!(dist_at(&d, &dist, Point::new(0, 0)), None);
+        assert_eq!(dist.len(), d.area());
+    }
+
+    #[test]
+    fn multi_seed_takes_nearest_seed_distance() {
+        // Straight corridor seeded from both ends: every cell reads its
+        // distance to the *nearest* seed.
+        let d = corridor((0, 0), 6, 3, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
+        let dist = barrier_distance_field(&d, [Point::new(0, 1), Point::new(3, 1)], |_, _| false);
+        assert_eq!(dist_at(&d, &dist, Point::new(0, 1)), Some(0));
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 1)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(2, 1)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 1)), Some(0));
+    }
+
+    #[test]
+    fn barrier_blocks_step_on_straight_corridor() {
+        // A cut edge between (1,1) and (2,1) with no other path leaves the
+        // far cell unreachable (None).
+        let d = corridor((0, 0), 6, 3, &[(0, 1), (1, 1), (2, 1), (3, 1)]);
+        let barrier = |a: Point, b: Point| {
+            (a == Point::new(1, 1) && b == Point::new(2, 1))
+                || (a == Point::new(2, 1) && b == Point::new(1, 1))
+        };
+        let dist = barrier_distance_field(&d, [Point::new(0, 1)], barrier);
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 1)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(2, 1)), None);
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 1)), None);
+    }
+
+    #[test]
+    fn ring_with_one_cut_edge_grows_the_long_way() {
+        // The 3x3 ring, cut between (1,1) and (2,1): seeded at (2,1), the
+        // cell across the cut (1,1) reads the maximum distance (the long way
+        // around the 8-cycle), not 1.
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let barrier = |a: Point, b: Point| {
+            (a == Point::new(1, 1) && b == Point::new(2, 1))
+                || (a == Point::new(2, 1) && b == Point::new(1, 1))
+        };
+        let dist = barrier_distance_field(&d, [Point::new(2, 1)], barrier);
+        assert_eq!(dist_at(&d, &dist, Point::new(2, 1)), Some(0));
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 1)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 2)), Some(2));
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 3)), Some(3));
+        assert_eq!(dist_at(&d, &dist, Point::new(2, 3)), Some(4));
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 3)), Some(5));
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 2)), Some(6));
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 1)), Some(7));
+    }
+
+    #[test]
+    fn unreachable_in_d_cell_stays_none() {
+        // Two disjoint blocks: seeding only one leaves the other's cells
+        // unreachable (None), never special-cased.
+        let d = corridor((0, 0), 5, 5, &[(0, 0), (1, 0), (3, 3), (4, 3)]);
+        let dist = barrier_distance_field(&d, [Point::new(0, 0)], |_, _| false);
+        assert_eq!(dist_at(&d, &dist, Point::new(1, 0)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(3, 3)), None);
+        assert_eq!(dist_at(&d, &dist, Point::new(4, 3)), None);
+    }
+
+    #[test]
+    fn seed_outside_d_contributes_nothing() {
+        let d = corridor((0, 0), 5, 5, &[(1, 1)]);
+        let dist = barrier_distance_field(&d, [Point::new(3, 3)], |_, _| false);
+        assert!(dist.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn saturated_self_neighbor_does_not_self_loop() {
+        // Seed at the i32::MAX corner: neighbors4() saturates its east/north
+        // steps to itself (already Some(0)), so the dist[i].is_none() guard
+        // skips them — no panic, no self-loop — while west/south (real,
+        // in-domain neighbors) still get distance 1.
+        let ox = i32::MAX - 1;
+        let oy = i32::MAX - 1;
+        let d = corridor(
+            (ox, oy),
+            2,
+            2,
+            &[(ox, oy), (ox + 1, oy), (ox, oy + 1), (ox + 1, oy + 1)],
+        );
+        let dist = barrier_distance_field(&d, [Point::new(i32::MAX, i32::MAX)], |_, _| false);
+        assert_eq!(dist_at(&d, &dist, Point::new(i32::MAX, i32::MAX)), Some(0));
+        assert_eq!(dist_at(&d, &dist, Point::new(ox, oy + 1)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(ox + 1, oy)), Some(1));
+        assert_eq!(dist_at(&d, &dist, Point::new(ox, oy)), Some(2));
+    }
+
+    #[test]
+    fn barrier_distance_field_is_deterministic() {
+        let d = corridor((0, 0), 5, 5, &ring_3x3());
+        let seeds = [Point::new(2, 1)];
+        let barrier = |a: Point, b: Point| {
+            (a == Point::new(1, 1) && b == Point::new(2, 1))
+                || (a == Point::new(2, 1) && b == Point::new(1, 1))
+        };
+        assert_eq!(
+            barrier_distance_field(&d, seeds, barrier),
+            barrier_distance_field(&d, seeds, barrier),
+        );
     }
 }
