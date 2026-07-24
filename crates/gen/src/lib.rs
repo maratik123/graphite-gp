@@ -3,7 +3,7 @@
 //! Approach **A** (coarse-block ring, infield-first) **+ D** (local repair): make
 //! the track almost-valid by construction so the expensive passability oracle
 //! acts as a certifier, not a regeneration engine. The pipeline runs in phases
-//! Ф1–Ф7 and emits a [`TrackArtifact`].
+//! Ф1–Ф7 and emits a [`TrackArtifact`](gp_core::track::TrackArtifact).
 //!
 //! Ф6 (local repair, `[C3]`) is the last phase built so far:
 //! [`phase6_local_repair`] applies one dual edge per committed edit, with an
@@ -13,6 +13,7 @@
 //! 2026-07-24-gp-gen-phase6-local-repair.design.md`).
 
 mod coarse;
+mod generate;
 mod phase1;
 mod phase2;
 mod phase3;
@@ -30,9 +31,9 @@ mod phase7;
 mod testfix;
 
 use gp_core::rng::Seeds;
-use gp_core::track::TrackArtifact;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+pub use generate::*;
 pub use phase1::*;
 pub use phase2::*;
 pub use phase3::*;
@@ -84,16 +85,6 @@ impl GenParams {
     pub fn generation_rng(&self) -> Xoshiro256PlusPlus {
         self.seeds.generation_rng()
     }
-}
-
-/// Run the full generation pipeline (design doc §2, Ф1–Ф7) and return a
-/// validated, passability-certified track.
-///
-/// TODO(1): implement the phased pipeline
-///   Ф1 skeleton ring · Ф2 rasterize to `D` · Ф3 start/finish + grid ·
-///   Ф4 static validation · Ф5 passability oracle · Ф6 local repair · Ф7 export.
-pub fn generate(_params: GenParams) -> TrackArtifact {
-    todo!("track generation pipeline (design doc §2)")
 }
 
 #[cfg(test)]
