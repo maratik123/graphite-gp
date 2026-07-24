@@ -752,4 +752,175 @@ mod tests {
             assert_eq!(edits[1].arm, RepairArm::FillInnerTooth);
         }
     }
+
+    // ---- AC2 consequence discriminators ------------------------------------
+
+    use gp_core::geom::component_count;
+
+    #[test]
+    fn ac2_add_edit_commits_despite_disconnection_elsewhere_proving_local_only() {
+        // A neck fixture (7x5, pinched single-row neck at x=3) plus a
+        // totally separate, disconnected 1-cell blob far away --
+        // component_count(d) == 2 *before* any edit. push_outer_wall_out
+        // has no global check, so it must still commit on the strictly
+        // local width improvement: a global flood-fill recheck would have
+        // rejected (component_count != 1), so committing proves none ran.
+        let mut d = Corridor::new(Point::new(0, 0), 10, 5);
+        for x in 0..7 {
+            if x == 3 {
+                d.set(Point::new(x, 2), true);
+            } else {
+                for y in 1..4 {
+                    d.set(Point::new(x, y), true);
+                }
+            }
+        }
+        d.set(Point::new(9, 0), true); // isolated, disconnected blob
+        assert_eq!(component_count(&d), 2, "fixture must start disconnected");
+
+        let ArmOutcome::Edit(edit) =
+            crate::phase6_arms::push_outer_wall_out(&d, Point::new(3, 2), Orient::Vertical)
+        else {
+            panic!("expected an Edit despite the disconnection elsewhere");
+        };
+
+        // The edit is genuine (AC1) and the corridor remains disconnected
+        // after applying it -- direct evidence the arm never touched
+        // global connectivity.
+        let (scratch, _) = crate::phase6_arms::apply_edit(&d, edit.wall, true).unwrap();
+        assert_eq!(component_count(&scratch), 2);
+    }
+
+    #[test]
+    fn ac2_remove_edit_that_disconnects_d_is_rejected_proving_global_flood_fill_ran() {
+        // Two rooms joined only by a 3-cell drivable row through H: every
+        // candidate cell's local metric (|H ∩ D| strictly decreases) holds
+        // trivially -- removing any single cell always drops the set's
+        // size by exactly one -- yet every candidate disconnects D. The
+        // arm must reject all of them; a purely-local check would have
+        // committed on the first candidate's trivial |H ∩ D| decrease, so
+        // rejection proves the global flood-fill recheck ran.
+        let mut d = Corridor::new(Point::new(0, 0), 9, 9);
+        for y in 0..9 {
+            for x in 0..3 {
+                d.set(Point::new(x, y), true);
+            }
+            for x in 6..9 {
+                d.set(Point::new(x, y), true);
+            }
+        }
+        for x in 3..=5 {
+            d.set(Point::new(x, 4), true);
+        }
+        let skel = CoarseSkeleton {
+            ring: std::collections::BTreeSet::new(),
+            hole: std::collections::BTreeSet::from([Point::new(1, 1)]),
+            dir: gp_core::track::RaceDir::Cw,
+        };
+
+        assert!(matches!(
+            crate::phase6_remove::trim_arm_wall(&d, &skel, 3, Point::new(3, 4)),
+            ArmOutcome::NoEdit(DeclineReason::RecheckFailed)
+        ));
+    }
+
+    // ---- AC9 totality / determinism ----------------------------------------
+
+    fn minimal_sf() -> StartFinish {
+        StartFinish {
+            chord: vec![Point::new(0, 0)],
+            orient: Orient::Horizontal,
+            gate: TimingGate {
+                behind: vec![Point::new(0, 0)],
+                forward: Side::East,
+            },
+        }
+    }
+
+    #[test]
+    fn ac9_is_total_on_adversarial_inputs_no_panic() {
+        let sf = minimal_sf();
+        let grid = StartGrid { positions: vec![] };
+        let skel = empty_skel();
+
+        // Empty issue list, no oracle input.
+        let d = Corridor::new(Point::new(0, 0), 3, 3);
+        let ctx = minimal_ctx(&d, &skel, &grid, &sf);
+        assert!(matches!(
+            phase6_local_repair(&ctx, &[]),
+            RepairOutcome::Failed
+        ));
+
+        // Out-of-box / overflow-adjacent stall walls.
+        let adversarial = vec![
+            Wall {
+                cell: Point::new(9999, 9999),
+                side: Side::East,
+            },
+            Wall {
+                cell: Point::new(i32::MAX, i32::MAX),
+                side: Side::East,
+            },
+        ];
+        let ctx_walls = RepairContext {
+            stall_walls: Some(&adversarial),
+            ..minimal_ctx(&d, &skel, &grid, &sf)
+        };
+        assert!(matches!(
+            phase6_local_repair(&ctx_walls, &[]),
+            RepairOutcome::Failed
+        ));
+
+        // A degenerate zero-area corridor, plus the two decline-only
+        // labels.
+        let empty_d = Corridor::new(Point::new(0, 0), 0, 0);
+        let ctx_empty = minimal_ctx(&empty_d, &skel, &grid, &sf);
+        let issues = [Issue::Disconnected, Issue::BadTopology];
+        assert!(matches!(
+            phase6_local_repair(&ctx_empty, &issues),
+            RepairOutcome::Failed
+        ));
+    }
+
+    #[test]
+    fn ac9_repeated_and_shuffled_calls_yield_identical_outcome() {
+        let mut d = Corridor::filled(Point::new(0, 0), 9, 17);
+        for x in 3..=5 {
+            for y in 3..=12 {
+                d.set(Point::new(x, y), false);
+            }
+        }
+        d.set(Point::new(4, 4), true);
+        d.set(Point::new(2, 11), false);
+        let skel = CoarseSkeleton {
+            ring: std::collections::BTreeSet::new(),
+            hole: std::collections::BTreeSet::from([Point::new(1, 1)]),
+            dir: gp_core::track::RaceDir::Cw,
+        };
+        let grid = StartGrid { positions: vec![] };
+        let sf = minimal_sf();
+        let ctx = minimal_ctx(&d, &skel, &grid, &sf);
+
+        let a = Issue::ArmsMerging {
+            bridge: Point::new(4, 4),
+        };
+        let b = Issue::ConcaveChordCut {
+            tooth: Point::new(2, 11),
+        };
+
+        let r1 = phase6_local_repair(&ctx, &[a, b]);
+        let r2 = phase6_local_repair(&ctx, &[a, b]);
+        let r3 = phase6_local_repair(&ctx, &[b, a]);
+
+        // `Corridor`/`RepairOutcome` carry no `PartialEq` (design.md §
+        // Ф6's signature — `Corridor` doesn't implement it), so equality
+        // is compared via `Debug`, which both derive.
+        let fmt = |r: &RepairOutcome| format!("{r:?}");
+        assert_eq!(fmt(&r1), fmt(&r2), "repeated calls must agree");
+        assert_eq!(
+            fmt(&r1),
+            fmt(&r3),
+            "a shuffled issue list must yield the same outcome"
+        );
+    }
 }
