@@ -58,6 +58,12 @@ pub struct GenParams {
     /// The grouped seeded-RNG config (issue #49) — `seeds.generation` feeds
     /// [`generation_rng`](Self::generation_rng), the pipeline's sole RNG path.
     pub seeds: Seeds,
+    /// Outer-loop budget — max number of seeds (draws from the single
+    /// `generation_rng` stream) to try before giving up on generation.
+    pub seed_budget: u32,
+    /// Inner-loop budget — max number of local-repair (Ф6) iterations per
+    /// seed before abandoning that seed and drawing the next one.
+    pub repair_budget: u32,
 }
 
 impl GenParams {
@@ -107,6 +113,8 @@ mod tests {
                 generation: seed,
                 ..Default::default()
             },
+            seed_budget: 1,
+            repair_budget: 1,
         }
     }
 
@@ -146,6 +154,8 @@ mod tests {
                 ai_learning: 2,
                 ai_inference: 3,
             },
+            seed_budget: 1,
+            repair_budget: 1,
         };
         let b = GenParams {
             cars: 4,
@@ -158,6 +168,8 @@ mod tests {
                 ai_learning: 98,
                 ai_inference: 97,
             },
+            seed_budget: 1,
+            repair_budget: 1,
         };
         assert_eq!(draws(a.generation_rng()), draws(b.generation_rng()));
     }
