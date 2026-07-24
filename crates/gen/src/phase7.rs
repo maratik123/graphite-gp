@@ -15,8 +15,94 @@
 //! `Centerline::at` already degrades gracefully on an empty centerline; this
 //! producer never panics.
 
-use gp_core::geom::{Corridor, DistanceTransform, medial_axis};
+use std::collections::BTreeSet;
+
+use gp_core::geom::{Corridor, DistanceTransform, Point, medial_axis, supercover};
 use gp_core::track::{Centerline, RaceDir, TimingGate};
+
+/// Maximum Manhattan gap (in cells) [`bridge_gaps`] will bridge between two
+/// cross-component medial-axis cells; a wider minimal gap abandons bridging
+/// (fallback to [`Centerline::default()`]). The annulus fixture's nearest
+/// cross-strip corner pair (e.g. `(3, 1)` to `(1, 3)`) is Manhattan `4`; this
+/// is that value plus a small margin.
+const MAX_BRIDGE_GAP: i32 = 6;
+
+/// The Manhattan distance between `a` and `b`, widened to avoid any overflow
+/// concern regardless of the (bounded, grid-realistic) input magnitudes.
+fn manhattan(a: Point, b: Point) -> i64 {
+    i64::from(a.x.abs_diff(b.x)).saturating_add(i64::from(a.y.abs_diff(b.y)))
+}
+
+/// The 4-connected components of `cells`, as a `Vec` of disjoint `BTreeSet`s.
+///
+/// Deterministic: `cells` is walked in `BTreeSet` (`x`-then-`y`) order, so
+/// repeated calls on the same input yield components in the same order with
+/// the same membership.
+fn components(cells: &BTreeSet<Point>) -> Vec<BTreeSet<Point>> {
+    let mut remaining = cells.clone();
+    let mut comps = Vec::new();
+    while let Some(&start) = remaining.iter().next() {
+        let mut comp = BTreeSet::new();
+        let mut stack = vec![start];
+        remaining.remove(&start);
+        while let Some(p) = stack.pop() {
+            comp.insert(p);
+            for n in p.neighbors4() {
+                if remaining.remove(&n) {
+                    stack.push(n);
+                }
+            }
+        }
+        comps.push(comp);
+    }
+    comps
+}
+
+/// Bridges cross-component gaps in the medial cell set `medial` (design doc
+/// § "The loop-trim / resample algorithm", step 2).
+///
+/// While more than one 4-connected component remains, finds the
+/// cross-component cell pair `(a, b)` of minimal Manhattan distance
+/// (deterministic tie-break: minimal `(a, b)` by `Point`'s derived `Ord`,
+/// `a <= b`) and inserts every `supercover(a, b)` cell that lies in `d` into
+/// the set. Returns `None` (fallback) if `medial` is empty, or if the
+/// smallest remaining cross-component gap ever exceeds [`MAX_BRIDGE_GAP`].
+fn bridge_gaps(d: &Corridor, medial: BTreeSet<Point>) -> Option<BTreeSet<Point>> {
+    if medial.is_empty() {
+        return None;
+    }
+    let mut cells = medial;
+    loop {
+        let comps = components(&cells);
+        if comps.len() <= 1 {
+            return Some(cells);
+        }
+        let mut best: Option<(i64, Point, Point)> = None;
+        for i in 0..comps.len() {
+            for j in (i.saturating_add(1))..comps.len() {
+                for &a in &comps[i] {
+                    for &b in &comps[j] {
+                        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+                        let cand = (manhattan(a, b), lo, hi);
+                        if best.is_none_or(|cur| cand < cur) {
+                            best = Some(cand);
+                        }
+                    }
+                }
+            }
+        }
+        // comps.len() > 1 guarantees at least one cross-component pair exists.
+        let (dist, a, b) = best.expect("multiple components imply a cross-component pair");
+        if dist > i64::from(MAX_BRIDGE_GAP) {
+            return None;
+        }
+        for p in supercover(a, b) {
+            if d.contains(p) {
+                cells.insert(p);
+            }
+        }
+    }
+}
 
 /// Produces the render-only racing centerline for corridor `d` (design doc §2
 /// line 191).
@@ -33,15 +119,18 @@ pub fn racing_line(d: &Corridor, _gate: &TimingGate, _race_dir: RaceDir) -> Cent
     if medial.is_empty() {
         return Centerline::default();
     }
-    // Subtasks 2-5 wire the rest of the pipeline; until then every non-empty
-    // medial axis also falls back (no producer overclaims yet).
+    let Some(_bridged) = bridge_gaps(d, medial) else {
+        return Centerline::default();
+    };
+    // Subtasks 3-5 wire the rest of the pipeline; until then a bridged medial
+    // set also falls back (no producer overclaims yet).
     Centerline::default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gp_core::geom::Point;
+    use gp_core::geom::Side;
     use gp_core::track::TimingGate;
 
     /// Subtask 1: an empty corridor (no drivable cells) has an empty medial
@@ -52,11 +141,63 @@ mod tests {
         let d = Corridor::new(Point::new(0, 0), 4, 4);
         let gate = TimingGate {
             behind: vec![],
-            forward: gp_core::geom::Side::East,
+            forward: Side::East,
         };
         let cl = racing_line(&d, &gate, RaceDir::Ccw);
         assert!(cl.samples.is_empty());
         assert!(cl.length.abs() < f32::EPSILON);
         assert!(cl.at(0.0).is_none());
+    }
+
+    /// Subtask 2 (happy): the annulus fixture's 4 corner-gapped medial strips
+    /// bridge into one 4-connected component.
+    #[test]
+    fn bridge_gaps_joins_annulus_corner_gaps_into_one_component() {
+        let d = crate::testfix::annulus_corridor();
+        let dt = DistanceTransform::compute(&d);
+        let medial = medial_axis(&dt);
+        assert!(
+            components(&medial).len() > 1,
+            "the annulus's medial axis starts as >1 disjoint strip"
+        );
+
+        let bridged = bridge_gaps(&d, medial).expect("annulus corner gaps are bridgeable");
+        assert_eq!(
+            components(&bridged).len(),
+            1,
+            "bridging must join all 4 strips into one component"
+        );
+    }
+
+    /// Subtask 2 (edge): two components a `MAX_BRIDGE_GAP`-exceeding Manhattan
+    /// distance apart abandon bridging (fallback signal).
+    #[test]
+    fn bridge_gaps_abandons_over_max_gap() {
+        let d = crate::testfix::corridor((0, 0), 1, 40, &[(0, 0), (0, 39)]);
+        let medial = BTreeSet::from([Point::new(0, 0), Point::new(0, 39)]);
+        assert!(bridge_gaps(&d, medial).is_none());
+    }
+
+    /// Subtask 2 (edge): two components within `MAX_BRIDGE_GAP` bridge into
+    /// one component, using only cells that lie in `d`.
+    #[test]
+    fn bridge_gaps_joins_a_close_gap() {
+        let d = crate::testfix::corridor((0, 0), 1, 5, &[(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]);
+        let medial = BTreeSet::from([
+            Point::new(0, 0),
+            Point::new(0, 1),
+            Point::new(0, 3),
+            Point::new(0, 4),
+        ]);
+        let bridged = bridge_gaps(&d, medial).expect("a 2-cell gap is within MAX_BRIDGE_GAP");
+        assert_eq!(components(&bridged).len(), 1);
+        assert!(bridged.contains(&Point::new(0, 2)));
+    }
+
+    /// Subtask 2: an empty medial set is not bridgeable (fallback signal).
+    #[test]
+    fn bridge_gaps_rejects_empty_medial() {
+        let d = Corridor::new(Point::new(0, 0), 4, 4);
+        assert!(bridge_gaps(&d, BTreeSet::new()).is_none());
     }
 }
