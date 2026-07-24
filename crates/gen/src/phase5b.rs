@@ -55,7 +55,7 @@ pub enum OracleResult {
     /// Non-emptiness (AC2) is guaranteed by a two-tier fallback: tier 1 is
     /// `p0_boundary_walls(d, &p0)`; when that is empty (`P0 == ∅`, or every
     /// `P0` cell is `D`-interior), tier 2 is [`walls_from_boundary`] over
-    /// the whole corridor, re-sorted with the same `wall_sort_key` —
+    /// the whole corridor, re-sorted with the same derived [`Wall`] order —
     /// non-empty for any non-empty `D` (the topmost drivable row's `North`
     /// side is always a boundary wall). See the module/type-level
     /// precondition for the degenerate empty-`D` case, where both tiers are
@@ -65,25 +65,6 @@ pub enum OracleResult {
         /// doc above for the two-tier derivation).
         stall_walls: Vec<Wall>,
     },
-}
-
-/// Total order key for [`Wall`] (design § Approach (1), R3): `(Point, u8)`
-/// with side rank `East = 0, West = 1, North = 2, South = 3`. Neither
-/// [`Wall`] nor [`Side`] derives `Ord` (a `gp-core` change, out of scope —
-/// spec § Out of scope), so a bare `.sort()` on `Vec<Wall>` does not
-/// compile; this crate-local key gives `p0_boundary_walls` and
-/// `phase6`'s tie-break a total order without touching `gp-core`.
-///
-/// `const fn`: a field read plus a `match` on a `Copy` enum is
-/// const-eligible, and `missing_const_for_fn` (nursery, deny) forces it.
-pub(crate) const fn wall_sort_key(w: Wall) -> (Point, u8) {
-    let rank = match w.side {
-        Side::East => 0,
-        Side::West => 1,
-        Side::North => 2,
-        Side::South => 3,
-    };
-    (w.cell, rank)
 }
 
 /// The off-`D` neighbor a shift of `w` would make drivable, or `None` if
@@ -124,7 +105,7 @@ pub(crate) const fn wall_neighbor(w: Wall) -> Option<Point> {
 /// therefore only ever name already-drivable cells), this relates `P0` to
 /// `D` itself.
 ///
-/// Sorted by [`wall_sort_key`] for deterministic output (R3).
+/// Sorted by the derived [`Wall`] order for deterministic output (R3).
 ///
 /// **Precondition:** `d` is non-empty (see [`OracleResult::NotLappable`]'s
 /// module-level precondition note) — on a degenerate empty `d` this
@@ -141,7 +122,7 @@ pub(crate) fn p0_boundary_walls(d: &Corridor, p0_cells: &HashSet<Point>) -> Vec<
             }
         }
     }
-    walls.sort_by_key(|&w| wall_sort_key(w));
+    walls.sort();
     walls
 }
 
@@ -398,7 +379,7 @@ pub fn phase5_full_oracle(
             let mut stall_walls = p0_boundary_walls(d, &p0);
             if stall_walls.is_empty() {
                 stall_walls = walls_from_boundary(d);
-                stall_walls.sort_by_key(|&w| wall_sort_key(w));
+                stall_walls.sort();
             }
             return OracleResult::NotLappable { stall_walls };
         };
@@ -591,9 +572,9 @@ mod tests {
             side: Side::West,
         }));
         assert_eq!(walls.len(), 2);
-        // Sorted by wall_sort_key.
+        // Sorted by the derived Wall order.
         let mut sorted = walls.clone();
-        sorted.sort_by_key(|&w| wall_sort_key(w));
+        sorted.sort();
         assert_eq!(walls, sorted);
     }
 
@@ -917,7 +898,7 @@ mod tests {
         };
         assert!(!stall_walls.is_empty());
         let mut expected = walls_from_boundary(&d);
-        expected.sort_by_key(|&w| wall_sort_key(w));
+        expected.sort();
         assert_eq!(stall_walls, expected);
     }
 
@@ -941,7 +922,7 @@ mod tests {
         assert_eq!(w1, w2, "repeated runs must agree");
 
         let mut sorted = w1.clone();
-        sorted.sort_by_key(|&w| wall_sort_key(w));
+        sorted.sort();
         assert_eq!(w1, sorted, "diagnostic must already be sorted");
     }
 
