@@ -6,11 +6,6 @@
 //! `remove_edit_wall` and applies it through `apply_edit`, so "one wall, one
 //! cell flip" (AC1) is enforced in exactly one place rather than once per
 //! arm.
-#![allow(
-    dead_code,
-    reason = "no production caller until subtask 10 wires the first arms in — every item here \
-              is already exercised by this module's own tests"
-)]
 
 use gp_core::geom::{Corridor, Orient, Point, Side, Wall};
 use gp_core::track::TrackMetrics;
@@ -459,6 +454,7 @@ mod tests {
 
         let (scratch, cell) = apply_edit(&d, edit.wall, true).expect("edit must apply");
         assert_eq!(cell, edit.cell);
+        assert_single_cell_flip(&d, &scratch, edit.cell, true); // AC1
         let after = axis_width(&scratch, center, Orient::Vertical);
         assert!(
             after > before,
@@ -517,8 +513,9 @@ mod tests {
         assert_eq!(edit.cell, Point::new(3, 5));
         assert!(edit.drivable);
 
-        let (scratch, _) = apply_edit(&d, edit.wall, true).expect("edit must apply");
+        let (scratch, cell) = apply_edit(&d, edit.wall, true).expect("edit must apply");
         assert!(scratch.contains(Point::new(3, 5)));
+        assert_single_cell_flip(&d, &scratch, cell, true); // AC1
         // Test-side proof of the local guard's soundness (AC2: never called
         // in the production path).
         assert_eq!(bounded_complement_components(&scratch), 1);
@@ -565,6 +562,9 @@ mod tests {
         assert_eq!(edit.cell, P::new(12, 0));
         assert!(edit.drivable);
         assert_eq!(edit.recheck, crate::phase6_repair::RecheckScope::SinkToSink);
+
+        let (scratch, cell) = apply_edit(&d, edit.wall, true).expect("edit must apply");
+        assert_single_cell_flip(&d, &scratch, cell, true); // AC1
     }
 
     /// Direct proof that `widen_corner`'s lever (`corner_speed`) can
@@ -606,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn run_out_repair_can_pick_widen_corner_when_it_reduces_the_deficit_more() {
+    fn run_out_repair_picks_widen_corner_when_lengthen_is_inadmissible() {
         // A single-column shaft x=3, y in -2..=1, minus the widen target
         // (3,1). The path is vertical up to c=(3,0) then turns east
         // (`travel_dir`'s forward-step preference makes dir(c) == East),
@@ -640,12 +640,132 @@ mod tests {
         assert_eq!(edit.wall.side, Side::North);
         assert_eq!(edit.cell, P::new(3, 1));
 
-        let (scratch, _) = apply_edit(&d, edit.wall, true).expect("edit must apply");
+        let (scratch, cell) = apply_edit(&d, edit.wall, true).expect("edit must apply");
+        assert_single_cell_flip(&d, &scratch, cell, true); // AC1
         let after =
             sink_to_sink_deficit(&scratch, &metrics, c, v_target).expect("still a path point");
         assert!(
             after < working,
             "deficit must strictly decrease: {working} -> {after}"
         );
+    }
+
+    #[test]
+    fn run_out_repair_declines_metric_not_improved_when_no_candidate_helps() {
+        // A single-column shaft x=3, y in 0..=3, box 7 wide so both East
+        // and West of every shaft cell are in-box and admissible. Path
+        // walks straight up the shaft then turns East at the very top row
+        // (y=3) -- `dir(c) == East` for the probe point c=(3,2) (its
+        // forward step in the frozen path is (3,3), same axis as the
+        // shaft, so `travel_dir` reads East only at the true turn index;
+        // c sits one row below the turn, so dir(c) is North -- lengthen
+        // extends the shaft upward, WidenCorner tries East/West of the
+        // shaft top). Found by exhaustive search over shaft lengths and
+        // v_target (see the design's own `[C3]` adverse-effect note,
+        // Decision 2: lengthening a straight can raise the arrival speed
+        // by more than the room it adds); this exact combination is a
+        // case where EVERY admissible candidate's deficit is unchanged --
+        // `admissible == true`, `best == None`.
+        let mut d = Corridor::new(P::new(0, 0), 7, 4);
+        for y in 0..4 {
+            d.set(P::new(3, y), true);
+        }
+        let path = vec![
+            P::new(3, 0),
+            P::new(3, 1),
+            P::new(3, 2),
+            P::new(3, 3),
+            P::new(4, 3),
+        ];
+        let metrics = TrackMetrics {
+            fastest_lap: path.clone(),
+            ..Default::default()
+        };
+        let c = path[2];
+        let v_target = 2;
+
+        let working = sink_to_sink_deficit(&d, &metrics, c, v_target).expect("c is a path point");
+        assert_eq!(working, 1, "fixture premise: must fire with deficit 1");
+
+        assert!(matches!(
+            run_out_repair(&d, &metrics, v_target, c),
+            ArmOutcome::NoEdit(DeclineReason::MetricNotImproved)
+        ));
+    }
+
+    #[test]
+    fn run_out_repair_breaks_an_arm_rank_tie_in_favor_of_lengthen_straight() {
+        // Found by exhaustive search (design § Test Design subtask 11's
+        // "arm-rank tie-break asserted on a constructed tie", never
+        // implemented -- self-review finding 3): a vertical shaft x=3,
+        // y=-5..=0, with a short EAST dogleg starting at (5,0) (a single
+        // drivable cell, (4,0) left as an in-box gap) before the real
+        // 90-degree turn. At c=(3,0), v_target=3:
+        // - LengthenStraight (East of c -> (4,0) admissible, since (4,0)
+        //   is an in-box gap) reduces the deficit from 5 to 3 (bridges the
+        //   gap to the pre-existing hook cell (5,0), a 2-cell runout_room
+        //   gain in one edit).
+        // - WidenCorner (North of c -> (3,1) admissible) ALSO reduces the
+        //   deficit from 5 to 3 -- an exact tie in `reduction`.
+        // LengthenStraight has arm_rank 0 < WidenCorner's 1, so it must
+        // win despite being evaluated second in `run_out_repair`'s own
+        // candidate list (Lengthen is pushed first, but the code's `<`
+        // comparison must still resolve the tie correctly, not just by
+        // insertion order).
+        let mut d = Corridor::new(P::new(3, -5), 5, 7);
+        for y in -5..=0 {
+            d.set(P::new(3, y), true);
+        }
+        d.set(P::new(5, 0), true); // the hook cell; (4,0) stays an in-box gap
+        let mut path: Vec<P> = (-5..=0).map(|y| P::new(3, y)).collect();
+        path.push(P::new(4, 0));
+        path.push(P::new(5, 0));
+        let metrics = TrackMetrics {
+            fastest_lap: path,
+            ..Default::default()
+        };
+        let c = P::new(3, 0);
+        let v_target = 3;
+
+        let working = sink_to_sink_deficit(&d, &metrics, c, v_target).expect("c is a path point");
+        assert_eq!(working, 5, "fixture premise: working deficit");
+
+        let lengthen_wall = Wall {
+            cell: c,
+            side: Side::East,
+        };
+        let (lengthen_scratch, _) = apply_edit(&d, lengthen_wall, true).unwrap();
+        let nd1 = sink_to_sink_deficit(&lengthen_scratch, &metrics, c, v_target)
+            .expect("still a path point");
+
+        let widen_wall = Wall {
+            cell: c,
+            side: Side::North,
+        };
+        let (widen_scratch, _) = apply_edit(&d, widen_wall, true).unwrap();
+        let nd2 = sink_to_sink_deficit(&widen_scratch, &metrics, c, v_target)
+            .expect("still a path point");
+
+        assert_eq!(nd1, 3, "fixture premise: lengthen's post-edit deficit");
+        assert_eq!(nd2, 3, "fixture premise: widen's post-edit deficit");
+        assert_eq!(
+            working - nd1,
+            working - nd2,
+            "fixture premise: the two candidates' reductions must tie"
+        );
+
+        let ArmOutcome::Edit(edit) = run_out_repair(&d, &metrics, v_target, c) else {
+            panic!("expected an Edit on the tied fixture");
+        };
+        assert_eq!(
+            edit.arm,
+            RepairArm::LengthenStraight,
+            "arm-rank tie-break: LengthenStraight (rank 0) must beat WidenCorner (rank 1)"
+        );
+        assert_eq!(edit.wall, lengthen_wall);
+        assert_eq!(edit.cell, P::new(4, 0));
+
+        let (scratch, cell) = apply_edit(&d, edit.wall, true).expect("edit must apply");
+        assert_single_cell_flip(&d, &scratch, cell, true); // AC1
     }
 }

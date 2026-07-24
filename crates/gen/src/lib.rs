@@ -37,6 +37,7 @@ pub use phase2::*;
 pub use phase3::*;
 pub use phase4::*;
 pub use phase5::*;
+pub use phase5_runout::phase5_runout_checks;
 pub use phase5b::*;
 pub use phase6::*;
 pub use phase6_repair::*;

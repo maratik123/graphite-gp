@@ -24,9 +24,13 @@ pub struct RepairContext<'a> {
     pub skel: &'a CoarseSkeleton,
     /// The coarse-block size (Ф2's `k`).
     pub k: i32,
-    /// The global width floor (`GenParams::min_width`).
+    /// The global width floor (`GenParams::min_width`). No arm currently
+    /// reads it — every add arm's metric is "strictly increases", never
+    /// "reaches `n`" — but the field is design-pinned: it is carried here
+    /// for the future `generate()` integration item (design.md § Approach).
     pub n: u32,
-    /// The S/F width floor (`GenParams::start_finish_width`).
+    /// The S/F width floor (`GenParams::start_finish_width`). Same status as
+    /// [`Self::n`]: unread by any arm today, carried for `generate()`.
     pub m: u32,
     /// The start grid.
     pub grid: &'a StartGrid,
@@ -375,22 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn committed_edit_carries_the_scope_actually_taken() {
-        // AC2: the scope is a field on the output, not inferred from timing.
-        let edit = CommittedEdit {
-            arm: RepairArm::PushOuterWallOut,
-            wall: Wall {
-                cell: Point::new(0, 0),
-                side: Side::East,
-            },
-            cell: Point::new(1, 0),
-            drivable: true,
-            recheck: recheck_scope(RepairArm::PushOuterWallOut),
-        };
-        assert_eq!(edit.recheck, RecheckScope::Local);
-    }
-
-    #[test]
     fn issue_rank_matches_the_pinned_severity_table() {
         assert_eq!(issue_rank(Issue::Disconnected), 0);
         assert_eq!(issue_rank(Issue::BadTopology), 1);
@@ -617,6 +605,78 @@ mod tests {
             assert_eq!(repaired.contains(edit.cell), edit.drivable);
             assert_ne!(d.contains(edit.cell), edit.drivable);
         }
+        // AC1 end-to-end: exactly one cell flips per committed edit, over
+        // the whole pass -- not just per-arm. A regression that flips an
+        // extra, unnamed cell per edit (e.g. a second `working.set(...)`
+        // slipped into the driver loop) would inflate this count without
+        // breaking any single-arm test.
+        let diffs: usize = crate::phase4::box_points(&d)
+            .filter(|&p| d.contains(p) != repaired.contains(p))
+            .count();
+        assert_eq!(
+            diffs,
+            edits.len(),
+            "the whole-pass cell-diff count must equal the number of committed edits"
+        );
+    }
+
+    #[test]
+    fn driver_level_staleness_declines_a_payload_staled_by_an_earlier_edit_in_the_pass() {
+        // Two IDENTICAL NoBraking{at: c} labels in one issues list --
+        // unlike phase6_arms.rs's own StalePayload test (a payload that was
+        // NEVER valid), this payload starts genuinely valid and is staled
+        // by the FIRST edit committed in THIS pass. brake_deficit_corridor
+        // at v_target=2 fully clears the deficit in one lengthen_straight
+        // edit (1 -> 0, the same fixture ac3_non_vacuity_... uses), so the
+        // second dispatch of the same label -- against the driver's own
+        // updated working corridor -- must decline StalePayload rather than
+        // attempt a second, unneeded edit. This is design.md § Decision 4's
+        // "re-validate every payload against the working corridor" driver
+        // invariant, exercised end-to-end through phase6_local_repair.
+        use crate::testfix::brake_deficit_corridor;
+
+        let (d, path, _sinks) = brake_deficit_corridor();
+        let c = path[10];
+        let metrics = TrackMetrics {
+            fastest_lap: path,
+            ..Default::default()
+        };
+        let skel = empty_skel();
+        let grid = ring_grid();
+        let sf = ring_sf();
+        let ctx = RepairContext {
+            d: &d,
+            skel: &skel,
+            k: 3,
+            n: 1,
+            m: 1,
+            grid: &grid,
+            sf: &sf,
+            race_dir: RaceDir::Cw,
+            v_target: 2,
+            metrics: Some(&metrics),
+            stall_walls: None,
+        };
+        let issues = [Issue::NoBraking { at: c }, Issue::NoBraking { at: c }];
+
+        let RepairOutcome::Repaired { d: repaired, edits } = phase6_local_repair(&ctx, &issues)
+        else {
+            panic!("expected the first NoBraking to commit");
+        };
+        assert_eq!(
+            edits.len(),
+            1,
+            "the second, now-staled duplicate must NOT commit a second edit: {edits:?}"
+        );
+
+        assert!(matches!(
+            dispatch(
+                &ctx,
+                &repaired,
+                DispatchLabel::Issue(Issue::NoBraking { at: c })
+            ),
+            ArmOutcome::NoEdit(DeclineReason::StalePayload)
+        ));
     }
 
     #[test]

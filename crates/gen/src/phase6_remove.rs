@@ -8,11 +8,6 @@
 //! exact move (`trim_arm_wall` + `nudge_finger` + their tests), so it is
 //! applied directly rather than re-derived: no logic change, only the file
 //! boundary.
-#![allow(
-    dead_code,
-    reason = "no production caller until subtask 13's dispatch driver wires them in — every \
-              item here is already exercised by this module's own tests"
-)]
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -157,7 +152,8 @@ mod tests {
             crate::phase6_repair::RecheckScope::GlobalFloodFill
         );
 
-        let (scratch, _) = apply_edit(&d, edit.wall, false).expect("edit must apply");
+        let (scratch, cell) = apply_edit(&d, edit.wall, false).expect("edit must apply");
+        crate::testfix::assert_single_cell_flip(&d, &scratch, cell, false); // AC1
         assert_eq!(component_count(&scratch), 1);
         assert_eq!(bounded_complement_components(&scratch), 1);
     }
@@ -224,7 +220,8 @@ mod tests {
         // (15, 9) first.
         assert_eq!(edit.cell, P::new(15, 9));
 
-        let (scratch, _) = apply_edit(&d, edit.wall, false).expect("edit must apply");
+        let (scratch, cell) = apply_edit(&d, edit.wall, false).expect("edit must apply");
+        crate::testfix::assert_single_cell_flip(&d, &scratch, cell, false); // AC1
         assert_eq!(component_count(&scratch), 1);
         assert_eq!(bounded_complement_components(&scratch), 1);
     }

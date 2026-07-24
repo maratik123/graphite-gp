@@ -9,12 +9,6 @@
 //! body (`phase5_runout_checks`); `phase4.rs`'s `Issue::NoBraking` variant
 //! carries the payload. `NoBraking` is emitted from this Ф5 family, never
 //! from `phase4_static_checks` (design.md § Decomposition subtask 2).
-#![allow(
-    dead_code,
-    reason = "no production caller until the Ф6 driver (phase6_repair.rs, Group B) wires \
-              phase5_runout_checks into the single-pass dispatch — every item here is \
-              already exercised by this module's own tests"
-)]
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
@@ -311,21 +305,19 @@ pub(crate) fn sink_to_sink_deficit(
     Some(deficit_at(d, &flood, c, dir, v_target))
 }
 
-/// The `NoBraking` issues along `metrics.fastest_lap` (design doc §2 Ф6,
-/// `ai-docs/plans/2026-07-24-gp-gen-phase6-local-repair.design.md` § Decision 2):
-/// one issue per maximal run of deficient path indices, anchored at the
-/// run's first point. `[]` on an empty path (total, no panic).
+/// The `NoBraking` issues along `metrics.fastest_lap`.
+///
+/// One issue per maximal run of deficient path indices, anchored at the
+/// run's first point (design doc §2 Ф6, `ai-docs/plans/
+/// 2026-07-24-gp-gen-phase6-local-repair.design.md` § Decision 2). `[]` on an
+/// empty path (total, no panic).
 ///
 /// Each index's deficit is measured against the sink-to-sink flood seeded at
 /// its nearest **upstream** sink (`sink_indices`), barriered at every sink
 /// cell — the flood is cached per distinct upstream sink index rather than
 /// recomputed per path point, since every point between two sinks shares the
 /// same upstream flood.
-pub(crate) fn phase5_runout_checks(
-    d: &Corridor,
-    metrics: &TrackMetrics,
-    v_target: i32,
-) -> Vec<Issue> {
+pub fn phase5_runout_checks(d: &Corridor, metrics: &TrackMetrics, v_target: i32) -> Vec<Issue> {
     let path = &metrics.fastest_lap;
     if path.is_empty() {
         return Vec::new();
@@ -517,9 +509,12 @@ mod tests {
 
     #[test]
     fn corner_speed_excludes_an_arrival_with_no_legal_successor() {
-        // A 1-wide dead end at x=2: the fastest arrival there (highest vnorm)
-        // has no legal successor (every move overruns off-D), but a slow
-        // arrival that can brake to rest in place does.
+        // A 1-wide dead end at x=2: the fastest arrival there is (2,0)
+        // vx=2 (vnorm 2) -- every action overruns off-D, so it has no legal
+        // successor. A slower arrival, vx=1 (vnorm 1), CAN brake to rest in
+        // place, so it qualifies. corner_speed must report the qualifying
+        // max (1), strictly below the raw peak (2) -- not merely "at most"
+        // it, which would hold trivially even if the filter did nothing.
         let d = Corridor::filled(Point::new(0, 0), 3, 1);
         let barriers = HashSet::new();
         let flood = window_speed(&d, &[car(0, 0, 1, 0)], &barriers, 3);
@@ -532,10 +527,15 @@ mod tests {
             .map(|s| vnorm(*s))
             .max()
             .unwrap_or(0);
+        assert_eq!(fastest_at_end, 2, "the fastest raw arrival must be vnorm 2");
         let qualifying = corner_speed(&d, &flood, end);
+        assert_eq!(
+            qualifying, 1,
+            "corner_speed must report the qualifying (successor-having) max, not the raw peak"
+        );
         assert!(
-            qualifying <= fastest_at_end,
-            "corner_speed must never exceed the raw peak at end"
+            qualifying < fastest_at_end,
+            "the no-successor arrival must be excluded, making this a strict inequality"
         );
     }
 
@@ -599,15 +599,26 @@ mod tests {
         // R4: speed_heatmap is a per-point max over ALL live states, so a
         // start cell traversed fast later has heatmap > 1 and would NOT be
         // a heatmap-derived sink — sink_indices' unconditional index-0
-        // inclusion is what keeps this call well-founded at all.
-        let (d, mut metrics) = straight_metrics(9);
+        // inclusion is what keeps this call well-founded at all. Uses the
+        // length-12 (deficient) straight so the pin is non-vacuous: a
+        // stubbed `phase5_runout_checks` returning `Vec::new()` cannot pass
+        // it (the expected result is non-empty).
+        let (d, mut metrics) = straight_metrics(12);
         metrics.speed_heatmap = vec![(metrics.fastest_lap[0], 5)];
-        // Must not panic, and must produce the same result as the
-        // no-heatmap-data case (heatmap is not consulted for index 0).
-        assert_eq!(
-            phase5_runout_checks(&d, &metrics, 1),
-            phase5_runout_checks(&d, &straight_metrics(9).1, 1),
+        assert!(
+            heatmap_at(&metrics.speed_heatmap, metrics.fastest_lap[0]).is_some_and(|v| v > 1),
+            "fixture premise: the start cell's heatmap entry must read > 1"
         );
+
+        let issues = phase5_runout_checks(&d, &metrics, 3);
+        assert!(
+            !issues.is_empty(),
+            "the deficient run near the far wall must still fire despite the start \
+             cell's own heatmap entry reading > 1"
+        );
+        // Must produce the same result as the no-heatmap-data case (heatmap
+        // is not consulted for index 0's sink membership).
+        assert_eq!(issues, phase5_runout_checks(&d, &straight_metrics(12).1, 3));
     }
 
     #[test]
