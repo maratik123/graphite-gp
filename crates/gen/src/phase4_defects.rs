@@ -152,7 +152,7 @@ pub(crate) fn concave_chord_cut_issues(d: &Corridor) -> Vec<Issue> {
 
 /// The expanded coarse-hole mask `H = ⋃ block_points(c, k), c ∈ skel.hole`
 /// (design doc §2 Ф6, `ArmsMerging`'s producing condition).
-fn expanded_hole_mask(skel: &CoarseSkeleton, k: i32) -> HashSet<Point> {
+pub(crate) fn expanded_hole_mask(skel: &CoarseSkeleton, k: i32) -> HashSet<Point> {
     skel.hole.iter().flat_map(|&c| block_points(c, k)).collect()
 }
 
