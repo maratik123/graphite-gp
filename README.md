@@ -67,11 +67,25 @@ unable to reach `raw() >= 1` (the crossing is now bounded to the chord's extent)
 `gp-gen` runs iterative deepening (`V_ceil = 1, 2, 4, 8, …`) over `live = R ∩ B`,
 halting at the true `Vmax_attain`, excluding provable-crash states (`R \ B`), and
 — on a valid lap — computing `tempo` / `fastest_lap` / `speed_heatmap` into
-`TrackMetrics`, or on no lap returning a goal-aware `break_points` frontier
-diagnostic (for the future Ф6 repair). It **composes** the Ф5a floods (no
-reimplementation, same `legal_move` / `register_move` path). The remaining
-pipeline is Ф6–Ф7 (#30–#34). Block 2
-(`gp-render`) is **complete** — see below.
+`TrackMetrics`, or on no lap returning a goal-aware frontier diagnostic. It
+**composes** the Ф5a floods (no reimplementation, same `legal_move` /
+`register_move` path).
+
+**Ф6's `map_frontier_gap_to_edge` (`[N3]`, the design's single riskiest step)**
+has now landed too (#30): given Ф5b's stall diagnostic it returns the concrete
+dual edge (`gp_core::geom::Wall`) whose one-edge shift repairs the track — a
+**verified-growth greedy**, not a geometric heuristic, since it scratch-applies
+each candidate and returns `RepairCandidate::Edge` only for an edit it has
+*proved* strictly grows the phase-0 reachable set `|P0|` at `V_ceil = 1`
+(else `NoCandidate`, never a sentinel). It also **amended the Ф5b diagnostic**
+(`break_points: Vec<Point>` → `stall_walls: Vec<Wall>`): the old payload was
+provably a subset of the corridor `D`, so it could never name the non-drivable
+cell that a geometric sever needs added. The outcome enum's arity was settled by
+an executable proof gate run *before* the shape was locked — the dynamic-only
+stall class is **empty**, structurally (`live` is monotone in `V_ceil`, so a
+no-lap verdict can only be returned at `V_ceil = 1`), so there are two variants
+and no declined arm. The remaining pipeline is the Ф6 repair *loop* and Ф7
+(#31–#34). Block 2 (`gp-render`) is **complete** — see below.
 
 **Block 2 (the `gp-render` draw-only renderer) is complete** — every
 `block:render` issue is closed. The backend is **eframe/egui 0.35**: `gp-game`
@@ -132,7 +146,7 @@ pipeline, oracle, feature extraction, policy) are still `todo!()`. See the
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary (scaffold banner)
-cargo test             # 506 workspace tests green (118 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 138 gp-gen; 2 doc-tests)
+cargo test             # 521 workspace tests green (118 gp-core; 248 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 153 gp-gen; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
