@@ -16,7 +16,7 @@
 //! period. Both engines are seedable and deterministic, so replay determinism
 //! (`docs/design.md` §Ф1, §N4) holds on every source.
 
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
@@ -75,6 +75,30 @@ impl Seeds {
     #[inline]
     pub fn ai_inference_rng(&self) -> Xoshiro256PlusPlus {
         Xoshiro256PlusPlus::seed_from_u64(self.ai_inference)
+    }
+
+    /// Derives all four source seeds from one master seed (issue #41's CLI
+    /// `--seed`).
+    ///
+    /// Builds one [`Xoshiro256PlusPlus`] via `seed_from_u64(master)`, then
+    /// takes **four successive `next_u64()` draws, in this exact order**:
+    /// draw 1 → `collision`, draw 2 → `generation`, draw 3 → `ai_learning`,
+    /// draw 4 → `ai_inference`. Draws are bound to named locals *before* the
+    /// [`Seeds`] literal is constructed, so the mapping never depends on
+    /// struct-literal field-evaluation order.
+    #[must_use]
+    pub fn from_master(master: u64) -> Self {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(master);
+        let collision = rng.next_u64();
+        let generation = rng.next_u64();
+        let ai_learning = rng.next_u64();
+        let ai_inference = rng.next_u64();
+        Self {
+            collision,
+            generation,
+            ai_learning,
+            ai_inference,
+        }
     }
 }
 
@@ -153,5 +177,43 @@ mod tests {
     #[test]
     fn default_is_all_zero_seeds() {
         assert_eq!(Seeds::default(), seeds(0, 0, 0, 0));
+    }
+
+    #[test]
+    fn from_master_draws_four_values_in_order() {
+        // AC11: the four resolved fields equal the first four `next_u64()`
+        // draws of `Xoshiro256PlusPlus::seed_from_u64(master)`, taken in the
+        // order collision, generation, ai_learning, ai_inference. Computed
+        // in-test from a fresh RNG — no magic literals — so a reordered
+        // assignment in `from_master` fails this test.
+        const MASTER: u64 = 42;
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(MASTER);
+        let expected = seeds(
+            rng.next_u64(),
+            rng.next_u64(),
+            rng.next_u64(),
+            rng.next_u64(),
+        );
+        assert_eq!(Seeds::from_master(MASTER), expected);
+    }
+
+    #[test]
+    fn from_master_is_deterministic_for_the_same_master() {
+        // AC11: the same master yields an identical `Seeds` across two
+        // independent derivations.
+        assert_eq!(Seeds::from_master(7), Seeds::from_master(7));
+    }
+
+    #[test]
+    fn from_master_distinct_masters_yield_pairwise_distinct_fields() {
+        // AC11: two distinct masters yield four pairwise-distinct field
+        // values.
+        let a = Seeds::from_master(1);
+        let b = Seeds::from_master(2);
+        let a_fields = [a.collision, a.generation, a.ai_learning, a.ai_inference];
+        let b_fields = [b.collision, b.generation, b.ai_learning, b.ai_inference];
+        for (x, y) in a_fields.iter().zip(b_fields.iter()) {
+            assert_ne!(x, y);
+        }
     }
 }
