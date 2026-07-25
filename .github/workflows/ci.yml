@@ -238,10 +238,13 @@ jobs:
           r="${{ needs.docs.result }}"
           if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
 
-  # Required branch-protection context `Miri` (#76). Mirrors build/test/clippy/
+  # Aggregator producing the `Miri` context (#76). Mirrors build/test/clippy/
   # docs-pass: an `if: always()` aggregator so a path-filtered `skipped` Miri
-  # passes, but a red `miri` job blocks merge. Required context points here, not
-  # at the raw `if:`-filtered `miri` job.
+  # passes, while a red `miri` job reddens this too. Unlike its siblings, `Miri`
+  # is deliberately NOT in `main-protection`'s required set while Miri's
+  # wall-clock is long (pending #134) — so a red Miri is a regression to fix,
+  # not a merge block. If it is ever restored to the required set, the context
+  # to require is this aggregator, not the raw `if:`-filtered `miri` job.
   miri-pass:
     name: Miri
     needs: [changes, miri]

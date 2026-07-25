@@ -20,7 +20,7 @@ exist" from a miss — re-run with a different method, or read the region.
 | Cause of the false negative | Fix |
 |---|---|
 | Multi-line construct (rustfmt-split `#[cfg_attr(\n    miri, …)]`, `assert!(matches!` with a message, wrapped macro call) | `rg -U` (multiline), or read the region |
-| Hand-rolled identifier class — `[a-z_]*` excludes digits, and Rust `snake_case` routinely carries them (`ac7_…`, `p0_at_v1`, `to_u32`) | `[A-Za-z0-9_]+`, or `ast-index symbol` / `ast-index outline`, which needs no hand-written pattern |
+| Hand-rolled identifier class — `[a-z_]*` excludes digits, and Rust `snake_case` routinely carries them (all three verified in-tree: `ac7_v1_liveness_is_equivalent_to_full_oracle_lappability`, `p0_at_v1`, `trap_ring_is_v1_lappable_and_has_an_unbrakeable_hazard`) | `[A-Za-z0-9_]+`, or `ast-index symbol` / `ast-index outline`, which needs no hand-written pattern |
 | Wrong crate version / wrong path on disk; aliased or rewritten output | Read the actual source file |
 
 **MUST — a claim that an API, symbol, flag, or precedent does NOT exist requires a

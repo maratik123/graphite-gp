@@ -11,12 +11,16 @@ hook proposal's `Verification:` field points here.
 
 ### 1. Lint the body
 
-Extract it with `jq` and run `shellcheck -s bash`. A hook is a `bash -c` program and
-nothing else in this workspace lints it — [`/ai-audit` Checklist K](../.claude/skills/ai-audit/SKILL.md)
-covers `scripts/*.sh` only, never `settings.json`-inlined bodies.
+Extract it with `jq` and run `shellcheck -s bash`. A hook is a `bash -c` program, and the
+only gate that lints one is [`/ai-audit` Checklist K](../.claude/skills/ai-audit/SKILL.md) —
+which runs post-hoc, on an audit pass, not when you author the hook. Nothing lints it at
+authoring time except you.
+
+Iterate over **every event**, not just `PreToolUse` — `PostToolUse` and `SessionStart`
+bodies are shell programs too, and at least one carries a live `SC2016`:
 
 ```bash
-jq -r '.hooks.PreToolUse[].hooks[].command' .claude/settings.json \
+jq -r '.hooks[][].hooks[].command' .claude/settings.json \
   | while IFS= read -r body; do printf '%s\n' "$body" | shellcheck -s bash - || true; done
 ```
 
