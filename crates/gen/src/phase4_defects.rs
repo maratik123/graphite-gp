@@ -27,7 +27,7 @@ use crate::phase4::{box_points, wall_runs};
 /// working and a scratch corridor.
 ///
 /// `axis` names the *narrow chord's own orientation* (the same convention as
-/// [`Issue::Narrow`](crate::Issue::Narrow) / [`Issue::NarrowSf`](crate::Issue::NarrowSf)):
+/// [`Issue::Narrow`](Issue::Narrow) / [`Issue::NarrowSf`](Issue::NarrowSf)):
 /// `Vertical` reads the vertical run (`up + down − 1`), `Horizontal` reads the
 /// horizontal run (`left + right − 1`) — mirroring this module's own
 /// [`narrow_at`] width derivation over the same `wall_runs` primitive.

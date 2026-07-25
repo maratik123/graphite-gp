@@ -1,7 +1,7 @@
 //! `generate()` — the Block-1 capstone that wires the already-landed phases
 //! Ф1→Ф7 into the outer generation loop of `docs/design.md` §2
 //! (`generate_track` pseudocode). No phase behaviour or signature changes —
-//! orchestration + [`gp_core::track::TrackArtifact`] assembly only
+//! orchestration + [`TrackArtifact`] assembly only
 //! (`ai-docs/plans/2026-07-24-gp-gen-generate-pipeline.design.md`).
 
 use gp_core::geom::{Corridor, Wall, walls_from_boundary};

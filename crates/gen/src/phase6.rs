@@ -32,13 +32,14 @@
 //! means no boundary edge derived from the diagnostic grows `P0` — this is a
 //! genuine, reachable outcome on a box-filling corridor (`dead_end_corridor`,
 //! `crash_pocket_fixture`: every off-`D` neighbor of every boundary wall lies
-//! outside the bounding box, where [`gp_core::geom::Corridor::set`] is a
+//! outside the bounding box, where [`Corridor::set`] is a
 //! documented no-op), **not** a swallowed error to "fix" by relaxing the
 //! growth check.
 //!
 //! **Why only two outcomes, not three.** The design phase executed the AC7
-//! monotonicity proof gate (`phase6::tests::ac7_v1_liveness_is_equivalent_to_full_oracle_lappability`,
-//! subtask 2) *before* `RepairCandidate`'s shape was locked (spec KD4). The
+//! monotonicity proof gate
+//! (`phase6::tests::ac7_v1_liveness_is_equivalent_to_full_oracle_lappability`, subtask 2)
+//! *before* `RepairCandidate`'s shape was locked (spec KD4). The
 //! dynamic-only stall class — V=1 lappable, but the full-`Vmax` oracle is
 //! not — **is empty**, not merely unobserved: `live` is monotone in
 //! `V_ceil` (`within_v_ceil` admits a strict superset of states as `V_ceil`
@@ -242,14 +243,9 @@ mod tests {
     /// contingency).
     #[test]
     fn ac7_v1_liveness_is_equivalent_to_full_oracle_lappability() {
-        let cases: Vec<(
-            &str,
-            gp_core::geom::Corridor,
-            gp_core::track::StartFinish,
-            gp_core::track::StartGrid,
-        )> = {
+        let cases: Vec<(&str, Corridor, gp_core::track::StartFinish, StartGrid)> = {
             let mut broken_ring = ring_corridor();
-            broken_ring.set(gp_core::geom::Point::new(4, 2), false);
+            broken_ring.set(Point::new(4, 2), false);
 
             let (dead_end_d, dead_end_sf, dead_end_grid) = dead_end_corridor();
             let (crash_d, crash_sf, crash_grid) = crash_pocket_fixture();

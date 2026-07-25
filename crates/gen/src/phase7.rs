@@ -182,7 +182,7 @@ fn bridge_gaps(d: &Corridor, medial: BTreeSet<Point>) -> Option<BTreeSet<Point>>
         let mut cross: Option<(i64, Point, Point)> = None;
         let mut same: Option<(i64, Point, Point)> = None;
         for i in 0..leaves.len() {
-            for j in (i.saturating_add(1))..leaves.len() {
+            for j in i.saturating_add(1)..leaves.len() {
                 let (a, b) = (leaves[i], leaves[j]);
                 if a.neighbors4().into_iter().any(|n| n == b) {
                     continue; // already directly connected; nothing to bridge
