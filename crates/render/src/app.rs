@@ -7,7 +7,8 @@
 //! [`Screen`], the [`RaceConfig`], the [`Overlays`], and a `has_generated`
 //! latch — and **borrows** all externally-sourced session data per frame
 //! through [`ShellSession`] (`gp-render` is draw-only and has no dependency
-//! on `gp-gen`/`gp-ai`/`gp-core::sim` — `ai-docs/key-decisions.md`).
+//! on `gp-gen`/`gp-ai` — `ai-docs/key-decisions.md`; it does depend on
+//! `gp-core`, including `gp_core::sim::Action` for [`ShellResponse::action`]).
 //!
 //! The transition logic is split from drawing: [`AppShell::apply`] and
 //! [`AppShell::can_nav`] touch no `egui` type, so AC1/AC2/AC5/AC6/AC7 are
@@ -23,6 +24,7 @@ use crate::{
     StandingEntry,
 };
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Rect, Sense, Stroke, Ui};
+use gp_core::sim::Action;
 use gp_core::track::TrackArtifact;
 
 /// Top bar band height — not JSX-literal (`App.jsx`'s header lets flexbox
@@ -245,7 +247,7 @@ impl AppShell {
             })
             .inner;
 
-        let (screen_nav, advance_rect) = ui
+        let (screen_nav, advance_rect, action) = ui
             .scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
                 self.show_body(ui, session)
             })
@@ -259,19 +261,29 @@ impl AppShell {
         ShellResponse {
             screen: self.screen,
             advance_rect,
+            action,
         }
     }
 
     /// Draws the current screen's body, threading the owned `config`/
     /// `overlays` and the borrowed `session` into the matching screen's
-    /// input struct. Returns the screen-derived `Nav` (if any) plus the
-    /// forward control's rect.
-    fn show_body(&mut self, ui: &mut Ui, session: ShellSession<'_>) -> (Option<Nav>, Rect) {
+    /// input struct. Returns the screen-derived `Nav` (if any), the forward
+    /// control's rect, and — for [`Screen::Race`] only — the player's
+    /// selected [`Action`] this frame (every other screen yields `None`).
+    fn show_body(
+        &mut self,
+        ui: &mut Ui,
+        session: ShellSession<'_>,
+    ) -> (Option<Nav>, Rect, Option<Action>) {
         match self.screen {
             Screen::Setup => {
                 let resp = SetupScreen::new(self.config).show(ui);
                 self.config = resp.config;
-                (resp.generated.then_some(Nav::Generate), resp.response.rect)
+                (
+                    resp.generated.then_some(Nav::Generate),
+                    resp.response.rect,
+                    None,
+                )
             }
             Screen::Lab => {
                 let input = LabInput {
@@ -291,7 +303,7 @@ impl AppShell {
                 } else {
                     None
                 };
-                (nav, resp.test_lap_response.rect)
+                (nav, resp.test_lap_response.rect, None)
             }
             Screen::Race => {
                 let input = RaceInput {
@@ -311,6 +323,7 @@ impl AppShell {
                 (
                     resp.finish.then_some(Nav::Finish),
                     resp.finish_response.rect,
+                    resp.action,
                 )
             }
             Screen::Results => {
@@ -326,7 +339,7 @@ impl AppShell {
                 } else {
                     None
                 };
-                (nav, resp.menu_response.rect)
+                (nav, resp.menu_response.rect, None)
             }
         }
     }
@@ -380,6 +393,12 @@ pub struct ShellResponse {
     /// Generate button / `LabScreen`'s Test-lap button /
     /// `RaceScreen`'s Finish button / `ResultsScreen`'s Menu button).
     pub advance_rect: Rect,
+    /// The player's selected [`Action`] this frame, forwarded from
+    /// `RaceResponse::action` when [`Screen::Race`] is active; `None` on
+    /// every other screen and on any frame the player has not yet decided
+    /// (spec `2026-07-25-game-controller-player` Scope 6). This is the
+    /// `MovePad`/Coast-button path's only route out of the shell.
+    pub action: Option<Action>,
 }
 
 /// Draws the top bar (wordmark + interactive nav row) into `ui`'s
