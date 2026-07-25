@@ -4,16 +4,17 @@
 //!
 //! **Poll-shaped**, per owner ruling R1-Q1: [`Controller::poll`] returns
 //! `Option<Action>`, where `None` means "no answer yet — ask again next
-//! frame". The player seat (`controller::player::PlayerController`) returns
-//! `None` on every frame before it has input; a future AI seat (#158)
-//! always returns `Some`. The trait computes no legality of its own (AC7) —
-//! every `Some(a)` an implementation returns must already be a member of
-//! the `legal` mask it was given.
+//! frame". The player seat ([`player::PlayerController`]) returns `None` on
+//! every frame before it has input; a future AI seat (#158) always returns
+//! `Some`. The trait computes no legality of its own (AC7) — every
+//! `Some(a)` an implementation returns must already be a member of the
+//! `legal` mask it was given.
 
 use gp_core::sim::{Action, BitFlags, CarState};
 use gp_core::track::TrackArtifact;
 
 pub mod keys;
+pub mod player;
 
 /// One frame's input candidates.
 ///
@@ -311,6 +312,81 @@ mod tests {
                 input,
             };
             assert_eq!(stub.poll(ctx), None);
+        }
+    }
+
+    #[test]
+    fn heterogeneous_roster_drives_every_seat_through_one_call_site() {
+        let track = fixture_track();
+        let state = super::test_fixtures::mid_corridor_state();
+        let legal = gp_core::sim::legal_mask(&track.corridor, state);
+        assert!(!legal.is_empty());
+
+        let mut roster = super::Roster::new();
+        roster.push(Box::new(crate::controller::player::PlayerController));
+        roster.push(Box::new(AlwaysCoastStub));
+        assert_eq!(roster.len(), 2);
+
+        for index in 0..roster.len() {
+            let ctx = PollContext {
+                track: &track,
+                state,
+                legal,
+                input: FrameInput {
+                    shell_action: Some(gp_core::sim::Action::East),
+                    key_action: None,
+                },
+            };
+            let action = roster.poll(index, ctx);
+            if let Some(a) = action {
+                assert!(legal_move(&track.corridor, state, a));
+            }
+        }
+    }
+
+    /// AC7's structural no-physics scan. Written here (subtask 4) rather
+    /// than subtask 2, where the design's Test Design table nominally
+    /// places it — `include_str!` on `keys.rs`/`player.rs` cannot compile
+    /// until both files exist, which is only true from subtask 4 onward
+    /// (see the progress-file Decisions log).
+    #[test]
+    fn controller_module_calls_no_physics() {
+        /// Strips the `#[cfg(test)]` region and every doc/comment/`use`
+        /// line, so only production code lines remain to be scanned — a
+        /// doc sentence naming `legal_move` (which AC1/AC6 require) must
+        /// not itself trip this test.
+        fn code_lines(src: &str) -> String {
+            let mut out = String::new();
+            for line in src.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if trimmed.starts_with("///")
+                    || trimmed.starts_with("//!")
+                    || trimmed.starts_with("//")
+                {
+                    continue;
+                }
+                if trimmed.starts_with("use ") {
+                    continue;
+                }
+                out.push_str(line);
+                out.push('\n');
+            }
+            out
+        }
+
+        let haystack = code_lines(include_str!("mod.rs"))
+            + &code_lines(include_str!("keys.rs"))
+            + &code_lines(include_str!("player.rs"));
+
+        for forbidden in ["step(", "legal_move(", "supercover("] {
+            assert!(
+                !haystack.contains(forbidden),
+                "controller/{{mod,keys,player}}.rs production code calls {forbidden}, \
+                 violating AC7's no-independent-physics rule"
+            );
         }
     }
 }
