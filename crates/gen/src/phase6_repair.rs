@@ -874,7 +874,7 @@ mod tests {
         let skel = CoarseSkeleton {
             ring: std::collections::BTreeSet::new(),
             hole: std::collections::BTreeSet::from([Point::new(1, 1)]),
-            dir: gp_core::track::RaceDir::Cw,
+            dir: RaceDir::Cw,
         };
 
         assert!(matches!(
@@ -954,7 +954,7 @@ mod tests {
         let skel = CoarseSkeleton {
             ring: std::collections::BTreeSet::new(),
             hole: std::collections::BTreeSet::from([Point::new(1, 1)]),
-            dir: gp_core::track::RaceDir::Cw,
+            dir: RaceDir::Cw,
         };
         let grid = StartGrid { positions: vec![] };
         let sf = minimal_sf();

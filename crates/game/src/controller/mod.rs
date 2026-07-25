@@ -1,6 +1,6 @@
 //! The controller abstraction (spec `2026-07-25-game-controller-player`
 //! Scope 1) — the single seam through which every car's per-turn
-//! [`gp_core::sim::Action`] is produced.
+//! [`Action`] is produced.
 //!
 //! **Poll-shaped**, per owner ruling R1-Q1: [`Controller::poll`] returns
 //! `Option<Action>`, where `None` means "no answer yet — ask again next

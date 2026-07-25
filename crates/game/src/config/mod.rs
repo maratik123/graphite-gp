@@ -1,11 +1,11 @@
 //! CLI argument parsing and validated game configuration (issue #41).
 //!
 //! Owns the bound/default constants, the seed resolution, the validated
-//! [`GameConfig`], and the [`gp_gen::GenParams`]/temperature mapping. The
+//! [`GameConfig`], and the [`GenParams`]/temperature mapping. The
 //! [`clap`]-derived raw `Cli` struct lives in [`cli`] (stays private to the
 //! whole `config` tree — it never escapes into the mapping logic); the
 //! cross-field [`ConfigError`] lives in [`error`]; the startup-echo formatter
-//! ([`echo::render_startup_echo`]) lives in [`echo`] — all three split out of
+//! ([`render_startup_echo`]) lives in [`echo`] — all three split out of
 //! this file to keep it under the workspace's 800-line soft cap (AGENTS.md §
 //! Code Style).
 

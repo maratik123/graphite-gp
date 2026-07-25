@@ -430,7 +430,7 @@ mod tests {
     /// (design § *Q3* — the two-`egui::Context` layout probe). Drives the
     /// real [`AppShell::show`] to [`Screen::Race`], captures the rest
     /// frame's `ui.max_rect()`, re-derives the body rect from
-    /// [`crate::app::TOP_BAR_H`] (the shell's own const — no layout
+    /// [`TOP_BAR_H`] (the shell's own const — no layout
     /// constant duplicated), and draws the **real** [`RaceScreen`] under
     /// that rect in a fresh `egui::Context` to read the production
     /// `movepad_response.rect`. Clicking that rect's centre on the
