@@ -6,8 +6,9 @@
 //! formatter ([`render_startup_echo`]). [`Cli`] stays private to this module —
 //! it never escapes into the mapping logic.
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use gp_core::rng::Seeds;
+use gp_gen::GenParams;
 use gp_render::screens::{DIFFICULTY_LABELS, Difficulty, RaceConfig};
 use thiserror::Error;
 
@@ -38,6 +39,41 @@ const TEMPERATURE_DECIMALS: usize = 2;
 /// Default `--seed` master, continuity with the deleted `main.rs`
 /// `FIXTURE_SEED` (the value the `LabScreen` header already shows).
 const DEFAULT_SEED: u64 = 7;
+/// Minimum accepted `--min-straight` — `gp-gen`'s `l_min` domain floor.
+/// Values below this are silently clamped up by the generator
+/// (`clamp_l_min`), so the CLI rejects them instead of advertising a value
+/// the generator would quietly rewrite.
+const MIN_STRAIGHT_MIN: i32 = 2;
+/// Maximum accepted `--min-straight` — `gp-gen`'s `l_min` domain ceiling.
+const MIN_STRAIGHT_MAX: i32 = 64;
+/// Minimum accepted `--block-size`. The *real* floor is the cross-field
+/// invariant `block_size ≥ ⌈cars/2⌉`; this per-flag floor only excludes
+/// non-positive values.
+const BLOCK_SIZE_MIN: i32 = 1;
+/// Maximum accepted `--block-size` — an allocation/typo guard (Ф2 allocates
+/// a corridor sized roughly `(coarse bbox) × block_size`), not a
+/// performance promise.
+const BLOCK_SIZE_MAX: i32 = 32;
+/// Minimum accepted `--seed-budget` / `--repair-budget`. `0` is accepted by
+/// `GenParams` but makes generation fail immediately — a CLI must not hand
+/// the user that footgun.
+const SEED_BUDGET_MIN: u32 = 1;
+/// Maximum accepted `--seed-budget` — 16× the heaviest measured
+/// configuration in this repo, an allocation/typo guard rather than a
+/// wall-clock promise.
+const SEED_BUDGET_MAX: u32 = 1024;
+/// Minimum accepted `--repair-budget`. See [`SEED_BUDGET_MIN`].
+const REPAIR_BUDGET_MIN: u32 = 1;
+/// Maximum accepted `--repair-budget`. See [`SEED_BUDGET_MAX`].
+const REPAIR_BUDGET_MAX: u32 = 1024;
+/// Default `--min-straight` — `gp-gen`'s own proven pair.
+const DEFAULT_MIN_STRAIGHT: i32 = 3;
+/// Default `--block-size` — `gp-gen`'s own proven pair.
+const DEFAULT_BLOCK_SIZE: i32 = 6;
+/// Default `--seed-budget` — `gp-gen`'s cheap always-on e2e case.
+const DEFAULT_SEED_BUDGET: u32 = 1;
+/// Default `--repair-budget` — `gp-gen`'s cheap always-on e2e case.
+const DEFAULT_REPAIR_BUDGET: u32 = 8;
 
 /// Parses `raw` case-insensitively against [`DIFFICULTY_LABELS`], so
 /// `gp-game` restates no difficulty spelling of its own.
@@ -99,6 +135,34 @@ struct Cli {
     /// Overrides the derived AI-inference seed.
     #[arg(long)]
     seed_ai_inference: Option<u64>,
+    /// Minimum straight run before a corner.
+    #[arg(
+        long,
+        default_value_t = DEFAULT_MIN_STRAIGHT,
+        value_parser = clap::value_parser!(i32).range(i64::from(MIN_STRAIGHT_MIN)..=i64::from(MIN_STRAIGHT_MAX)),
+    )]
+    min_straight: i32,
+    /// Coarse-block corridor width.
+    #[arg(
+        long,
+        default_value_t = DEFAULT_BLOCK_SIZE,
+        value_parser = clap::value_parser!(i32).range(i64::from(BLOCK_SIZE_MIN)..=i64::from(BLOCK_SIZE_MAX)),
+    )]
+    block_size: i32,
+    /// Maximum number of seeds to try before giving up on generation.
+    #[arg(
+        long,
+        default_value_t = DEFAULT_SEED_BUDGET,
+        value_parser = clap::value_parser!(u32).range(i64::from(SEED_BUDGET_MIN)..=i64::from(SEED_BUDGET_MAX)),
+    )]
+    seed_budget: u32,
+    /// Maximum number of local-repair iterations per seed.
+    #[arg(
+        long,
+        default_value_t = DEFAULT_REPAIR_BUDGET,
+        value_parser = clap::value_parser!(u32).range(i64::from(REPAIR_BUDGET_MIN)..=i64::from(REPAIR_BUDGET_MAX)),
+    )]
+    repair_budget: u32,
 }
 
 /// The validated game configuration assembled from [`Cli`] (issue #41).
@@ -110,24 +174,52 @@ pub(crate) struct GameConfig {
     /// The resolved per-source seeds — the master expanded via
     /// `Seeds::from_master`, with any supplied per-source override applied.
     pub(crate) seeds: Seeds,
+    /// `L_min` — minimum straight length before a corner.
+    pub(crate) min_straight: i32,
+    /// `k` — coarse-block size / nominal corridor width.
+    pub(crate) block_size: i32,
+    /// Outer-loop seed budget.
+    pub(crate) seed_budget: u32,
+    /// Inner-loop repair budget.
+    pub(crate) repair_budget: u32,
 }
 
 /// A `gp-game` config error — `clap`'s own diagnostics for tokenizing and
-/// per-flag ranges, plus (from subtask 5 on) the cross-field invariant.
+/// per-flag ranges, plus the cross-field invariant `block_size ≥
+/// ⌈cars/2⌉`.
 #[derive(Debug, Error)]
 pub(crate) enum ConfigError {
     /// A `clap` parsing/validation error (unknown flag, missing value,
     /// unparseable value, out-of-range value, unrecognised difficulty).
     #[error(transparent)]
     Cli(#[from] clap::Error),
+    /// `--block-size` is below the corridor-width floor `⌈cars/2⌉` implied
+    /// by `--cars` (AC5).
+    #[error(
+        "--block-size {block_size} is below the corridor-width floor \
+         ceil(cars/2) = {floor} implied by --cars {cars}"
+    )]
+    BlockSizeBelowWidthFloor {
+        /// The `--cars` value the floor was derived from.
+        cars: u32,
+        /// The rejected `--block-size` value.
+        block_size: i32,
+        /// The derived floor, `GenParams::min_width()`.
+        floor: u32,
+    },
 }
 
 impl ConfigError {
     /// Reports the error and exits the process non-zero — never returns.
-    /// `clap`-formatted for every variant reachable so far.
+    /// `clap`-formatted for every variant, including the cross-field one
+    /// (via `Cli::command().error(..)`, so its rendering matches `clap`'s
+    /// own diagnostics).
     pub(crate) fn exit(self) -> ! {
         match self {
             Self::Cli(err) => err.exit(),
+            other @ Self::BlockSizeBelowWidthFloor { .. } => Cli::command()
+                .error(clap::error::ErrorKind::ValueValidation, other.to_string())
+                .exit(),
         }
     }
 }
@@ -146,7 +238,11 @@ impl TryFrom<Cli> for GameConfig {
             ai_inference: cli.seed_ai_inference.unwrap_or(derived.ai_inference),
         };
 
-        Ok(Self {
+        // Build-then-validate (AC8 holds by construction): assemble the
+        // config first, then read the corridor-width floor off
+        // `to_gen_params().min_width()` — the object validated is the
+        // object handed to `gp-gen`, never a hand-rolled `⌈cars/2⌉`.
+        let config = Self {
             race: RaceConfig {
                 cars: cli.cars,
                 laps: cli.laps,
@@ -154,7 +250,26 @@ impl TryFrom<Cli> for GameConfig {
                 difficulty: cli.difficulty,
             },
             seeds,
-        })
+            min_straight: cli.min_straight,
+            block_size: cli.block_size,
+            seed_budget: cli.seed_budget,
+            repair_budget: cli.repair_budget,
+        };
+
+        let floor = config.to_gen_params().min_width();
+        // `config.block_size` is validated into `[1, 32]` by `clap`, so this
+        // total conversion always succeeds; a hypothetical failure compares
+        // as `0 < floor`, which rejects rather than silently accepts.
+        let block_size_u32 = u32::try_from(config.block_size).unwrap_or(0);
+        if block_size_u32 < floor {
+            return Err(ConfigError::BlockSizeBelowWidthFloor {
+                cars: config.race.cars,
+                block_size: config.block_size,
+                floor,
+            });
+        }
+
+        Ok(config)
     }
 }
 
@@ -173,6 +288,21 @@ impl GameConfig {
     /// but the form stays total rather than relying on that invariant.
     pub(crate) fn total_laps(self) -> i32 {
         i32::try_from(self.race.laps).unwrap_or(i32::MAX)
+    }
+
+    /// Maps this config onto a [`GenParams`], mapping `v_target` onto
+    /// `v_ceiling` (AC7). FORCED `const fn` — a pure struct literal over
+    /// `Copy` fields (`clippy::missing_const_for_fn`, nursery = deny).
+    pub(crate) const fn to_gen_params(self) -> GenParams {
+        GenParams {
+            cars: self.race.cars,
+            min_straight: self.min_straight,
+            v_ceiling: self.race.v_target,
+            block_size: self.block_size,
+            seeds: self.seeds,
+            seed_budget: self.seed_budget,
+            repair_budget: self.repair_budget,
+        }
     }
 }
 
@@ -199,10 +329,11 @@ pub(crate) fn render_startup_echo(config: &GameConfig) -> String {
         temp = config.temperature(),
         prec = TEMPERATURE_DECIMALS,
     );
-    // v2 (subtask 4): a standalone `Seeds` line — `Debug` cannot silently
-    // omit a field. Subtask 5 replaces this with the full `GenParams`
-    // `Debug` line, which nests the same `Seeds` fields.
-    format!("{player_line}\ngraphite-gp: {:?}", config.seeds)
+    // v3 (subtask 5): the full `GenParams` `Debug` line — carries all seven
+    // fields, including the four nested `Seeds` values. `Debug` cannot
+    // silently omit a field, and auto-follows the deferred
+    // `v_ceiling` -> `v_target` rename instead of drifting.
+    format!("{player_line}\ngraphite-gp: {:?}", config.to_gen_params())
 }
 
 #[cfg(test)]
@@ -225,10 +356,15 @@ mod tests {
         parse_from(full).expect_err("expected Err")
     }
 
-    /// Unwraps the `clap::error::ErrorKind` of a `ConfigError::Cli`.
+    /// Unwraps the `clap::error::ErrorKind` of a `ConfigError::Cli`. Panics
+    /// on the cross-field variant — no test in this module calls `kind` for
+    /// a case expected to produce it.
     fn kind(args: &[&str]) -> clap::error::ErrorKind {
         match parse_err(args) {
             ConfigError::Cli(err) => err.kind(),
+            other @ ConfigError::BlockSizeBelowWidthFloor { .. } => {
+                panic!("unexpected variant: {other:?}")
+            }
         }
     }
 
@@ -544,18 +680,281 @@ mod tests {
         assert_eq!(config.seeds.ai_inference, derived.ai_inference);
     }
 
-    // ---- AC16 (partial, subtask 3): the four player flags + version ----
+    // ---- AC16 (final, subtask 5): all thirteen flags + nine defaults ----
 
     #[test]
-    fn ac16_partial_help_and_version() {
-        use clap::CommandFactory;
+    fn ac16_help_lists_all_thirteen_flags_and_nine_defaults() {
         let help = Cli::command().render_long_help().to_string();
-        for flag in ["--cars", "--laps", "--difficulty", "--v-target"] {
+        for flag in [
+            "--cars",
+            "--laps",
+            "--difficulty",
+            "--v-target",
+            "--seed",
+            "--seed-collision",
+            "--seed-generation",
+            "--seed-ai-learning",
+            "--seed-ai-inference",
+            "--min-straight",
+            "--block-size",
+            "--seed-budget",
+            "--repair-budget",
+        ] {
             assert!(help.contains(flag), "{help}");
         }
+        assert_eq!(help.matches("[default: ").count(), 9, "{help}");
+    }
+
+    #[test]
+    fn ac16_version_reports_crate_version() {
         assert_eq!(
             Cli::command().get_version(),
             Some(env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    // ---- AC13 (final): tuning defaults ----
+
+    #[test]
+    fn ac13_tuning_defaults_match_documented_literals() {
+        assert_eq!(DEFAULT_MIN_STRAIGHT, 3);
+        assert_eq!(DEFAULT_BLOCK_SIZE, 6);
+        assert_eq!(DEFAULT_SEED_BUDGET, 1);
+        assert_eq!(DEFAULT_REPAIR_BUDGET, 8);
+        let config = parse(&[]);
+        assert_eq!(config.min_straight, DEFAULT_MIN_STRAIGHT);
+        assert_eq!(config.block_size, DEFAULT_BLOCK_SIZE);
+        assert_eq!(config.seed_budget, DEFAULT_SEED_BUDGET);
+        assert_eq!(config.repair_budget, DEFAULT_REPAIR_BUDGET);
+    }
+
+    // ---- AC3 (final): tuning flags round-trip ----
+
+    #[test]
+    fn ac3_tuning_flags_round_trip() {
+        let config = parse(&[
+            "--min-straight",
+            "5",
+            "--block-size",
+            "10",
+            "--seed-budget",
+            "3",
+            "--repair-budget",
+            "12",
+        ]);
+        assert_eq!(config.min_straight, 5);
+        assert_eq!(config.block_size, 10);
+        assert_eq!(config.seed_budget, 3);
+        assert_eq!(config.repair_budget, 12);
+    }
+
+    // ---- AC4: tuning-flag bounds, incl. min_straight 2/64 accept, 1/65 reject ----
+
+    #[test]
+    fn ac4_min_straight_bounds() {
+        assert_eq!(parse(&["--min-straight", "2"]).min_straight, 2);
+        assert_eq!(parse(&["--min-straight", "64"]).min_straight, 64);
+        assert_eq!(
+            kind(&["--min-straight", "1"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+        assert_eq!(
+            kind(&["--min-straight", "65"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn ac4_block_size_bounds() {
+        // Paired with --cars 2 so the cross-field floor is 1, keeping this
+        // a per-flag boundary test rather than a cross-field one.
+        assert_eq!(parse(&["--cars", "2", "--block-size", "1"]).block_size, 1);
+        assert_eq!(parse(&["--block-size", "32"]).block_size, 32);
+        assert_eq!(
+            kind(&["--block-size", "0"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+        assert_eq!(
+            kind(&["--block-size", "33"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn ac4_seed_budget_bounds() {
+        assert_eq!(parse(&["--seed-budget", "1"]).seed_budget, 1);
+        assert_eq!(parse(&["--seed-budget", "1024"]).seed_budget, 1024);
+        assert_eq!(
+            kind(&["--seed-budget", "0"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+        assert_eq!(
+            kind(&["--seed-budget", "1025"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn ac4_repair_budget_bounds() {
+        assert_eq!(parse(&["--repair-budget", "1"]).repair_budget, 1);
+        assert_eq!(parse(&["--repair-budget", "1024"]).repair_budget, 1024);
+        assert_eq!(
+            kind(&["--repair-budget", "0"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+        assert_eq!(
+            kind(&["--repair-budget", "1025"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    // ---- AC5: cross-field invariant ----
+
+    #[test]
+    fn ac5_block_size_below_width_floor_is_rejected() {
+        match parse_err(&["--cars", "6", "--block-size", "2"]) {
+            ConfigError::BlockSizeBelowWidthFloor {
+                cars,
+                block_size,
+                floor,
+            } => {
+                assert_eq!(cars, 6);
+                assert_eq!(block_size, 2);
+                assert_eq!(floor, 3);
+            }
+            other @ ConfigError::Cli(_) => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ac5_block_size_at_width_floor_is_accepted() {
+        assert_eq!(parse(&["--cars", "6", "--block-size", "3"]).block_size, 3);
+    }
+
+    // ---- AC6: cross-field error message names flag, values and domain ----
+
+    #[test]
+    fn ac6_cross_field_error_names_flags_and_values() {
+        let text = rendered(&["--cars", "6", "--block-size", "2"]);
+        assert!(text.contains("--block-size"), "{text}");
+        assert!(text.contains('2'), "{text}");
+        assert!(text.contains('3'), "{text}");
+        assert!(text.contains("--cars"), "{text}");
+        assert!(text.contains('6'), "{text}");
+    }
+
+    // ---- AC7: to_gen_params maps all seven fields ----
+
+    #[test]
+    fn ac7_to_gen_params_maps_all_seven_fields() {
+        let config = parse(&[
+            "--cars",
+            "6",
+            "--v-target",
+            "10",
+            "--min-straight",
+            "5",
+            "--block-size",
+            "10",
+            "--seed-budget",
+            "3",
+            "--repair-budget",
+            "12",
+            "--seed",
+            "42",
+        ]);
+        let params = config.to_gen_params();
+        assert_eq!(params.cars, 6);
+        assert_eq!(params.min_straight, 5);
+        assert_eq!(params.v_ceiling, 10);
+        assert_eq!(params.block_size, 10);
+        assert_eq!(params.seeds, config.seeds);
+        assert_eq!(params.seed_budget, 3);
+        assert_eq!(params.repair_budget, 12);
+    }
+
+    // ---- AC8: derived invariants over the whole accepted `cars` domain ----
+
+    #[test]
+    fn ac8_block_size_and_start_finish_width_hold_over_cars_domain() {
+        for cars in CARS_MIN..=CARS_MAX {
+            let params = parse(&["--cars", &cars.to_string()]).to_gen_params();
+            assert!(
+                u32::try_from(params.block_size).unwrap_or(0) >= params.min_width(),
+                "cars={cars}"
+            );
+            assert_eq!(params.start_finish_width(), cars);
+        }
+    }
+
+    // ---- AC18: the startup echo contains every resolved value ----
+
+    #[test]
+    fn ac18_echo_contains_every_resolved_value() {
+        let config = parse(&[
+            "--cars",
+            "6",
+            "--seed",
+            "12345",
+            "--seed-ai-learning",
+            "999",
+        ]);
+        let params = config.to_gen_params();
+        let rendered = render_startup_echo(&config);
+
+        assert!(
+            rendered.contains(&format!(
+                "temperature {:.*}",
+                TEMPERATURE_DECIMALS,
+                config.temperature()
+            )),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("cars: {}", params.cars)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("min_straight: {}", params.min_straight)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("v_ceiling: {}", params.v_ceiling)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("block_size: {}", params.block_size)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("seed_budget: {}", params.seed_budget)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("repair_budget: {}", params.repair_budget)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("collision: {}", params.seeds.collision)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("generation: {}", params.seeds.generation)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("ai_learning: {}", params.seeds.ai_learning)),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(&format!("ai_inference: {}", params.seeds.ai_inference)),
+            "{rendered}"
+        );
+
+        // Negative control (design § AC18): the player line alone does not
+        // satisfy the `GenParams`-half needles.
+        let player_line = rendered.lines().next().expect("player line present");
+        assert!(!player_line.contains("min_straight: "), "{player_line}");
+        assert!(!player_line.contains("collision: "), "{player_line}");
     }
 }
