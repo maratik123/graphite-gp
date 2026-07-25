@@ -167,10 +167,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # Miri is a real branch-protection gate (#76): the `miri-pass` aggregator
-    # below (context `Miri`) is required by `main-protection`, so a red Miri
-    # fails this job → the run → the aggregator, blocking merge. No
-    # `continue-on-error` — a red Miri must turn the run red, not just the check.
+    # No `continue-on-error` (#76) — a red Miri must turn the run red, not just
+    # the check: it fails this job → the run → the `miri-pass` aggregator below
+    # (context `Miri`). That context is deliberately NOT required by
+    # `main-protection` while Miri's wall-clock is long (pending #134 for gp-gen
+    # plus per-crate tuning), so a red Miri is a regression to fix, not a merge
+    # block. Restore `Miri` to the required set once those land.
     env:
       # `-Zmiri-tree-borrows`: aliasing model per design.
       MIRIFLAGS: -Zmiri-tree-borrows
@@ -236,10 +238,13 @@ jobs:
           r="${{ needs.docs.result }}"
           if [[ "$c" != "success" ]] || [[ "$r" != "success" && "$r" != "skipped" ]]; then exit 1; fi
 
-  # Required branch-protection context `Miri` (#76). Mirrors build/test/clippy/
+  # Aggregator producing the `Miri` context (#76). Mirrors build/test/clippy/
   # docs-pass: an `if: always()` aggregator so a path-filtered `skipped` Miri
-  # passes, but a red `miri` job blocks merge. Required context points here, not
-  # at the raw `if:`-filtered `miri` job.
+  # passes, while a red `miri` job reddens this too. Unlike its siblings, `Miri`
+  # is deliberately NOT in `main-protection`'s required set while Miri's
+  # wall-clock is long (pending #134) — so a red Miri is a regression to fix,
+  # not a merge block. If it is ever restored to the required set, the context
+  # to require is this aggregator, not the raw `if:`-filtered `miri` job.
   miri-pass:
     name: Miri
     needs: [changes, miri]

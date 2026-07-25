@@ -177,7 +177,9 @@ cargo test             # 709 workspace tests green (150 gp-core; 248 gp-render: 
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
 test, clippy (`-D warnings`), and docs on every push/PR to `main`, plus a
-required Miri lane (Tree Borrows, gated via the `miri-pass` aggregator, #76);
+a Miri lane (Tree Borrows, gated via the `miri-pass` aggregator, #76 — reported,
+but deliberately not a required context while its wall-clock is long, pending
+#134);
 the workspace lint policy (`clippy::pedantic`/`nursery` =
 `deny`) lives in the root `Cargo.toml` + `clippy.toml` (see
 [`ai-docs/code-style.md`](ai-docs/code-style.md) § Linter posture).
