@@ -119,6 +119,7 @@
       "Bash(grep *)",
       "Bash(rg *)",
       "Bash(jq *)",
+      "Bash(shellcheck *)",
       "Bash(awk *)",
       "Bash(sort *)",
       "Bash(wc *)"
