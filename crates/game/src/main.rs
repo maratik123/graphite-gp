@@ -11,10 +11,11 @@
 //!
 //! Wires `gp_render::AppShell` (issue #23) as the app's `eframe::App`, driven
 //! by a **hand-built fixture** `TrackArtifact` + fixture cars/standings/
-//! summary/phases — `gp_gen::generate` is an unimplemented `todo!()` stub
-//! (`crates/gen/src/lib.rs`) that would panic at startup, so this binary
-//! constructs the fixture directly from `gp_core::geom::{Corridor,
-//! walls_from_boundary}` instead (design `2026-07-22-render-app-shell` §
+//! summary/phases. `gp_gen::generate` is **implemented** (issue #34), but
+//! calling it — and threading its `TrackArtifact` through the shell — is
+//! issue #43's scope, not this binary's yet; so for now it constructs the
+//! fixture directly from `gp_core::geom::{Corridor,
+//! walls_from_boundary}` (design `2026-07-22-render-app-shell` §
 //! *The binary hand-builds the fixture track*), mirroring the render-safe
 //! pattern `gp-render`'s own `track/mod.rs::fixture_track_with_metrics` test
 //! fixture already exercises. The fixture car/track set is fixed at 4 cars
