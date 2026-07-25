@@ -120,6 +120,7 @@
       "Bash(rg *)",
       "Bash(jq *)",
       "Bash(shellcheck *)",
+      "Bash(actionlint *)",
       "Bash(awk *)",
       "Bash(sort *)",
       "Bash(wc *)"
