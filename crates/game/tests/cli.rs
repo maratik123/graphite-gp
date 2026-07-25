@@ -1,9 +1,15 @@
 //! Process-level exit-contract tests for the `graphite-gp` binary (issue
 //! #41, AC15/AC16). Spawns the built binary via
-//! `env!("CARGO_BIN_EXE_graphite-gp")` — the only reach a `gp-game` test
-//! needs beyond the in-crate `cargo test` coverage in `config/`, since a
-//! `gp-game` lib target buys nothing else (design § *Resolved spec
-//! hand-offs* #1). All three tests terminate before `eframe::run_native` is
+//! `env!("CARGO_BIN_EXE_graphite-gp")` — the only reach a `crates/game/tests/`
+//! integration test needs beyond `main.rs`'s own in-bin `#[cfg(test)]`
+//! coverage (`config/`) and, as of the `gp-game` controller abstraction
+//! (design `2026-07-25-game-controller-player` § *Q4*), the crate's `src/lib.rs`
+//! target's own in-crate tests (`controller/{mod,keys,player}.rs`).
+//! `crates/game/tests/*.rs` files are **integration** tests — a separate
+//! compiled crate per file — so they cannot `use` either the bin's or the
+//! lib's private items regardless of which targets exist; only a
+//! process-level spawn like this file's reaches the binary's exit-code
+//! contract. All three tests terminate before `eframe::run_native` is
 //! called, so none opens a window.
 
 use std::process::Command;

@@ -1756,7 +1756,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eframe",
- "gp-ai",
  "gp-core",
  "gp-gen",
  "gp-render",

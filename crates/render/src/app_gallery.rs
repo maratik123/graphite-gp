@@ -196,9 +196,12 @@ mod tests {
         render_shell_golden, shell_session,
     };
     use crate::BakedTrackGeometry;
-    use crate::app::{AppShell, Nav, Screen};
+    use crate::app::{AppShell, Nav, Screen, TOP_BAR_H};
+    use crate::screens::race::{RaceInput, RaceScreen, active_legal_mask};
+    use crate::{Overlays, Scene};
     use egui::epaint::Primitive;
     use gp_core::geom::Point;
+    use gp_core::sim::Action;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -421,5 +424,204 @@ mod tests {
         let rect = advance(&mut harness);
         click(&mut harness, rect);
         assert_eq!(latest_screen.get(), Screen::Setup, "Menu -> Setup");
+    }
+
+    /// AC10 — a `MovePad` centre click reaches `ShellResponse.action`
+    /// (design § *Q3* — the two-`egui::Context` layout probe). Drives the
+    /// real [`AppShell::show`] to [`Screen::Race`], captures the rest
+    /// frame's `ui.max_rect()`, re-derives the body rect from
+    /// [`crate::app::TOP_BAR_H`] (the shell's own const — no layout
+    /// constant duplicated), and draws the **real** [`RaceScreen`] under
+    /// that rect in a fresh `egui::Context` to read the production
+    /// `movepad_response.rect`. Clicking that rect's centre on the
+    /// original harness selects the pad's `(1,1)` cell — `Action::Coast`
+    /// (`movepad.rs::MOVES[0]`) — and the assertion is that
+    /// `ShellResponse.action` carries it.
+    ///
+    /// Miri-ignored for the same *own cause* as
+    /// [`click_through_setup_to_menu`]: `Harness::builder()`'s `getcwd`,
+    /// not the golden's Vulkan-`dlopen` (no `render()` here).
+    #[cfg_attr(
+        miri,
+        ignore = "Harness::builder() calls getcwd via egui_kittest's kittest.toml \
+                  lookup, unsupported under Miri isolation (no render() here, so \
+                  not the golden's Vulkan-dlopen cause)"
+    )]
+    #[test]
+    fn shell_race_arm_forwards_movepad_action() {
+        let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
+        let standings = fixture_standings();
+        let trails: [[Point; 2]; 4] = [
+            [Point::new(8, 3), Point::new(9, 3)],
+            [Point::new(8, 3), Point::new(8, 4)],
+            [Point::new(13, 4), Point::new(13, 3)],
+            [Point::new(10, 5), Point::new(11, 5)],
+        ];
+        let cars = fixture_race_cars(&trails);
+
+        // Precondition guard: a fixture drift that leaves Coast illegal for
+        // car 0 must fail loudly here, not as a mysterious `None` below.
+        assert!(
+            active_legal_mask(&track, &cars, 0).contains(Action::Coast),
+            "fixture car 0's legal mask must include Coast for the pad-centre \
+             click to select it"
+        );
+
+        let mut shell = AppShell::new(FIXED_CONFIG);
+        shell.apply(Nav::Generate);
+        shell.apply(Nav::TestLap);
+        assert_eq!(
+            shell.screen(),
+            Screen::Race,
+            "Generate -> Lab -> TestLap -> Race"
+        );
+
+        let latest_rect: Rc<Cell<Option<egui::Rect>>> = Rc::new(Cell::new(None));
+        let latest_action: Rc<Cell<Option<Action>>> = Rc::new(Cell::new(None));
+        let latest_rect_c = Rc::clone(&latest_rect);
+        let latest_action_c = Rc::clone(&latest_action);
+
+        let mut fonts_installed = false;
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(CANVAS_SIZE)
+            .build_ui(move |ui| {
+                if !fonts_installed {
+                    ui.ctx().set_fonts(crate::fonts::definitions());
+                    fonts_installed = true;
+                    return;
+                }
+                latest_rect_c.set(Some(ui.max_rect()));
+                let session = shell_session(&track, &geometry, &cars, &standings);
+                let resp = shell.show(ui, session);
+                // Latched, not overwritten: `clicked()` is level-triggered
+                // for exactly one frame, and `Harness::step()` draws further
+                // settling frames afterward that would otherwise wipe the
+                // captured `Some` back to `None` (mirrors
+                // `race_gallery.rs::race_screen_coast_and_movepad_emit_action`'s
+                // idiom).
+                if let Some(action) = resp.action {
+                    latest_action_c.set(Some(action));
+                }
+            });
+
+        harness.run_steps(1); // fonts
+        harness.run_steps(1); // first real draw (rest frame)
+        assert_eq!(
+            latest_action.get(),
+            None,
+            "the rest frame must not select an action"
+        );
+
+        let full = latest_rect
+            .get()
+            .expect("rest frame captured the shell's max_rect");
+        let body_rect = egui::Rect::from_min_max(
+            egui::Pos2::new(full.min.x, full.min.y + TOP_BAR_H),
+            full.max,
+        );
+
+        // Re-fetch the fixtures — the harness closure above moved its own
+        // copies.
+        let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
+        let cars = fixture_race_cars(&trails);
+
+        let probe_ctx = egui::Context::default();
+        probe_ctx.set_fonts(crate::fonts::definitions());
+        let probe_input = egui::RawInput {
+            screen_rect: Some(full),
+            ..Default::default()
+        };
+        let movepad_rect: Rc<Cell<Option<egui::Rect>>> = Rc::new(Cell::new(None));
+        let movepad_rect_c = Rc::clone(&movepad_rect);
+        let _ = probe_ctx.run_ui(probe_input, |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
+                let input = RaceInput {
+                    scene: Scene {
+                        track: &track,
+                        geometry: &geometry,
+                        cars: &cars,
+                        reduced_motion: false,
+                        overlays: Overlays::default(),
+                    },
+                    active: 0,
+                    laps_done: 0,
+                    total_laps: 1,
+                };
+                let resp = RaceScreen::new(input).show(ui);
+                movepad_rect_c.set(Some(resp.movepad_response.rect));
+            });
+        });
+        let pad_rect = movepad_rect
+            .get()
+            .expect("probe pass captured the MovePad's rect");
+
+        let center = pad_rect.center();
+        harness.hover_at(center);
+        harness.step();
+        harness.drag_at(center);
+        harness.step();
+        harness.drop_at(center);
+        harness.step();
+
+        assert_eq!(latest_action.get(), Some(Action::Coast));
+    }
+
+    /// AC10's other half — a non-`Race` screen never carries an action.
+    /// Checked on a fresh `Setup` shell and again after `Nav::Generate`
+    /// (`Screen::Lab`). Same Miri cause as
+    /// [`shell_race_arm_forwards_movepad_action`].
+    #[cfg_attr(
+        miri,
+        ignore = "Harness::builder() calls getcwd via egui_kittest's kittest.toml \
+                  lookup, unsupported under Miri isolation (no render() here, so \
+                  not the golden's Vulkan-dlopen cause)"
+    )]
+    #[test]
+    fn shell_non_race_screen_yields_no_action() {
+        fn assert_no_action(shell: AppShell, expected_screen: Screen) {
+            let track = fixture_track();
+            let geometry = BakedTrackGeometry::new(&track);
+            let standings = fixture_standings();
+
+            let latest_screen: Rc<Cell<Option<Screen>>> = Rc::new(Cell::new(None));
+            let latest_action: Rc<Cell<Option<Action>>> = Rc::new(Cell::new(None));
+            let latest_screen_c = Rc::clone(&latest_screen);
+            let latest_action_c = Rc::clone(&latest_action);
+
+            let mut shell = shell;
+            let mut fonts_installed = false;
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size(CANVAS_SIZE)
+                .build_ui(move |ui| {
+                    if !fonts_installed {
+                        ui.ctx().set_fonts(crate::fonts::definitions());
+                        fonts_installed = true;
+                        return;
+                    }
+                    let session = shell_session(&track, &geometry, &[], &standings);
+                    let resp = shell.show(ui, session);
+                    latest_screen_c.set(Some(resp.screen));
+                    // Latch, mirroring the positive test: a settling frame
+                    // would otherwise wipe a transient `Some` back to `None`
+                    // and let this assertion pass vacuously.
+                    if let Some(action) = resp.action {
+                        latest_action_c.set(Some(action));
+                    }
+                });
+
+            harness.run_steps(2);
+
+            assert_eq!(latest_screen.get(), Some(expected_screen));
+            assert_eq!(latest_action.get(), None);
+        }
+
+        let mut shell = AppShell::new(FIXED_CONFIG);
+        assert_no_action(shell, Screen::Setup);
+
+        shell.apply(Nav::Generate);
+        assert_eq!(shell.screen(), Screen::Lab, "Generate -> Lab");
+        assert_no_action(shell, Screen::Lab);
     }
 }
