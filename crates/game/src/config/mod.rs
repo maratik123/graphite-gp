@@ -497,17 +497,12 @@ mod tests {
 
     #[test]
     fn total_laps_returns_parsed_laps_as_i32() {
-        assert_eq!(
-            parse(&[]).total_laps(),
-            i32::try_from(DEFAULT_LAPS).unwrap()
-        );
-        assert_eq!(
-            parse(&["--laps", &LAPS_MIN.to_string()]).total_laps(),
-            i32::try_from(LAPS_MIN).unwrap()
-        );
-        assert_eq!(
-            parse(&["--laps", &LAPS_MAX.to_string()]).total_laps(),
-            i32::try_from(LAPS_MAX).unwrap()
-        );
+        // Asserted against `i32` LITERALS, not `i32::try_from(DEFAULT_LAPS)`:
+        // re-deriving the expectation through the same conversion
+        // `total_laps` performs would let a conversion bug cancel out on both
+        // sides. The literals match AC13's documented defaults/bounds.
+        assert_eq!(parse(&[]).total_laps(), 5);
+        assert_eq!(parse(&["--laps", "1"]).total_laps(), 1);
+        assert_eq!(parse(&["--laps", "9"]).total_laps(), 9);
     }
 }

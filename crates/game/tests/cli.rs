@@ -1,10 +1,10 @@
 //! Process-level exit-contract tests for the `graphite-gp` binary (issue
 //! #41, AC15/AC16). Spawns the built binary via
 //! `env!("CARGO_BIN_EXE_graphite-gp")` — the only reach a `gp-game` test
-//! needs beyond the in-crate `cargo test` coverage in `config.rs`, since a
+//! needs beyond the in-crate `cargo test` coverage in `config/`, since a
 //! `gp-game` lib target buys nothing else (design § *Resolved spec
-//! hand-offs* #1). Both tests terminate before `eframe::run_native` is
-//! called, so neither opens a window.
+//! hand-offs* #1). All three tests terminate before `eframe::run_native` is
+//! called, so none opens a window.
 
 use std::process::Command;
 
@@ -50,7 +50,9 @@ fn cross_field_block_size_below_floor_exits_nonzero_with_values_in_stderr() {
         .args(["--cars", "6", "--block-size", "2"])
         .output()
         .expect("failed to spawn the built graphite-gp binary");
-    assert_ne!(output.status.code(), Some(0));
+    // `Some(2)`, not `assert_ne!(.., Some(0))` — measured, and it gives
+    // sibling parity with the clap-sourced case above.
+    assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--block-size 2"), "{stderr}");
     assert!(stderr.contains("= 3"), "{stderr}");
