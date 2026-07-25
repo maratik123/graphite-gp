@@ -19,6 +19,8 @@ gp-core = { workspace = true }
 gp-gen = { workspace = true }
 gp-render = { workspace = true }
 gp-ai = { workspace = true }
+clap = { workspace = true }
+thiserror = { workspace = true }
 eframe = { workspace = true }
 # `winit` is never `use`d in this crate. It exists solely to carry Cargo
 # features to the single shared winit package via feature unification:

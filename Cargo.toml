@@ -31,6 +31,7 @@ gp-core = { path = "crates/core" }
 gp-gen = { path = "crates/gen" }
 gp-render = { path = "crates/render" }
 gp-ai = { path = "crates/ai" }
+clap = { version = "4", features = ["derive"] }
 thiserror = "2"
 strum = { version = "0.28", features = ["derive"] }
 enum-map = "3"

@@ -11,13 +11,17 @@
 //!
 //! Wires `gp_render::AppShell` (issue #23) as the app's `eframe::App`, driven
 //! by a **hand-built fixture** `TrackArtifact` + fixture cars/standings/
-//! summary/phases — `gp_gen::generate` is an unimplemented `todo!()` stub
-//! (`crates/gen/src/lib.rs`) that would panic at startup, so this binary
-//! constructs the fixture directly from `gp_core::geom::{Corridor,
-//! walls_from_boundary}` instead (design `2026-07-22-render-app-shell` §
+//! summary/phases. `gp_gen::generate` is **implemented** (issue #34), but
+//! calling it — and threading its `TrackArtifact` through the shell — is
+//! issue #43's scope, not this binary's yet; so for now it constructs the
+//! fixture directly from `gp_core::geom::{Corridor,
+//! walls_from_boundary}` (design `2026-07-22-render-app-shell` §
 //! *The binary hand-builds the fixture track*), mirroring the render-safe
 //! pattern `gp-render`'s own `track/mod.rs::fixture_track_with_metrics` test
-//! fixture already exercises. Real generation → sim → AI orchestration is
+//! fixture already exercises. The fixture car/track set is fixed at 4 cars
+//! **regardless of `--cars`** until #43 wires real generation — a CLI value
+//! above the fixture count is a known, visible inconsistency until then
+//! (issue #41 spec § Risks). Real generation → sim → AI orchestration is
 //! block 3b's own future work (spec § Deferred).
 
 use eframe::egui;
@@ -26,24 +30,19 @@ use gp_core::sim::CarState;
 use gp_core::track::{
     Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackArtifact, TrackMetrics,
 };
-use gp_render::screens::{Difficulty, PhaseStatus, RaceConfig, RaceSummary, StandingEntry};
+use gp_render::screens::{PhaseStatus, RaceSummary, StandingEntry};
 use gp_render::widgets::CarKind;
 use gp_render::{AppShell, BakedTrackGeometry, CarRender, ShellSession};
+use std::io::Write;
 
-/// The mock's startup config default (`App.jsx`'s `useState` seed —
-/// `docs/design-system/ui_kits/game/App.jsx`).
-const STARTUP_CONFIG: RaceConfig = RaceConfig {
-    cars: 4,
-    laps: 5,
-    v_target: 7,
-    difficulty: Difficulty::Pro,
-};
+mod config;
 
 /// The fixture header `seed <N>` `LabScreen` displays.
 const FIXTURE_SEED: i32 = 7;
 
 /// The fixture cars' names/colors follow `gp_render::screens::race::CAR_NAMES`
-/// order; only the first 4 are used (`STARTUP_CONFIG.cars`).
+/// order; only the first 4 are used, regardless of `--cars`, until #43 wires
+/// real generation.
 const FIXTURE_CAR_COUNT: usize = 4;
 
 /// The app shell, driven by a hand-built fixture session (spec § Key
@@ -70,18 +69,21 @@ struct GraphiteGpApp {
     standings: Vec<StandingEntry>,
     /// The fixture race summary `ResultsScreen` displays.
     summary: RaceSummary,
+    /// The validated lap count, computed once from `config` in [`Self::new`].
+    total_laps: i32,
 }
 
 impl GraphiteGpApp {
-    /// Builds the app shell over the hand-built fixture session data.
-    fn new() -> Self {
+    /// Builds the app shell over the hand-built fixture session data, seeded
+    /// by the CLI-derived `config` (issue #41).
+    fn new(config: config::GameConfig) -> Self {
         let track = fixture_track();
         let geometry = BakedTrackGeometry::new(&track);
         let (car_states, trails) = fixture_cars();
         let standings = fixture_standings();
 
         Self {
-            shell: AppShell::new(STARTUP_CONFIG),
+            shell: AppShell::new(config.race),
             track,
             geometry,
             car_states,
@@ -93,6 +95,7 @@ impl GraphiteGpApp {
                 tempo: 0.87,
                 crashes: 0,
             },
+            total_laps: config.total_laps(),
         }
     }
 }
@@ -116,8 +119,7 @@ impl eframe::App for GraphiteGpApp {
             reduced_motion: false,
             active: 0,
             laps_done: 0,
-            total_laps: i32::try_from(STARTUP_CONFIG.laps)
-                .expect("STARTUP_CONFIG.laps is a small const literal — always fits i32"),
+            total_laps: self.total_laps,
             phases: self.phases,
             valid: true,
             seed: FIXTURE_SEED,
@@ -266,16 +268,33 @@ fn fixture_standings() -> Vec<StandingEntry> {
     FIXTURE_STANDINGS.to_vec()
 }
 
-/// Open the window and run the app shell.
+/// Parses CLI arguments, opens the window and runs the app shell.
+///
+/// An invalid argument reports the error and exits non-zero **before** the
+/// window opens (AC15) — `ConfigError::exit` never returns. On the success
+/// path, the resolved configuration is echoed to stdout (AC18) before
+/// [`eframe::run_native`] is called.
 ///
 /// # Errors
 /// Returns [`eframe::Error`] if the native window/graphics context fails to
 /// initialize (e.g. no compatible Vulkan/GL adapter).
 fn main() -> eframe::Result {
+    let config = match config::parse_from(std::env::args_os()) {
+        Ok(config) => config,
+        Err(err) => err.exit(),
+    };
+    // `let _ = writeln!`, not `println!` — `println!` panics on a broken
+    // pipe, which would be a new production panic path (AC14 in spirit).
+    let _ = writeln!(
+        std::io::stdout(),
+        "{}",
+        config::render_startup_echo(&config)
+    );
+
     eframe::run_native(
         "graphite-gp",
         eframe::NativeOptions::default(),
-        Box::new(|creation_context| {
+        Box::new(move |creation_context| {
             creation_context
                 .egui_ctx
                 .set_fonts(gp_render::fonts::definitions());
@@ -286,7 +305,7 @@ fn main() -> eframe::Result {
             creation_context
                 .egui_ctx
                 .set_visuals(egui::Visuals::light());
-            Ok(Box::new(GraphiteGpApp::new()))
+            Ok(Box::new(GraphiteGpApp::new(config)))
         }),
     )
 }

@@ -408,3 +408,9 @@ Append-only correction/validation log — the feed for `/improve`. See AGENTS.md
 
 **Kind:** correction
 **Escalated?** no
+
+### 2026-07-25 — tooling — ran the workspace Miri gate locally during /task Step 8 with no strong requirement
+**What happened:** Spawning the Group A `code-writer` for #41, I instructed it to "reproduce with the workspace command CI runs — `MIRIFLAGS=-Zmiri-tree-borrows cargo +nightly miri test --workspace --exclude gp-gen`" as part of subtask 6, and the design doc's subtask-6 text called for the same. Subtask 6 had already added `#[cfg_attr(miri, ignore = "...")]` to both new tests, so the local run could only ever confirm a skip. With a fresh `clap` dependency edge just landed, Miri had to rebuild the workspace under the interpreter; the subagent backgrounded the run and sat waiting, producing no file writes and no live `cargo`/`rustc`/`miri` process for ~11 minutes. The user read it as a stuck subagent and then directed: don't run Miri locally without a strong requirement — leave it to CI.
+**Rule:** Do NOT run the workspace Miri gate locally as routine Step-8 per-subtask verification, and do not write such a step into a design doc. Miri is CI-enforced (the `miri-pass` aggregator is a required branch-protection context) and CI is where the routine run belongs. Local Miri needs a STRONG, named reason — diagnosing an already-red Miri run, or checking whether a test genuinely ABORTS the interpreter (as opposed to merely costing wall-clock) before choosing its `#[cfg_attr(miri, ignore)]` reason. What is dropped is the local reproduction, NOT the gating requirement: adding `#[cfg_attr(miri, ignore = "<why>")]` per-test in the same commit stays mandatory. Corollary for orchestrators: when a long build IS warranted, expect the first Miri build after any new dependency edge to be very slow, and say so up front — otherwise silence with no live process looks identical to a hang.
+**Kind:** correction
+**Escalated?** no
