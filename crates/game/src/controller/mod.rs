@@ -13,6 +13,8 @@
 use gp_core::sim::{Action, BitFlags, CarState};
 use gp_core::track::TrackArtifact;
 
+pub mod keys;
+
 /// One frame's input candidates.
 ///
 /// From the two sources a player seat reads (spec Scope 2/3): the on-screen
@@ -28,8 +30,8 @@ pub struct FrameInput {
     /// `legal`: the shell's "Coast (·)" button is built unconditionally and
     /// can carry an action outside the legal mask.
     pub shell_action: Option<Action>,
-    /// The action, if any, the keyboard read (`controller::keys::keyboard_action`)
-    /// selected this frame.
+    /// The action, if any, the keyboard read
+    /// ([`keys::keyboard_action`]) selected this frame.
     pub key_action: Option<Action>,
 }
 
