@@ -177,6 +177,8 @@ Run the full 11-step verify list in `reference.md` § Step 9 — verify list (fu
 
 Update content files only — **do not move spec/design to `done/` yet** (that happens at Step 12). Append this task's per-issue implementation-status entry to `ai-docs/context-status.md` (the detailed log), bump the affected block's summary bullet + resolve open questions in `ai-docs/context.md` (thin orientation page — keep it under the size cap), and update `README.md` (status table for newly implemented crates). Full detail: `reference.md` § Step 9.5 — documentation update (detail).
 
+**Every number and every `file:line` you write here is a measurement, not a recollection.** A test count, a crate tally, a panic-index / unsafe-index row locator, a "N sites" figure — re-derive each one **in this turn, after the last edit**, with the command that produces it (`cargo test -p <crate> --lib` for a per-crate count; the locator `rg` re-run after the final `cargo fmt`). **NEVER** transcribe a figure from a subagent's return summary — it is a claim (AGENTS.md § *Workflow*), and a `code-writer` has already reported one crate's count for another's. If a new figure contradicts an existing durable baseline (README's test line, a panic-index row), the resolution is a **fresh measurement**, never picking one of the two.
+
 **Write progress at this step boundary** before further tool calls: rewrite `**current_step:**` to `Step 9.5 — docs updated`; append a `## Decisions log` bullet recording any open questions resolved in `context.md` (one line, prefixed `Step 9.5:`; omit if none).
 
 Then proceed to Step 10.
@@ -233,6 +235,27 @@ After all findings are resolved, run gates (`cargo build`, `cargo test`, `cargo 
 After the PR is created, the unconditional PR-body re-read rule (AGENTS.md *Workflow*) applies to any subsequent push on this branch: `gh pr view <N>` first, then `gh pr edit` only if the body now contradicts the diff.
 
 **Reviewer comments arrive after Step 12** — run `/pr-commented` (one round per invocation, re-invocable). Do not re-enter `/task` for routine reviewer feedback; architectural-rework requests are the exception (`/pr-commented` bails → fresh `/task` design-review cycle).
+
+---
+
+## Patterns
+
+### 1. Step 9's per-AC sweep is load-bearing, not ceremonial
+
+*Prefer* running **each measurable AC's own command over the AC's own stated scope**,
+and treating that result as authoritative. Two upstream readings do **not** override it:
+`design-review`'s narrower operative reading of an AC (an AC saying "anywhere in
+`crates/`, grep-clean" binds every subtask, including one a later design section adds for
+a *different* AC's traceability), and a delegate's "flagged, left as-is per the design".
+
+*Default to* **building** missing coverage over recording a PARTIAL. When a delegate
+waves a clause through as "untestable on the fixture I used", check whether the coverage
+is genuinely unachievable or just needs a purpose-built fixture — the delegate's local
+fixture choice can silently narrow coverage below the approved spec.
+
+Validated by [`ai-docs/learnings.md`](../../../ai-docs/learnings.md) 2026-07-23
+(AC7 long-straight fixture) and 2026-07-24 (AC11 whole-`crates/` grep-clean past a
+design-review GO). The delegate-skepticism half also lives in AGENTS.md § *Patterns* 1.
 
 ---
 

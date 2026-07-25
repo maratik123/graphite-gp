@@ -147,7 +147,7 @@ After edits:
 4. **Cross-reference re-verification (anchor-aware)** — see [`reference.md` § Step 2.6 sub-step 4 — Cross-reference re-verification (anchor-aware)](reference.md#step-26-sub-step-4--cross-reference-re-verification-anchor-aware) for the verbatim bash recipe. Use it rather than naive `realpath -m` (which mistakes `#anchor` for part of the path) over every relative link the audit touched in any `.claude/agents/*.md` or `.claude/skills/**/SKILL.md`.
 
 5. **Script verification (when checklist K extracted any `scripts/*.sh`).** For every script the audit added or modified:
-   - **`shellcheck`** the script if `shellcheck` is on `$PATH`; flag warnings/errors as `minor` post-extraction findings.
+   - **`shellcheck`** the script if `shellcheck` is on `$PATH`; flag warnings/errors as `minor` post-extraction findings. **Inlined hook bodies count too** — a `bash -c` program in `.claude/settings.json` is a script that no other gate lints; extract each with `jq` and `shellcheck -s bash` it whenever the audit touched a hook. Recipe: [`ai-docs/hook-verification.md`](../../../ai-docs/hook-verification.md).
    - Confirm executable bit (`-rwx------` or broader). If `chmod +x` was forgotten, the script will fail at invocation time with `Permission denied`.
    - **Smoke-test the documented no-op path** when feasible: most extracted scripts have a documented exit-0 case (missing input, no-op match). Invoke against that input and verify expected exit code + status message (e.g., `cleanup-progress.sh nonexistent-branch-xyz` should print `pr-merged: no merged PR found for nonexistent-branch-xyz` and exit 0).
 

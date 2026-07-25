@@ -167,10 +167,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # Miri is a real branch-protection gate (#76): the `miri-pass` aggregator
-    # below (context `Miri`) is required by `main-protection`, so a red Miri
-    # fails this job → the run → the aggregator, blocking merge. No
-    # `continue-on-error` — a red Miri must turn the run red, not just the check.
+    # No `continue-on-error` (#76) — a red Miri must turn the run red, not just
+    # the check: it fails this job → the run → the `miri-pass` aggregator below
+    # (context `Miri`). That context is deliberately NOT required by
+    # `main-protection` while Miri's wall-clock is long (pending #134 for gp-gen
+    # plus per-crate tuning), so a red Miri is a regression to fix, not a merge
+    # block. Restore `Miri` to the required set once those land.
     env:
       # `-Zmiri-tree-borrows`: aliasing model per design.
       MIRIFLAGS: -Zmiri-tree-borrows

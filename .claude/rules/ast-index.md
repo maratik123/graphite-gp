@@ -11,6 +11,24 @@
    - Searching for string literals inside code (`"some text"`)
    - Searching in comments content
 
+## Negative results are NOT evidence
+
+A search that comes back **empty or short** for a construct that SHOULD exist is a
+**search-method failure first, code-absence second.** Never conclude "X does not
+exist" from a miss — re-run with a different method, or read the region.
+
+| Cause of the false negative | Fix |
+|---|---|
+| Multi-line construct (rustfmt-split `#[cfg_attr(\n    miri, …)]`, `assert!(matches!` with a message, wrapped macro call) | `rg -U` (multiline), or read the region |
+| Hand-rolled identifier class — `[a-z_]*` excludes digits, and Rust `snake_case` routinely carries them (`ac7_…`, `p0_at_v1`, `to_u32`) | `[A-Za-z0-9_]+`, or `ast-index symbol` / `ast-index outline`, which needs no hand-written pattern |
+| Wrong crate version / wrong path on disk; aliased or rewritten output | Read the actual source file |
+
+**MUST — a claim that an API, symbol, flag, or precedent does NOT exist requires a
+raw read of the source (or offline rustdoc), never a search tool's silence.** This
+binds `[measured:]` tags in a design doc especially: a `[measured:]` negative backed
+by a grep miss is untagged. Prescribing a *replacement* off such a negative
+compounds it by inventing a second nonexistent symbol.
+
 ## Why ast-index
 
 ast-index is 17-69x faster than grep (1-10ms vs 200ms-3s) and returns structured, accurate results.

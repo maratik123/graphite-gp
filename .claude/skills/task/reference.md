@@ -203,7 +203,7 @@ Verify both spec and design (with GO verdict) exist AND that **every note / mino
 6. **actionlint gate** — if this task created or modified any `.github/workflows/*.yml` file, run `actionlint <file>` (or pass every changed workflow file in one invocation) and require a clean pass. Skip the gate only when no workflow file was touched. See AGENTS.md *Build & Test → Workflow files*.
 7. **Panic-index sync** — see `## Step 9 — panic-index sync (detail)` below.
 8. **Unsafe-index sync** — see `## Step 9 — unsafe-index sync (detail)` below.
-9. For each AC — confirm covered by test or manual verification.
+9. For each AC — confirm covered by test or manual verification. For a **measurable** AC (one naming a command or a scope), run **that AC's own command over that AC's own stated scope** and treat the result as authoritative — not `design-review`'s operative reading, not a delegate's "flagged, left as-is". See § *Patterns* 1 in [`SKILL.md`](SKILL.md#1-step-9s-per-ac-sweep-is-load-bearing-not-ceremonial).
 10. Show a `| # | Criterion | Test / Verification | Status |` summary table.
 11. On ALL PASS → proceed to Step 9.5.
 

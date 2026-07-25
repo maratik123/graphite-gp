@@ -198,6 +198,7 @@ The verb chosen for a promoted rule encodes its shape. Carrot rules (`Kind: vali
 >
 > | If the entry asserts... | Verify with |
 > |---|---|
+> | **Any claim, before choosing the command** | **Name the artifact that DECIDES it, then check your command reaches that artifact.** A claim about merge/permission/policy is decided by the branch-protection ruleset (`gh api repos/<o>/<r>/rulesets/<id>`), not by `ci.yml`; a claim about tracked-ness by `git ls-files`, not `find`; a claim about an upstream resolution by the closing comment, not the issue body. A passing run of a category-blind command is evidence about the **command**, never about the claim. |
 > | A precedent list (*"`X`, `Y`, `Z` are all `const fn`"*) | Read **each** cited site. One counter-example inverts the lesson for every future reader. |
 > | A `file:line` | `sed -n '<N>p' <file>` — line numbers drift after any edit to the file. |
 > | A lint's group / a tool's flag / an API's behaviour | Run it (`cargo clippy -W clippy::<group>` on a probe; `<tool> --help`) — see AGENTS.md § *Dependency Versions*. |
@@ -226,7 +227,14 @@ Type: PreToolUse / PostToolUse
 Matcher: which tool
 Command: what to execute
 Why hook and not rule: [explanation]
+Verification: [all three MUSTs discharged — see below]
 ```
+
+**A proposed hook is not verified until all three MUSTs in [`ai-docs/hook-verification.md`](../../ai-docs/hook-verification.md) hold** — a green self-authored suite is evidence about your *cases*, never your *matcher*:
+
+1. **Lint the body** — `jq`-extract, `shellcheck -s bash`. Nothing else lints a `settings.json`-inlined body.
+2. **Exercise it live** — run the real commands you expect to pass, including innocent ones that merely CONTAIN the matched substring.
+3. **Prove the keyed input field populates, passively** — log it from a temporary non-blocking hook on a benign action, then revert. **NEVER** probe by telling a compliant actor to issue the banned action.
 
 ### Step 5: Apply after confirmation
 
