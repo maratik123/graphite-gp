@@ -7,6 +7,7 @@
 //! it never escapes into the mapping logic.
 
 use clap::Parser;
+use gp_core::rng::Seeds;
 use gp_render::screens::{DIFFICULTY_LABELS, Difficulty, RaceConfig};
 use thiserror::Error;
 
@@ -34,6 +35,9 @@ const DEFAULT_V_TARGET: i32 = 7;
 const DEFAULT_DIFFICULTY_LABEL: &str = "Pro";
 /// Decimal places the startup echo renders the pilot temperature at.
 const TEMPERATURE_DECIMALS: usize = 2;
+/// Default `--seed` master, continuity with the deleted `main.rs`
+/// `FIXTURE_SEED` (the value the `LabScreen` header already shows).
+const DEFAULT_SEED: u64 = 7;
 
 /// Parses `raw` case-insensitively against [`DIFFICULTY_LABELS`], so
 /// `gp-game` restates no difficulty spelling of its own.
@@ -79,6 +83,22 @@ struct Cli {
         value_parser = clap::value_parser!(i32).range(i64::from(V_TARGET_MIN)..=i64::from(V_TARGET_MAX)),
     )]
     v_target: i32,
+    /// Master seed, expanded into every RNG source unless overridden per
+    /// source below.
+    #[arg(long, default_value_t = DEFAULT_SEED)]
+    seed: u64,
+    /// Overrides the derived car-collision-resolution seed.
+    #[arg(long)]
+    seed_collision: Option<u64>,
+    /// Overrides the derived track-generation seed.
+    #[arg(long)]
+    seed_generation: Option<u64>,
+    /// Overrides the derived AI-learning seed.
+    #[arg(long)]
+    seed_ai_learning: Option<u64>,
+    /// Overrides the derived AI-inference seed.
+    #[arg(long)]
+    seed_ai_inference: Option<u64>,
 }
 
 /// The validated game configuration assembled from [`Cli`] (issue #41).
@@ -87,6 +107,9 @@ pub(crate) struct GameConfig {
     /// The player-facing race configuration, reused from `gp-render` — the
     /// same type `AppShell::new` and the Setup screen already speak.
     pub(crate) race: RaceConfig,
+    /// The resolved per-source seeds — the master expanded via
+    /// `Seeds::from_master`, with any supplied per-source override applied.
+    pub(crate) seeds: Seeds,
 }
 
 /// A `gp-game` config error — `clap`'s own diagnostics for tokenizing and
@@ -113,6 +136,16 @@ impl TryFrom<Cli> for GameConfig {
     type Error = ConfigError;
 
     fn try_from(cli: Cli) -> Result<Self, Self::Error> {
+        // Seed resolution (normative, per spec): four independent
+        // `Option::unwrap_or` picks, one per field — never a panic path.
+        let derived = Seeds::from_master(cli.seed);
+        let seeds = Seeds {
+            collision: cli.seed_collision.unwrap_or(derived.collision),
+            generation: cli.seed_generation.unwrap_or(derived.generation),
+            ai_learning: cli.seed_ai_learning.unwrap_or(derived.ai_learning),
+            ai_inference: cli.seed_ai_inference.unwrap_or(derived.ai_inference),
+        };
+
         Ok(Self {
             race: RaceConfig {
                 cars: cli.cars,
@@ -120,6 +153,7 @@ impl TryFrom<Cli> for GameConfig {
                 v_target: cli.v_target,
                 difficulty: cli.difficulty,
             },
+            seeds,
         })
     }
 }
@@ -156,7 +190,7 @@ where
 /// Renders the resolved configuration for the startup echo (AC18) — a pure
 /// formatter, no I/O, so it is testable without a process or a window.
 pub(crate) fn render_startup_echo(config: &GameConfig) -> String {
-    format!(
+    let player_line = format!(
         "graphite-gp: cars {cars}, laps {laps}, V_target {v_target}, difficulty {difficulty} (temperature {temp:.prec$})",
         cars = config.race.cars,
         laps = config.race.laps,
@@ -164,7 +198,11 @@ pub(crate) fn render_startup_echo(config: &GameConfig) -> String {
         difficulty = config.race.difficulty.label(),
         temp = config.temperature(),
         prec = TEMPERATURE_DECIMALS,
-    )
+    );
+    // v2 (subtask 4): a standalone `Seeds` line — `Debug` cannot silently
+    // omit a field. Subtask 5 replaces this with the full `GenParams`
+    // `Debug` line, which nests the same `Seeds` fields.
+    format!("{player_line}\ngraphite-gp: {:?}", config.seeds)
 }
 
 #[cfg(test)]
@@ -200,14 +238,15 @@ mod tests {
         parse_err(args).to_string()
     }
 
-    // ---- AC13: player defaults ----
+    // ---- AC13: defaults (player + seed) ----
 
     #[test]
-    fn ac13_player_defaults_match_documented_literals() {
+    fn ac13_defaults_match_documented_literals() {
         assert_eq!(DEFAULT_CARS, 4);
         assert_eq!(DEFAULT_LAPS, 5);
         assert_eq!(DEFAULT_V_TARGET, 7);
         assert_eq!(DEFAULT_DIFFICULTY_LABEL, "Pro");
+        assert_eq!(DEFAULT_SEED, 7);
         let config = parse(&[]);
         assert_eq!(config.race.cars, DEFAULT_CARS);
         assert_eq!(config.race.laps, DEFAULT_LAPS);
@@ -215,7 +254,14 @@ mod tests {
         assert_eq!(config.race.difficulty, Difficulty::Pro);
     }
 
-    // ---- AC3 (player flags slice): every player flag round-trips ----
+    // ---- AC2 (seeds half): empty args derive Seeds from DEFAULT_SEED ----
+
+    #[test]
+    fn ac2_default_seeds_equal_derivation_from_default_seed() {
+        assert_eq!(parse(&[]).seeds, Seeds::from_master(DEFAULT_SEED));
+    }
+
+    // ---- AC3: every player + seed flag round-trips ----
 
     #[test]
     fn ac3_player_flags_round_trip() {
@@ -233,6 +279,24 @@ mod tests {
         assert_eq!(config.race.laps, 9);
         assert_eq!(config.race.difficulty, Difficulty::Ace);
         assert_eq!(config.race.v_target, 10);
+    }
+
+    #[test]
+    fn ac3_seed_override_flags_round_trip() {
+        let config = parse(&[
+            "--seed-collision",
+            "1",
+            "--seed-generation",
+            "2",
+            "--seed-ai-learning",
+            "3",
+            "--seed-ai-inference",
+            "4",
+        ]);
+        assert_eq!(config.seeds.collision, 1);
+        assert_eq!(config.seeds.generation, 2);
+        assert_eq!(config.seeds.ai_learning, 3);
+        assert_eq!(config.seeds.ai_inference, 4);
     }
 
     // ---- AC4: per-flag bounds, player flags ----
@@ -371,6 +435,113 @@ mod tests {
     #[test]
     fn ac14_bare_end_of_flags_marker_parses_to_defaults() {
         assert_eq!(parse(&["--"]), parse(&[]));
+    }
+
+    // ---- AC14 (final, subtask 4): the two rows `--seed` unlocks ----
+
+    #[test]
+    fn ac14_seed_overflow_is_value_validation() {
+        assert_eq!(
+            kind(&["--seed", "18446744073709551616"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn ac14_lone_seed_flag_is_invalid_value() {
+        assert_eq!(kind(&["--seed"]), clap::error::ErrorKind::InvalidValue);
+    }
+
+    // ---- AC11 (parse level): master -> Seeds derivation, at parse_from ----
+
+    #[test]
+    fn ac11_same_master_two_parses_yield_identical_seeds() {
+        assert_eq!(
+            parse(&["--seed", "123"]).seeds,
+            parse(&["--seed", "123"]).seeds
+        );
+    }
+
+    #[test]
+    fn ac11_distinct_masters_yield_pairwise_distinct_fields() {
+        let a = parse(&["--seed", "1"]).seeds;
+        let b = parse(&["--seed", "2"]).seeds;
+        let a_fields = [a.collision, a.generation, a.ai_learning, a.ai_inference];
+        let b_fields = [b.collision, b.generation, b.ai_learning, b.ai_inference];
+        for (x, y) in a_fields.iter().zip(b_fields.iter()) {
+            assert_ne!(x, y);
+        }
+    }
+
+    // ---- AC12: override precedence ----
+
+    #[test]
+    fn ac12_collision_override_leaves_others_derived() {
+        let derived = Seeds::from_master(5);
+        let config = parse(&["--seed", "5", "--seed-collision", "999"]);
+        assert_eq!(config.seeds.collision, 999);
+        assert_eq!(config.seeds.generation, derived.generation);
+        assert_eq!(config.seeds.ai_learning, derived.ai_learning);
+        assert_eq!(config.seeds.ai_inference, derived.ai_inference);
+    }
+
+    #[test]
+    fn ac12_generation_override_leaves_others_derived() {
+        let derived = Seeds::from_master(5);
+        let config = parse(&["--seed", "5", "--seed-generation", "999"]);
+        assert_eq!(config.seeds.collision, derived.collision);
+        assert_eq!(config.seeds.generation, 999);
+        assert_eq!(config.seeds.ai_learning, derived.ai_learning);
+        assert_eq!(config.seeds.ai_inference, derived.ai_inference);
+    }
+
+    #[test]
+    fn ac12_ai_learning_override_leaves_others_derived() {
+        let derived = Seeds::from_master(5);
+        let config = parse(&["--seed", "5", "--seed-ai-learning", "999"]);
+        assert_eq!(config.seeds.collision, derived.collision);
+        assert_eq!(config.seeds.generation, derived.generation);
+        assert_eq!(config.seeds.ai_learning, 999);
+        assert_eq!(config.seeds.ai_inference, derived.ai_inference);
+    }
+
+    #[test]
+    fn ac12_ai_inference_override_leaves_others_derived() {
+        let derived = Seeds::from_master(5);
+        let config = parse(&["--seed", "5", "--seed-ai-inference", "999"]);
+        assert_eq!(config.seeds.collision, derived.collision);
+        assert_eq!(config.seeds.generation, derived.generation);
+        assert_eq!(config.seeds.ai_learning, derived.ai_learning);
+        assert_eq!(config.seeds.ai_inference, 999);
+    }
+
+    #[test]
+    fn ac12_all_four_overrides_make_seeds_independent_of_master() {
+        let overrides = &[
+            "--seed-collision",
+            "10",
+            "--seed-generation",
+            "20",
+            "--seed-ai-learning",
+            "30",
+            "--seed-ai-inference",
+            "40",
+        ];
+        let mut full_a = vec!["--seed", "1"];
+        full_a.extend_from_slice(overrides);
+        let mut full_b = vec!["--seed", "2"];
+        full_b.extend_from_slice(overrides);
+        assert_eq!(parse(&full_a).seeds, parse(&full_b).seeds);
+    }
+
+    #[test]
+    fn ac12_override_without_seed_still_derives_others_from_default() {
+        let derived = Seeds::from_master(DEFAULT_SEED);
+        let config = parse(&["--seed-collision", "999"]);
+        assert_eq!(config.seeds.collision, 999);
+        assert_eq!(config.seeds.generation, derived.generation);
+        assert_eq!(config.seeds.ai_learning, derived.ai_learning);
+        assert_eq!(config.seeds.ai_inference, derived.ai_inference);
     }
 
     // ---- AC16 (partial, subtask 3): the four player flags + version ----
