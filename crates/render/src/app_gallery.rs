@@ -603,7 +603,12 @@ mod tests {
                     let session = shell_session(&track, &geometry, &[], &standings);
                     let resp = shell.show(ui, session);
                     latest_screen_c.set(Some(resp.screen));
-                    latest_action_c.set(resp.action);
+                    // Latch, mirroring the positive test: a settling frame
+                    // would otherwise wipe a transient `Some` back to `None`
+                    // and let this assertion pass vacuously.
+                    if let Some(action) = resp.action {
+                        latest_action_c.set(Some(action));
+                    }
                 });
 
             harness.run_steps(2);

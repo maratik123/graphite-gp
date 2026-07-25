@@ -120,8 +120,10 @@ pub enum Nav {
 ///
 /// Owns only `Copy`, `gp-render`-local state: the current [`Screen`], the
 /// [`RaceConfig`], the [`Overlays`], and the `has_generated` latch.
-/// Everything sourced from `gp-gen`/`gp-ai`/`gp-core::sim` is borrowed per
-/// frame through [`ShellSession`] (design § *Owned vs borrowed*).
+/// Everything sourced from `gp-gen`/`gp-ai` is borrowed per frame through
+/// [`ShellSession`] (design § *Owned vs borrowed*), as is the inbound
+/// [`gp_core::sim::CarState`] inside each [`ShellSession::cars`] entry. The
+/// shell's one *outbound* `gp_core::sim` value is [`ShellResponse::action`].
 #[derive(Clone, Copy, Debug)]
 pub struct AppShell {
     screen: Screen,
@@ -349,9 +351,8 @@ impl AppShell {
 /// borrows (design § *Owned vs borrowed*).
 ///
 /// `gp-render` cannot own any of this, since it has no dependency on
-/// `gp-gen`/`gp-ai`/`gp-core::sim`. The shell selects the fields the current
-/// screen needs; fields for a screen not currently active are simply unread
-/// that frame.
+/// `gp-gen`/`gp-ai`. The shell selects the fields the current screen needs;
+/// fields for a screen not currently active are simply unread that frame.
 #[derive(Clone, Copy, Debug)]
 pub struct ShellSession<'a> {
     /// The track fixture — `Lab`'s canvas + oracle tiles, `Race`'s canvas.

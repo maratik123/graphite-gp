@@ -68,7 +68,8 @@ pub trait Controller {
     /// no decision is ready yet ("ask again next frame"). Every `Some(a)`
     /// returned **must** satisfy `ctx.legal.contains(a)` (AC1/AC2); the
     /// implementation computes no legality of its own (AC7) — `ctx.legal`
-    /// is the only source of truth.
+    /// is the only source of truth. **Precondition:** `ctx.legal` is
+    /// non-empty — see [`PollContext`]'s own doc.
     fn poll(&mut self, ctx: PollContext<'_>) -> Option<Action>;
 }
 
@@ -94,6 +95,8 @@ impl Roster {
     /// Polls the seat at `index`. Total: an out-of-range `index` yields
     /// `None` rather than panicking (the reason `Roster` is a newtype
     /// rather than a `pub type` alias over `Vec` — see the design doc's Q1).
+    /// **Precondition:** `ctx.legal` is non-empty — see [`PollContext`]'s
+    /// own doc.
     pub fn poll(&mut self, index: usize, ctx: PollContext<'_>) -> Option<Action> {
         self.seats.get_mut(index).and_then(|seat| seat.poll(ctx))
     }
@@ -125,7 +128,7 @@ impl Default for Roster {
 pub(crate) mod test_fixtures {
     use super::{Action, BitFlags, CarState, TrackArtifact};
     use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
-    use gp_core::sim::legal_mask;
+    use gp_core::sim::{legal_mask, resolve_crash};
     use gp_core::track::{
         Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackMetrics,
     };
@@ -215,14 +218,31 @@ pub(crate) mod test_fixtures {
         }
     }
 
-    /// The four fixture states, paired with their real `legal_mask` against
+    /// Fixture (e): the REQUIRED singleton-`{Coast}` mask row (spec AC2;
+    /// design § Test Design fixture (d)) — a genuine scrub tick reached via
+    /// `gp_core::sim::resolve_crash` on fixture (d)
+    /// ([`crash_prone_state`]), whose `action_mask` collapses to exactly
+    /// `{Coast}` (mirrors
+    /// `player::tests::singleton_coast_mask_resolves_on_the_first_poll`'s
+    /// Scenario 2). Distinct from `crash_prone_state`'s own row in this
+    /// table, which stays the **empty**-mask fixture AC6 needs.
+    pub(crate) fn scrub_state_with_singleton_coast_mask(
+        track: &TrackArtifact,
+    ) -> (CarState, BitFlags<Action>) {
+        let outcome = resolve_crash(&track.corridor, crash_prone_state());
+        let mask = outcome.action_mask(&track.corridor);
+        (outcome.state, mask)
+    }
+
+    /// The fixture states, paired with their real `legal_mask` (or, for the
+    /// scrub row, real `CrashOutcome::action_mask`) against
     /// [`fixture_track`]'s corridor — computed once so every consumer test
     /// asserts against the mask the state actually produces, rather than a
     /// hand-guessed one.
     pub(crate) fn fixture_states_with_masks(
         track: &TrackArtifact,
     ) -> Vec<(CarState, BitFlags<Action>)> {
-        [
+        let mut fixtures: Vec<(CarState, BitFlags<Action>)> = [
             mid_corridor_state(),
             wall_adjacent_state(),
             fast_approach_excludes_coast_state(),
@@ -230,7 +250,9 @@ pub(crate) mod test_fixtures {
         ]
         .into_iter()
         .map(|state| (state, legal_mask(&track.corridor, state)))
-        .collect()
+        .collect();
+        fixtures.push(scrub_state_with_singleton_coast_mask(track));
+        fixtures
     }
 
     /// A stub [`super::Controller`] returning a fixed, mask-respecting
@@ -285,6 +307,7 @@ mod tests {
         let track = fixture_track();
         let state = super::test_fixtures::crash_prone_state();
         let mut stub = AlwaysCoastStub;
+        let mut player = crate::controller::player::PlayerController;
         let inputs = [
             FrameInput::default(),
             FrameInput {
@@ -312,7 +335,31 @@ mod tests {
                 input,
             };
             assert_eq!(stub.poll(ctx), None);
+
+            // AC6 must hold for the real player seat too, not only the
+            // AlwaysCoastStub above — the real seat is the one a shipped
+            // scrub tick actually polls.
+            let ctx = PollContext {
+                track: &track,
+                state,
+                legal: BitFlags::empty(),
+                input,
+            };
+            assert_eq!(player.poll(ctx), None);
         }
+    }
+
+    #[test]
+    fn fixture_table_includes_a_required_singleton_coast_mask_row() {
+        let track = fixture_track();
+        let fixtures = fixture_states_with_masks(&track);
+        let singleton_coast = BitFlags::from(gp_core::sim::Action::Coast);
+        assert!(
+            fixtures.iter().any(|&(_, mask)| mask == singleton_coast),
+            "fixture_states_with_masks must include a singleton-{{Coast}} mask row \
+             (spec AC2 REQUIRED case), got masks: {:?}",
+            fixtures.iter().map(|&(_, mask)| mask).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -321,27 +368,61 @@ mod tests {
         let state = super::test_fixtures::mid_corridor_state();
         let legal = gp_core::sim::legal_mask(&track.corridor, state);
         assert!(!legal.is_empty());
+        // Fixture (a) is the all-legal mid-corridor state, not the
+        // singleton-{Coast} row — so PlayerController::decide must consult
+        // input.shell_action rather than auto-resolving (AC5 does not
+        // apply here).
+        assert_ne!(legal, BitFlags::from(gp_core::sim::Action::Coast));
 
         let mut roster = super::Roster::new();
         roster.push(Box::new(crate::controller::player::PlayerController));
         roster.push(Box::new(AlwaysCoastStub));
         assert_eq!(roster.len(), 2);
 
-        for index in 0..roster.len() {
-            let ctx = PollContext {
-                track: &track,
-                state,
-                legal,
-                input: FrameInput {
-                    shell_action: Some(gp_core::sim::Action::East),
-                    key_action: None,
-                },
-            };
-            let action = roster.poll(index, ctx);
-            if let Some(a) = action {
-                assert!(legal_move(&track.corridor, state, a));
-            }
-        }
+        let input = FrameInput {
+            shell_action: Some(gp_core::sim::Action::East),
+            key_action: None,
+        };
+
+        // Seat 0 (the player seat): decide picks input.shell_action (East)
+        // first, since it's a member of the all-legal mask.
+        let player_ctx = PollContext {
+            track: &track,
+            state,
+            legal,
+            input,
+        };
+        let player_answer = roster.poll(0, player_ctx);
+        assert_eq!(
+            player_answer,
+            Some(gp_core::sim::Action::East),
+            "seat 0 (PlayerController) must actually answer with its shell_action"
+        );
+        assert!(legal_move(
+            &track.corridor,
+            state,
+            player_answer.expect("asserted Some above")
+        ));
+
+        // Seat 1 (AlwaysCoastStub): answers Coast unconditionally whenever
+        // Coast is legal, ignoring `input` entirely.
+        let stub_ctx = PollContext {
+            track: &track,
+            state,
+            legal,
+            input,
+        };
+        let stub_answer = roster.poll(1, stub_ctx);
+        assert_eq!(
+            stub_answer,
+            Some(gp_core::sim::Action::Coast),
+            "seat 1 (AlwaysCoastStub) must actually answer Coast"
+        );
+        assert!(legal_move(
+            &track.corridor,
+            state,
+            stub_answer.expect("asserted Some above")
+        ));
     }
 
     /// AC7's structural no-physics scan. Written here (subtask 4) rather
