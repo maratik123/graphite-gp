@@ -11,8 +11,8 @@ use gp_core::geom::{
     Corridor, Point, Side, bounded_complement_components, component_count, walls_from_boundary,
 };
 use gp_core::track::RaceDir;
-use rand::RngExt;
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::seq::IteratorRandom;
+use rand::{Rng, RngExt};
 use strum::IntoEnumIterator;
 
 /// Documented supported domain floor for `l_min` (design doc, reviewer NOTE
@@ -62,7 +62,7 @@ pub struct CoarseSkeleton {
 ///
 /// Infallible: a bounded same-stream retry plus a guaranteed-terminating
 /// rectangular fallback make this a total function — no `Result`, no panic.
-pub fn phase1_coarse_ring(l_min: i32, rng: &mut Xoshiro256PlusPlus) -> CoarseSkeleton {
+pub fn phase1_coarse_ring(l_min: i32, rng: &mut impl Rng) -> CoarseSkeleton {
     phase1_coarse_ring_attempts(l_min, rng, MAX_ATTEMPTS).0
 }
 
@@ -78,7 +78,7 @@ pub fn phase1_coarse_ring(l_min: i32, rng: &mut Xoshiro256PlusPlus) -> CoarseSke
 )]
 fn phase1_coarse_ring_attempts(
     l_min: i32,
-    rng: &mut Xoshiro256PlusPlus,
+    rng: &mut impl Rng,
     max_attempts: u32,
 ) -> (CoarseSkeleton, bool) {
     let l_eff = clamp_l_min(l_min);
@@ -145,7 +145,7 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
     reason = "ring/rng are established, unambiguous domain vocabulary here \
               (the annulus, the RNG stream) — no realistic confusion risk"
 )]
-fn widen(ring: &BTreeSet<Point>, rng: &mut Xoshiro256PlusPlus) -> BTreeSet<Point> {
+fn widen(ring: &BTreeSet<Point>, rng: &mut impl Rng) -> BTreeSet<Point> {
     let mut ring = ring.clone();
     for side in Side::iter() {
         let amount = rng.random_range(0..=WIDEN_MAX);
@@ -251,12 +251,10 @@ fn rectangular_fallback(l_eff: i32) -> (BTreeSet<Point>, BTreeSet<Point>) {
 
 /// Draws the fixed traversal orientation — one `u32` pick after the loop
 /// settles (success or fallback), so `dir` is seeded on every path (AC4).
-fn choose_dir(rng: &mut Xoshiro256PlusPlus) -> RaceDir {
-    if rng.random_range(0u32..2) == 0 {
-        RaceDir::Cw
-    } else {
-        RaceDir::Ccw
-    }
+fn choose_dir(rng: &mut impl Rng) -> RaceDir {
+    RaceDir::iter()
+        .choose(rng)
+        .expect("enum variants iterator should return correct size_hint")
 }
 
 /// Clamps `l_min` into the documented supported coarse-block domain
@@ -305,7 +303,7 @@ fn block_frontier(blocks: &BTreeSet<(i32, i32)>) -> BTreeSet<(i32, i32)> {
 /// frontier (`y ≥ 2` keep-out) until `target` blocks are reached or the
 /// frontier is exhausted. Each pick draws a fixed-width `u32` index into the
 /// frontier enumerated as a sorted `Vec` (AC5 determinism).
-fn grow_blocks(blocks: &mut BTreeSet<(i32, i32)>, target: usize, rng: &mut Xoshiro256PlusPlus) {
+fn grow_blocks(blocks: &mut BTreeSet<(i32, i32)>, target: usize, rng: &mut impl Rng) {
     while blocks.len() < target {
         let frontier: Vec<(i32, i32)> = block_frontier(blocks).into_iter().collect();
         let Ok(n) = u32::try_from(frontier.len()) else {
@@ -459,7 +457,7 @@ fn debug_assert_base_south_edge_intact(p: &BTreeSet<Point>, base_w: i32) {
 /// base strip, even-sublattice growth restricted to `y ≥ 2`, then
 /// pre-dilation hole-fill. Returns `(P, l_eff, base_w)` — callers need
 /// `l_eff` for the later run-length check and `base_w` only for tests/debug.
-fn build_p(l_min: i32, rng: &mut Xoshiro256PlusPlus) -> (BTreeSet<Point>, i32, i32) {
+fn build_p(l_min: i32, rng: &mut impl Rng) -> (BTreeSet<Point>, i32, i32) {
     let l_eff = clamp_l_min(l_min);
     let base_w = base_width(l_eff);
     #[allow(
@@ -486,6 +484,7 @@ mod tests {
     use gp_core::geom::{bounded_complement_components, component_count};
     use gp_core::rng::Seeds;
     use rand::SeedableRng;
+    use rand::rngs::Xoshiro256PlusPlus;
 
     fn rng(seed: u64) -> Xoshiro256PlusPlus {
         Xoshiro256PlusPlus::seed_from_u64(seed)
