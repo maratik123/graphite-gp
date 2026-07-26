@@ -3,9 +3,8 @@
 
 use crate::geom::{Corridor, CorridorScratch, Point};
 use crate::sim::CarState;
-use rand::RngExt;
 use rand::seq::SliceRandom;
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::{Rng, RngExt};
 use std::collections::{HashMap, HashSet};
 use std::ops::ControlFlow;
 
@@ -57,7 +56,7 @@ use std::ops::ControlFlow;
 /// The tie index is drawn as `u32` (matching `rand`'s own slice-index
 /// policy for `shuffle`), so the pick is reproducible across 32-/64-bit
 /// targets.
-pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut Xoshiro256PlusPlus) {
+pub fn resolve_collisions(d: &Corridor, cars: &mut [CarState], rng: &mut impl Rng) {
     let mut buckets: HashMap<Point, Vec<usize>> = HashMap::new();
     for (i, car) in cars.iter().enumerate() {
         buckets.entry(car.pos()).or_default().push(i);
@@ -121,6 +120,7 @@ mod tests {
     use super::*;
     use crate::rng::Seeds;
     use crate::sim::common::*;
+    use rand_xoshiro::Xoshiro256PlusPlus;
 
     /// A car at rest at `(x, y)` with velocity `(vx, vy)`.
     fn car(x: i32, y: i32, vx: i32, vy: i32) -> CarState {

@@ -109,7 +109,7 @@ mod tests {
         }
     }
 
-    fn draws(mut rng: Xoshiro256PlusPlus) -> Vec<u64> {
+    fn draws(mut rng: impl Rng) -> Vec<u64> {
         (0..8).map(|_| rng.next_u64()).collect()
     }
 
