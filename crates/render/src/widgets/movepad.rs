@@ -341,7 +341,7 @@ mod tests {
         }
     }
 
-    /// AC6 — an all-illegal mask (`BitFlags::empty()`) yields every cell
+    /// AC6 — an all-illegal mask (`Actions::empty()`) yields every cell
     /// disabled, deterministically.
     #[test]
     fn all_illegal_mask_yields_all_disabled() {

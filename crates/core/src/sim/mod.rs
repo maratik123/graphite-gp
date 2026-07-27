@@ -55,7 +55,7 @@ pub enum Action {
     South,
 }
 
-/// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
+/// Re-exported so consumers of [`legal_mask`]'s `Actions` return type
 /// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
 /// guideline C-REEXPORT).
 pub type Actions = BitFlags<Action>;
@@ -110,7 +110,7 @@ pub fn legal_move(d: &Corridor, s: CarState, a: Action) -> bool {
 /// The legal-action mask for `s`, in [`Action`] declaration order. Consumed by
 /// the player UI, the AI policy (as the pre-softmax `−inf` mask), and the
 /// oracle.
-pub fn legal_mask(d: &Corridor, s: CarState) -> BitFlags<Action> {
+pub fn legal_mask(d: &Corridor, s: CarState) -> Actions {
     Action::VARIANTS
         .iter()
         .copied()
@@ -390,9 +390,9 @@ impl CrashOutcome {
     /// The action mask available from this outcome: the singleton `{Coast}`
     /// while [`CrashOutcome::scrub`] holds (`[N5]`'s "один ход без права
     /// реакселерации"), otherwise the ordinary [`legal_mask`].
-    pub fn action_mask(self, d: &Corridor) -> BitFlags<Action> {
+    pub fn action_mask(self, d: &Corridor) -> Actions {
         if self.scrub {
-            BitFlags::from(Action::Coast)
+            Actions::from(Action::Coast)
         } else {
             legal_mask(d, self.state)
         }
@@ -571,7 +571,7 @@ mod tests {
         for &a in Action::VARIANTS {
             assert!(!legal_move(&d, s, a));
         }
-        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        assert_eq!(legal_mask(&d, s), Actions::empty());
     }
 
     #[test]
@@ -587,7 +587,7 @@ mod tests {
         for &a in Action::VARIANTS {
             assert!(!legal_move(&d, s, a));
         }
-        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        assert_eq!(legal_mask(&d, s), Actions::empty());
     }
 
     #[test]
@@ -755,7 +755,7 @@ mod tests {
             assert_eq!(mask.contains(a), legal_move(&d, s, a));
         }
         assert!(!mask.is_empty());
-        assert_ne!(mask, BitFlags::all());
+        assert_ne!(mask, Actions::all());
     }
 
     #[test]
@@ -1086,7 +1086,7 @@ mod tests {
         // (3,1); L=(2,1). First confirm this is a genuine crash.
         let d = filled(3, 4);
         let s = car(1, 0, 3, 2);
-        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        assert_eq!(legal_mask(&d, s), Actions::empty());
         let out = resolve_crash(&d, s);
         assert_eq!(out.state.pos(), Point::new(2, 1));
     }
@@ -1114,7 +1114,7 @@ mod tests {
         // (2,0)==L in D -> survivor vy, floor(0/2)=0.
         let d2 = filled(3, 4);
         let s2 = car(0, 0, 5, 0);
-        assert_eq!(legal_mask(&d2, s2), BitFlags::empty());
+        assert_eq!(legal_mask(&d2, s2), Actions::empty());
         let out2 = resolve_crash(&d2, s2);
         assert_eq!(
             out2.state,
@@ -1131,7 +1131,7 @@ mod tests {
         // not in D -> vx=0; (2,1) in D -> survivor vy, floor(-2/2)=-1.
         let d3 = filled(3, 4);
         let s3 = car(1, 3, 3, -2);
-        assert_eq!(legal_mask(&d3, s3), BitFlags::empty());
+        assert_eq!(legal_mask(&d3, s3), Actions::empty());
         let out3 = resolve_crash(&d3, s3);
         assert_eq!(
             out3.state,
@@ -1150,7 +1150,7 @@ mod tests {
         // (3,2) and (2,3) not in D -> corner -> v=(0,0).
         let d = filled(3, 3);
         let s = car(0, 0, 3, 3);
-        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        assert_eq!(legal_mask(&d, s), Actions::empty());
         let out = resolve_crash(&d, s);
         assert_eq!(
             out.state,
@@ -1170,7 +1170,7 @@ mod tests {
         let s = car(1, 0, 3, 2);
         let out = resolve_crash(&d, s);
         assert!(out.scrub);
-        assert_eq!(out.action_mask(&d), BitFlags::from(Action::Coast));
+        assert_eq!(out.action_mask(&d), Actions::from(Action::Coast));
 
         let out2 = out.consume_scrub();
         assert!(!out2.scrub);
@@ -1185,7 +1185,7 @@ mod tests {
         );
         assert_eq!(out2.action_mask(&d), legal_mask(&d, out2.state));
         // Non-vacuous: the resumed mask differs from the scrub-only mask.
-        assert_ne!(legal_mask(&d, out2.state), BitFlags::from(Action::Coast));
+        assert_ne!(legal_mask(&d, out2.state), Actions::from(Action::Coast));
     }
 
     #[test]
@@ -1196,7 +1196,7 @@ mod tests {
         // in D, legal.
         let d = filled(4, 2);
         let s = car(0, 0, 4, 3);
-        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        assert_eq!(legal_mask(&d, s), Actions::empty());
         let out = resolve_crash(&d, s);
         assert_eq!(
             out.state,
@@ -1238,7 +1238,7 @@ mod tests {
             vx: i32::MAX,
             vy: 0,
         };
-        assert_eq!(legal_mask(&d, s), BitFlags::empty());
+        assert_eq!(legal_mask(&d, s), Actions::empty());
         let out = resolve_crash(&d, s);
         assert!(out.scrub);
     }
