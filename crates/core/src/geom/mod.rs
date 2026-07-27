@@ -386,6 +386,7 @@ impl Corridor {
 /// let cells = supercover(Point::new(0, 0), Point::new(2, 0));
 /// assert_eq!(cells.count(), 3);
 /// ```
+/// # Panics
 #[allow(
     clippy::arithmetic_side_effects,
     reason = "bounded-chord precondition above: |v| << 1.5e9 per move, so the \
@@ -397,12 +398,164 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
     let dx = i64::from(b.x) - i64::from(a.x);
     let dy = i64::from(b.y) - i64::from(a.y);
     let bound = dx.abs() + dy.abs();
-    (a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
-        (a.y.min(b.y)..=a.y.max(b.y)).filter_map(move |cy| {
-            let cr = dx * (i64::from(cy) - i64::from(a.y)) - dy * (i64::from(cx) - i64::from(a.x));
-            (2 * cr.abs() <= bound).then(|| Point::new(cx, cy))
-        })
-    })
+
+    let ax = i64::from(a.x);
+    let ay = i64::from(a.y);
+
+    if dx.abs() >= dy.abs() {
+        // Внутренний цикл по x, внешний — по y. Вдоль внешней оси (y) движется dy,
+        // поперёк (across) — dx.
+        let x_min = i64::from(a.x.min(b.x));
+        let x_max = i64::from(a.x.max(b.x));
+
+        let inner_range = InnerRange {
+            outer_origin: ay,
+            across_delta: dx,
+            inner_origin: ax,
+            along_delta: dy,
+            inner_min: x_min,
+            inner_max: x_max,
+            bound,
+        };
+
+        EitherIter::Left((a.y.min(b.y)..=a.y.max(b.y)).flat_map(move |cy| {
+            let (lo, hi) = inner_range.evaluate(cy);
+            (lo..=hi).map(move |cx| Point::new(cx, cy))
+        }))
+    } else {
+        // Внутренний цикл по y, внешний — по x.
+        let y_min = i64::from(a.y.min(b.y));
+        let y_max = i64::from(a.y.max(b.y));
+
+        let inner_range = InnerRange {
+            outer_origin: ax,
+            across_delta: dy,
+            inner_origin: ay,
+            along_delta: dx,
+            inner_min: y_min,
+            inner_max: y_max,
+            bound,
+        };
+
+        EitherIter::Right((a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
+            let (lo, hi) = inner_range.evaluate(cx);
+            (lo..=hi).map(move |cy| Point::new(cx, cy))
+        }))
+    }
+}
+
+struct InnerRange {
+    outer_origin: i64,
+    across_delta: i64,
+    inner_origin: i64,
+    along_delta: i64,
+    inner_min: i64,
+    inner_max: i64,
+    bound: i64,
+}
+
+impl InnerRange {
+    fn evaluate(&self, outer: Coord) -> (i32, i32) {
+        let outer = i64::from(outer);
+        let (lo, hi) = if self.along_delta == 0 {
+            (self.inner_min, self.inner_max)
+        } else {
+            // Все входные величины получены из i32-координат (плюс небольшие
+            // константные множители вроде `2`), поэтому промежуточные значения
+            // остаются на порядки меньше границ i64 — переполнение здесь
+            // практически невозможно при разумных координатах карты.
+            #[allow(clippy::arithmetic_side_effects)]
+            let (m, low, high) = {
+                let cross = self.across_delta * (outer - self.outer_origin);
+                let m = 2 * self.along_delta;
+                let center = 2 * (cross + self.along_delta * self.inner_origin);
+                let low = center - self.bound;
+                let high = center + self.bound;
+                (m, low, high)
+            };
+
+            let (low, high) = if m > 0 { (low, high) } else { (high, low) };
+
+            let (lo, hi) = (div_ceil(low, m), div_floor(high, m));
+
+            (lo.max(self.inner_min), hi.min(self.inner_max))
+        };
+        (
+            i32::try_from(lo).expect("lo clamped within i32-derived inner_min..=inner_max"),
+            i32::try_from(hi).expect("hi clamped within i32-derived inner_min..=inner_max"),
+        )
+    }
+}
+
+enum EitherIter<A, B> {
+    Left(A),
+    Right(B),
+}
+
+impl<A, B, T> Iterator for EitherIter<A, B>
+where
+    A: Iterator<Item = T>,
+    B: Iterator<Item = T>,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Self::Left(a) => a.next(),
+            Self::Right(b) => b.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Left(a) => a.size_hint(),
+            Self::Right(b) => b.size_hint(),
+        }
+    }
+}
+
+impl<A, B, T> ExactSizeIterator for EitherIter<A, B>
+where
+    A: ExactSizeIterator<Item = T>,
+    B: ExactSizeIterator<Item = T>,
+{
+    fn len(&self) -> usize {
+        match self {
+            Self::Left(a) => a.len(),
+            Self::Right(b) => b.len(),
+        }
+    }
+}
+
+impl<A, B, T> DoubleEndedIterator for EitherIter<A, B>
+where
+    A: DoubleEndedIterator<Item = T>,
+    B: DoubleEndedIterator<Item = T>,
+{
+    fn next_back(&mut self) -> Option<T> {
+        match self {
+            Self::Left(a) => a.next_back(),
+            Self::Right(b) => b.next_back(),
+        }
+    }
+}
+
+const fn div_floor(a: i64, b: i64) -> i64 {
+    let q = a.div_euclid(b);
+    if b < 0 && a.rem_euclid(b) != 0 {
+        q.wrapping_sub(1)
+    } else {
+        q
+    }
+}
+
+const fn div_ceil(a: i64, b: i64) -> i64 {
+    let q = a.div_euclid(b);
+    if b > 0 && a.rem_euclid(b) != 0 {
+        q.wrapping_add(1)
+    } else {
+        q
+    }
 }
 
 #[cfg(test)]
