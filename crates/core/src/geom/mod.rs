@@ -386,7 +386,6 @@ impl Corridor {
 /// let cells = supercover(Point::new(0, 0), Point::new(2, 0));
 /// assert_eq!(cells.count(), 3);
 /// ```
-/// # Panics
 #[allow(
     clippy::arithmetic_side_effects,
     reason = "bounded-chord precondition above: |v| << 1.5e9 per move, so the \
