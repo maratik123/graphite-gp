@@ -6,8 +6,7 @@
 
 use crate::geom::{Corridor, Point, Side, supercover};
 use crate::track::StartFinish;
-use enumflags2::BitFlags;
-use enumflags2::bitflags;
+use enumflags2::{BitFlags, bitflags};
 use strum::VariantArray;
 
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
