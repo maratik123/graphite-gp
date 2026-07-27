@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn keyboard_action_masks_illegal_keys() {
-        let mut legal = BitFlags::all();
+        let mut legal = Actions::all();
         legal.remove(Action::North);
         let action = keyboard_action(legal, |k| k == Key::ArrowUp);
         assert_eq!(action, None);
@@ -80,14 +80,14 @@ mod tests {
 
     #[test]
     fn keyboard_action_scans_in_action_declaration_order() {
-        let legal = BitFlags::all();
+        let legal = Actions::all();
         let action = keyboard_action(legal, |k| k == Key::Space || k == Key::ArrowUp);
         assert_eq!(action, Some(Action::Coast));
     }
 
     #[test]
     fn keyboard_action_skips_illegal_and_takes_the_next_legal_key() {
-        let mut legal = BitFlags::all();
+        let mut legal = Actions::all();
         legal.remove(Action::Coast);
         let action = keyboard_action(legal, |k| k == Key::Space || k == Key::ArrowUp);
         assert_eq!(action, Some(Action::North));

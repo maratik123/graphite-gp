@@ -291,7 +291,7 @@ fn cell_rect(pad_rect: Rect, row: u8, col: u8, size: f32, gap: f32) -> Rect {
 mod tests {
     use super::{MOVES, MovePad};
     use crate::tokens::color;
-    use gp_core::sim::{Action, BitFlags};
+    use gp_core::sim::{Action, Actions};
 
     /// AC5 — the three-row style table: selected wins over legal; legal
     /// unselected uses the resting trio; illegal uses the disabled trio.
@@ -345,7 +345,7 @@ mod tests {
     /// disabled, deterministically.
     #[test]
     fn all_illegal_mask_yields_all_disabled() {
-        let legal: BitFlags<Action> = BitFlags::empty();
+        let legal: Actions = Actions::empty();
         for cell in &MOVES {
             assert!(!legal.contains(cell.action));
             let style = MovePad::resolve(false, false);
@@ -358,7 +358,7 @@ mod tests {
     /// Builder defaults: `new` starts unselected at the default size.
     #[test]
     fn new_has_expected_defaults() {
-        let pad = MovePad::new(BitFlags::all());
+        let pad = MovePad::new(Actions::all());
         assert!(pad.selected.is_none());
         crate::test_util::assert_f32("MovePad::new size", pad.size, super::SIZE);
 

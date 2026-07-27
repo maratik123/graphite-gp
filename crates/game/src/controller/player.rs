@@ -7,7 +7,7 @@
 //! replay-determinism test (AC9).
 
 use super::{Controller, FrameInput, PollContext};
-use gp_core::sim::{Action, Actions, make_bitflags};
+use gp_core::sim::{Action, Actions};
 
 /// The player seat. Stateless — every decision is a pure function of the
 /// [`PollContext`] it is handed.
@@ -26,7 +26,7 @@ impl PlayerController {
     /// `None`, never an illegal `Some`.
     #[must_use]
     pub fn decide(legal: Actions, input: FrameInput) -> Option<Action> {
-        if legal == make_bitflags!(Action::Coast) {
+        if legal == Actions::from(Action::Coast) {
             return Some(Action::Coast);
         }
         [input.shell_action, input.key_action]
@@ -143,7 +143,7 @@ mod tests {
         let track = fixture_track();
 
         // Scenario 1: a hand-built singleton mask.
-        let legal = BitFlags::from(Action::Coast);
+        let legal = Actions::from(Action::Coast);
         let action = PlayerController::decide(legal, FrameInput::default());
         assert_eq!(action, Some(Action::Coast));
 
@@ -154,7 +154,7 @@ mod tests {
         let outcome = resolve_crash(&track.corridor, crash_state);
         assert!(outcome.scrub);
         let scrub_mask = outcome.action_mask(&track.corridor);
-        assert_eq!(scrub_mask, BitFlags::from(Action::Coast));
+        assert_eq!(scrub_mask, Actions::from(Action::Coast));
         let action = PlayerController::decide(scrub_mask, FrameInput::default());
         assert_eq!(action, Some(Action::Coast));
         assert!(legal_move(&track.corridor, outcome.state, Action::Coast));
@@ -188,7 +188,7 @@ mod tests {
             (mid, mid_legal, FrameInput::default()),
         ];
 
-        let run = |script: &[(gp_core::sim::CarState, BitFlags<Action>, FrameInput)]| {
+        let run = |script: &[(gp_core::sim::CarState, Actions, FrameInput)]| {
             let mut controller = PlayerController;
             script
                 .iter()

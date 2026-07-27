@@ -10,8 +10,6 @@ use enumflags2::BitFlags;
 use enumflags2::bitflags;
 use strum::VariantArray;
 
-pub use enumflags2::make_bitflags;
-
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct CarState {
