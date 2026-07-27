@@ -168,7 +168,7 @@ mod tests {
     use gp_core::geom::Point;
     use gp_core::sim::CarState;
     use gp_core::track::TrackArtifact;
-    use strum::{IntoEnumIterator, VariantArray};
+    use strum::VariantArray;
 
     /// AC5/AC9 — the documented back-to-front layer order is exactly (final,
     /// flattened, 9-entry list) `outfield → asphalt → infield → heatmap →

@@ -229,7 +229,7 @@ pub fn draw_icon(painter: &Painter, handle: &TextureHandle, rect: Rect, tint: Co
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use strum::{EnumCount, IntoEnumIterator, VariantArray};
+    use strum::{EnumCount, VariantArray};
 
     /// Pre-step P's recorded byte sizes for the vendored SVGs (Lucide tag
     /// `1.25.0`) — the authoritative SHA-256 pin lives in the vendoring

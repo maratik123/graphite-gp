@@ -16,7 +16,7 @@ use super::tag::{Tag, tag_label_galley};
 use crate::icons::{Icon, IconSet};
 use crate::tokens::typography;
 use egui::{FontFamily, FontId, Pos2, Rect};
-use strum::{IntoEnumIterator, VariantArray};
+use strum::VariantArray;
 
 /// The gallery's fixed canvas: 1040×900 logical points at
 /// `pixels_per_point = 1.0`.

@@ -521,7 +521,6 @@ pub fn phase3_start_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
 
     #[test]
     fn forward_side_matches_ccw_rotation_formula() {

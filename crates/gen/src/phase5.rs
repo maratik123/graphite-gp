@@ -65,7 +65,7 @@ pub(crate) const fn within_v_ceil(s: CarState, v_ceil: i32) -> bool {
 /// the bound is purely kinematic, `d` membership is enforced only on
 /// transitions via `legal_move`. Deterministic **membership** (AC5): the
 /// worklist is a `VecDeque` seeded in `seeds`' argument order, expanding
-/// successors in [`Action::iter()`] declaration order; the returned
+/// successors in [`Action::VARIANTS`] declaration order; the returned
 /// [`HashSet`]'s own iteration order is not meaningful and is never relied on.
 pub fn forward_reachable(d: &Corridor, seeds: &[CarState], v_ceil: i32) -> HashSet<CarState> {
     let mut visited = HashSet::new();
