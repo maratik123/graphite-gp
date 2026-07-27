@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn action_iter_is_declaration_order() {
-        // AC4: Action::iter() must preserve the policy's logit order —
+        // AC4: Action::VARIANTS must preserve the policy's logit order —
         // Coast, East, West, North, South — exactly as declared.
         assert_eq!(
             Action::VARIANTS.to_vec(),

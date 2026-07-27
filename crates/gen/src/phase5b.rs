@@ -164,7 +164,7 @@ pub(crate) fn crosses_sf_forward(sf: &StartFinish, from: Point, to: Point) -> bo
 
 /// Enumerates the lap-close goal states reachable in one legal move from
 /// `r` (design § Approach (1)): for each `s ∈ r` and each `a ∈
-/// Action::iter()`, if `legal_move(d, s, a)` holds and the swept move `s.pos()
+/// Action::VARIANTS`, if `legal_move(d, s, a)` holds and the swept move `s.pos()
 /// → step(s, a).pos()` is a forward S/F crossing ([`crosses_sf_forward`]),
 /// the successor `step(s, a)` is a goal — bounded to the same `v_ceil` L∞
 /// box the floods enforce ([`within_v_ceil`]).

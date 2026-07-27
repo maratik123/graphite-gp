@@ -339,7 +339,7 @@ mod tests {
                   through IconSet::new, which panics under Miri at \
                   tiny-skia-0.12.0/src/pipeline/mod.rs:205 (\"range end \
                   index 330 out of range for slice of length 324\") — \
-                  isolated by bisecting Icon::iter() one variant at a time; \
+                  isolated by bisecting Icon::VARIANTS one variant at a time; \
                   play/pause/grid-3x3/zoom-in all bake cleanly under Miri \
                   at width 18, only settings.svg's stroke geometry \
                   triggers this tiny-skia \"simd\" feature scanline \

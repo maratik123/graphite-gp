@@ -74,7 +74,7 @@ const fn opposite_side(s: Side) -> Side {
 
 // ---- Straight-run selection (pick_straight_run) --------------------------
 
-/// `Side::iter()`'s fixed enumeration order, as a rank — the primary
+/// `Side::VARIANTS`'s fixed enumeration order, as a rank — the primary
 /// tie-break key for deterministic straight-run selection (AC8).
 const fn side_rank(s: Side) -> u8 {
     match s {

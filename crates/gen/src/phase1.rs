@@ -131,7 +131,7 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
 }
 
 /// Widens `ring` outward on each [`Side`] by a `0..=WIDEN_MAX` amount drawn
-/// per side, in `Side::iter()`'s fixed order (design doc §2 Ф1 step 5).
+/// per side, in `Side::VARIANTS`'s fixed order (design doc §2 Ф1 step 5).
 ///
 /// Each widened layer is attached only to `ring`'s existing extremal cells on
 /// that side and never touches the inner hole — outward-only. For a concave
