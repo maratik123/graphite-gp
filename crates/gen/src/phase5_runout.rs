@@ -15,7 +15,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use gp_core::geom::{Corridor, Point};
 use gp_core::sim::{Action, CarState, legal_move, step};
 use gp_core::track::TrackMetrics;
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 use crate::Issue;
 use crate::phase4::wall_run;
@@ -192,7 +192,7 @@ pub(crate) fn window_speed(
         }
     }
     while let Some(s) = queue.pop_front() {
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             if !legal_move(d, s, a) {
                 continue;
             }
@@ -216,7 +216,7 @@ pub(crate) fn corner_speed(d: &Corridor, flood: &WindowFlood, end: Point) -> i32
         .states
         .iter()
         .filter(|s| s.pos() == end)
-        .filter(|&&s| Action::iter().any(|a| legal_move(d, s, a)))
+        .filter(|&&s| Action::VARIANTS.iter().any(|&a| legal_move(d, s, a)))
         .map(|&s| vnorm(s))
         .max()
         .unwrap_or(0)

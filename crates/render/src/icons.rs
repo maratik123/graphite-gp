@@ -32,7 +32,7 @@ pub const ICON_LOGICAL_SIZE_PX: f32 = 18.0;
     PartialEq,
     Eq,
     Hash,
-    strum::EnumIter,
+    strum::VariantArray,
     strum::EnumCount,
     strum::IntoStaticStr,
     enum_map::Enum,
@@ -229,7 +229,7 @@ pub fn draw_icon(painter: &Painter, handle: &TextureHandle, rect: Rect, tint: Co
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use strum::{EnumCount, IntoEnumIterator};
+    use strum::{EnumCount, VariantArray};
 
     /// Pre-step P's recorded byte sizes for the vendored SVGs (Lucide tag
     /// `1.25.0`) — the authoritative SHA-256 pin lives in the vendoring
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn all_icons_have_nonempty_svg_bytes() {
-        for icon in Icon::iter() {
+        for &icon in Icon::VARIANTS {
             let bytes = icon.svg_bytes();
             assert!(!bytes.is_empty(), "{icon:?} svg_bytes() was empty");
             assert!(
@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn icon_all_and_names_are_the_five_distinct_variants() {
         assert_eq!(Icon::COUNT, 5);
-        let names: HashSet<&str> = Icon::iter().map(<&'static str>::from).collect();
+        let names: HashSet<&str> = Icon::VARIANTS.iter().map(<&'static str>::from).collect();
         assert_eq!(
             names.len(),
             5,
@@ -339,7 +339,7 @@ mod tests {
                   through IconSet::new, which panics under Miri at \
                   tiny-skia-0.12.0/src/pipeline/mod.rs:205 (\"range end \
                   index 330 out of range for slice of length 324\") — \
-                  isolated by bisecting Icon::iter() one variant at a time; \
+                  isolated by bisecting Icon::VARIANTS one variant at a time; \
                   play/pause/grid-3x3/zoom-in all bake cleanly under Miri \
                   at width 18, only settings.svg's stroke geometry \
                   triggers this tiny-skia \"simd\" feature scanline \
@@ -352,7 +352,7 @@ mod tests {
         let set = IconSet::new(&ctx).expect("vendored icons bake");
 
         let mut ids = HashSet::new();
-        for icon in Icon::iter() {
+        for &icon in Icon::VARIANTS {
             let handle = set.get(icon);
             assert_eq!(
                 handle.name(),

@@ -14,7 +14,7 @@ use std::collections::{HashSet, VecDeque};
 use gp_core::geom::Corridor;
 use gp_core::sim::{Action, CarState, LapCounter, legal_move, step};
 use gp_core::track::{RaceDir, StartFinish, StartGrid};
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 /// The predecessor of `s2` under action `a` — inverts [`step`]: `step`
 /// computes `vx' = vx + ax` then `x' = x + vx'`, so undoing it takes
@@ -65,7 +65,7 @@ pub(crate) const fn within_v_ceil(s: CarState, v_ceil: i32) -> bool {
 /// the bound is purely kinematic, `d` membership is enforced only on
 /// transitions via `legal_move`. Deterministic **membership** (AC5): the
 /// worklist is a `VecDeque` seeded in `seeds`' argument order, expanding
-/// successors in [`Action::iter()`] declaration order; the returned
+/// successors in [`Action::VARIANTS`] declaration order; the returned
 /// [`HashSet`]'s own iteration order is not meaningful and is never relied on.
 pub fn forward_reachable(d: &Corridor, seeds: &[CarState], v_ceil: i32) -> HashSet<CarState> {
     let mut visited = HashSet::new();
@@ -76,7 +76,7 @@ pub fn forward_reachable(d: &Corridor, seeds: &[CarState], v_ceil: i32) -> HashS
         }
     }
     while let Some(s) = queue.pop_front() {
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             if !legal_move(d, s, a) {
                 continue;
             }
@@ -107,7 +107,7 @@ pub fn backward_reachable(d: &Corridor, goals: &[CarState], v_ceil: i32) -> Hash
         }
     }
     while let Some(s2) = queue.pop_front() {
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             let Some(s) = predecessor(s2, a) else {
                 continue;
             };
@@ -168,7 +168,7 @@ pub fn oracle_liveness_v1(
         }
     }
     while let Some((s, counter)) = queue.pop_front() {
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             if !legal_move(d, s, a) {
                 continue;
             }
@@ -365,7 +365,7 @@ mod tests {
         let set = forward_reachable(&d, &[seed], 1);
 
         for &s in &set {
-            for a in Action::iter() {
+            for &a in Action::VARIANTS {
                 let expects_edge = legal_move(&d, s, a);
                 if expects_edge {
                     let s2 = step(s, a);

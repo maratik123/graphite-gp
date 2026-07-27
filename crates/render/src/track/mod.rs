@@ -35,18 +35,18 @@ pub use transform::TrackTransform;
 use crate::Overlays;
 use egui::{Painter, Rect};
 use gp_core::track::TrackArtifact;
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 /// The layers [`draw_frame`] draws, back-to-front (AC5/AC9, final documented
 /// order): `regions` (which expands to [`regions::RegionLayer`]'s own
 /// `outfield → asphalt → infield`) `→ heatmap → grid → walls → fastest-lap →
 /// sf → cars`. [`draw_frame`] iterates
-/// [`Layer::iter`](IntoEnumIterator::iter) and dispatches each variant
+/// [`Layer::VARIANTS`] and dispatches each variant
 /// to its draw action, so this order **is** the draw order (no second,
 /// separately-maintained sequence to drift from it) —
 /// `layer_order_matches_documented_names` pins the flattened, 9-name list as
 /// a tested contract.
-#[derive(Clone, Copy, Debug, strum::EnumIter, strum::IntoStaticStr)]
+#[derive(Clone, Copy, Debug, strum::VariantArray, strum::IntoStaticStr)]
 #[strum(serialize_all = "kebab-case")]
 pub(crate) enum Layer {
     /// The three regions (`outfield`, `asphalt`, `infield`) — see
@@ -113,7 +113,7 @@ pub(crate) fn draw_frame(
         .map(|loop_points| loop_points.iter().map(|&p| transform.map(p)).collect())
         .collect();
 
-    for layer in Layer::iter() {
+    for &layer in Layer::VARIANTS {
         match layer {
             Layer::Regions => {
                 regions::fill(
@@ -168,7 +168,7 @@ mod tests {
     use gp_core::geom::Point;
     use gp_core::sim::CarState;
     use gp_core::track::TrackArtifact;
-    use strum::IntoEnumIterator;
+    use strum::VariantArray;
 
     /// AC5/AC9 — the documented back-to-front layer order is exactly (final,
     /// flattened, 9-entry list) `outfield → asphalt → infield → heatmap →
@@ -177,9 +177,11 @@ mod tests {
     /// own three names.
     #[test]
     fn layer_order_matches_documented_names() {
-        let flat: Vec<&'static str> = Layer::iter()
-            .flat_map(|layer| match layer {
-                Layer::Regions => super::regions::RegionLayer::iter()
+        let flat: Vec<&'static str> = Layer::VARIANTS
+            .iter()
+            .flat_map(|&layer| match layer {
+                Layer::Regions => super::regions::RegionLayer::VARIANTS
+                    .iter()
                     .map(<&'static str>::from)
                     .collect::<Vec<_>>(),
                 other => vec![<&'static str>::from(other)],

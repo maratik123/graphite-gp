@@ -11,9 +11,9 @@ use gp_core::geom::{
     Corridor, Point, Side, bounded_complement_components, component_count, walls_from_boundary,
 };
 use gp_core::track::RaceDir;
-use rand::seq::IteratorRandom;
+use rand::seq::IndexedRandom;
 use rand::{Rng, RngExt};
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 /// Documented supported domain floor for `l_min` (design doc, reviewer NOTE
 /// 2): below this, [`phase1_coarse_ring`] clamps up.
@@ -131,7 +131,7 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
 }
 
 /// Widens `ring` outward on each [`Side`] by a `0..=WIDEN_MAX` amount drawn
-/// per side, in `Side::iter()`'s fixed order (design doc §2 Ф1 step 5).
+/// per side, in `Side::VARIANTS`'s fixed order (design doc §2 Ф1 step 5).
 ///
 /// Each widened layer is attached only to `ring`'s existing extremal cells on
 /// that side and never touches the inner hole — outward-only. For a concave
@@ -147,7 +147,7 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
 )]
 fn widen(ring: &BTreeSet<Point>, rng: &mut impl Rng) -> BTreeSet<Point> {
     let mut ring = ring.clone();
-    for side in Side::iter() {
+    for side in Side::VARIANTS {
         let amount = rng.random_range(0..=WIDEN_MAX);
         if amount == 0 {
             continue;
@@ -252,9 +252,10 @@ fn rectangular_fallback(l_eff: i32) -> (BTreeSet<Point>, BTreeSet<Point>) {
 /// Draws the fixed traversal orientation — one `u32` pick after the loop
 /// settles (success or fallback), so `dir` is seeded on every path (AC4).
 fn choose_dir(rng: &mut impl Rng) -> RaceDir {
-    RaceDir::iter()
+    RaceDir::VARIANTS
         .choose(rng)
-        .expect("enum variants iterator should return correct size_hint")
+        .copied()
+        .expect("enum variants should not be empty")
 }
 
 /// Clamps `l_min` into the documented supported coarse-block domain

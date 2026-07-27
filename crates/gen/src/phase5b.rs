@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use gp_core::geom::{Corridor, Point, Side, Wall, walls_from_boundary};
 use gp_core::sim::{Action, CarState, LapCounter, legal_move, step};
 use gp_core::track::{RaceDir, StartFinish, StartGrid, TrackMetrics};
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 use crate::phase5::within_v_ceil;
 
@@ -114,7 +114,7 @@ pub(crate) const fn wall_neighbor(w: Wall) -> Option<Point> {
 pub(crate) fn p0_boundary_walls(d: &Corridor, p0_cells: &HashSet<Point>) -> Vec<Wall> {
     let mut walls: Vec<Wall> = Vec::new();
     for &cell in p0_cells {
-        for side in Side::iter() {
+        for &side in Side::VARIANTS {
             let off_d =
                 wall_neighbor(Wall { cell, side }).is_none_or(|neighbor| !d.contains(neighbor));
             if off_d {
@@ -164,7 +164,7 @@ pub(crate) fn crosses_sf_forward(sf: &StartFinish, from: Point, to: Point) -> bo
 
 /// Enumerates the lap-close goal states reachable in one legal move from
 /// `r` (design § Approach (1)): for each `s ∈ r` and each `a ∈
-/// Action::iter()`, if `legal_move(d, s, a)` holds and the swept move `s.pos()
+/// Action::VARIANTS`, if `legal_move(d, s, a)` holds and the swept move `s.pos()
 /// → step(s, a).pos()` is a forward S/F crossing ([`crosses_sf_forward`]),
 /// the successor `step(s, a)` is a goal — bounded to the same `v_ceil` L∞
 /// box the floods enforce ([`within_v_ceil`]).
@@ -180,7 +180,7 @@ pub(crate) fn lap_close_goals(
 ) -> Vec<CarState> {
     let mut goals = Vec::new();
     for &s in r {
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             if !legal_move(d, s, a) {
                 continue;
             }
@@ -280,7 +280,7 @@ pub(crate) fn fastest_lap_through_live(
 
     while let Some((s, counter)) = queue.pop_front() {
         let s_key: Key = (s, counter.raw().clamp(-1, 0));
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             if !legal_move(d, s, a) {
                 continue;
             }
@@ -790,7 +790,11 @@ mod tests {
         // No legal move exists from the witness: every action's minimum
         // resulting x (vx - 1 = 2, so x' >= 8) exceeds the track's last
         // index (7).
-        assert!(Action::iter().all(|a| !legal_move(&d, witness, a)));
+        assert!(
+            Action::VARIANTS
+                .iter()
+                .all(|&a| !legal_move(&d, witness, a))
+        );
 
         let goals = lap_close_goals(&d, &sf, &r, v_ceil);
         let b = crate::backward_reachable(&d, &goals, v_ceil);

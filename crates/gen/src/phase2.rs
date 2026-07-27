@@ -11,7 +11,7 @@
 use std::collections::{BTreeSet, HashSet};
 
 use gp_core::geom::{Corridor, Point, Side};
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 use crate::CoarseSkeleton;
 use crate::coarse::block_points;
@@ -245,10 +245,10 @@ fn taper_pass(d: &mut Corridor, h: &BTreeSet<Point>, side: Side) {
 }
 
 /// Stage 2 (design doc §2 Ф2): four directional outfield passes, in
-/// [`Side::iter()`] order (East, West, North, South) for determinism (AC6).
+/// [`Side::VARIANTS`] order (East, West, North, South) for determinism (AC6).
 /// Additive and hole-safe by construction (design doc Risks) — satisfies AC4.
 fn stage2_taper(d: &mut Corridor, h: &BTreeSet<Point>) {
-    for side in Side::iter() {
+    for &side in Side::VARIANTS {
         taper_pass(d, h, side);
     }
 }

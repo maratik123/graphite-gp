@@ -7,7 +7,7 @@
 use crate::geom::{Corridor, Point, Side, supercover};
 use crate::track::StartFinish;
 use enumflags2::bitflags;
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 /// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
 /// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
@@ -42,7 +42,7 @@ impl CarState {
 /// foundation of every braking-distance argument in the design.
 #[bitflags]
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, strum::EnumIter)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, strum::VariantArray)]
 // `#[bitflags]`-generated code triggers `clippy::use_self` (nursery) against
 // the enum's own declaration span; no `Self`-eligible code exists in this
 // hand-written block.
@@ -111,7 +111,11 @@ pub fn legal_move(d: &Corridor, s: CarState, a: Action) -> bool {
 /// the player UI, the AI policy (as the pre-softmax `−inf` mask), and the
 /// oracle.
 pub fn legal_mask(d: &Corridor, s: CarState) -> BitFlags<Action> {
-    Action::iter().filter(|&a| legal_move(d, s, a)).collect()
+    Action::VARIANTS
+        .iter()
+        .copied()
+        .filter(|&a| legal_move(d, s, a))
+        .collect()
 }
 
 /// Advances one car by one (assumed-legal) action, returning the new state.
@@ -564,7 +568,7 @@ mod tests {
             vx: i32::MAX,
             vy: 0,
         };
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             assert!(!legal_move(&d, s, a));
         }
         assert_eq!(legal_mask(&d, s), BitFlags::empty());
@@ -580,7 +584,7 @@ mod tests {
             vx: i32::MIN,
             vy: 0,
         };
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             assert!(!legal_move(&d, s, a));
         }
         assert_eq!(legal_mask(&d, s), BitFlags::empty());
@@ -747,7 +751,7 @@ mod tests {
             vy: 0,
         };
         let mask = legal_mask(&d, s);
-        for a in Action::iter() {
+        for &a in Action::VARIANTS {
             assert_eq!(mask.contains(a), legal_move(&d, s, a));
         }
         assert!(!mask.is_empty());
@@ -756,10 +760,10 @@ mod tests {
 
     #[test]
     fn action_iter_is_declaration_order() {
-        // AC4: Action::iter() must preserve the policy's logit order —
+        // AC4: Action::VARIANTS must preserve the policy's logit order —
         // Coast, East, West, North, South — exactly as declared.
         assert_eq!(
-            Action::iter().collect::<Vec<_>>(),
+            Action::VARIANTS.to_vec(),
             vec![
                 Action::Coast,
                 Action::East,

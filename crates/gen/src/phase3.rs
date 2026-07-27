@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use gp_core::geom::{Corridor, Orient, Point, Side};
 use gp_core::track::{RaceDir, StartFinish, StartGrid, TimingGate};
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 use crate::CoarseSkeleton;
 
@@ -74,7 +74,7 @@ const fn opposite_side(s: Side) -> Side {
 
 // ---- Straight-run selection (pick_straight_run) --------------------------
 
-/// `Side::iter()`'s fixed enumeration order, as a rank — the primary
+/// `Side::VARIANTS`'s fixed enumeration order, as a rank — the primary
 /// tie-break key for deterministic straight-run selection (AC8).
 const fn side_rank(s: Side) -> u8 {
     match s {
@@ -132,7 +132,9 @@ fn contiguous_runs(vals: &BTreeSet<i32>) -> Vec<(i32, i32)> {
 fn pick_straight_run(ring: &BTreeSet<Point>, hole: &BTreeSet<Point>) -> Segment {
     let mut groups: BTreeMap<(u8, i32), BTreeSet<i32>> = BTreeMap::new();
     for &c in ring {
-        let hole_facing: Vec<Side> = Side::iter()
+        let hole_facing: Vec<Side> = Side::VARIANTS
+            .iter()
+            .copied()
             .filter(|&s| {
                 let (dx, dy) = s.delta();
                 hole.contains(&Point::new(c.x.saturating_add(dx), c.y.saturating_add(dy)))
@@ -519,12 +521,11 @@ pub fn phase3_start_finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
 
     #[test]
     fn forward_side_matches_ccw_rotation_formula() {
         // CCW: forward.delta() = (inward.y, -inward.x).
-        for inward in Side::iter() {
+        for &inward in Side::VARIANTS {
             let (ix, iy) = inward.delta();
             let expected = (iy, -ix);
             assert_eq!(forward_side(RaceDir::Ccw, inward).delta(), expected);
@@ -534,7 +535,7 @@ mod tests {
     #[test]
     fn forward_side_matches_cw_rotation_formula() {
         // CW: forward.delta() = (-inward.y, inward.x).
-        for inward in Side::iter() {
+        for &inward in Side::VARIANTS {
             let (ix, iy) = inward.delta();
             let expected = (-iy, ix);
             assert_eq!(forward_side(RaceDir::Cw, inward).delta(), expected);
@@ -569,7 +570,7 @@ mod tests {
 
     #[test]
     fn opposite_side_round_trips() {
-        for s in Side::iter() {
+        for &s in Side::VARIANTS {
             assert_eq!(opposite_side(opposite_side(s)), s);
         }
         assert_eq!(opposite_side(Side::East), Side::West);
@@ -621,7 +622,8 @@ mod tests {
             } else {
                 Point::new(seg.fixed_coord, v)
             };
-            let hole_facing_count = Side::iter()
+            let hole_facing_count = Side::VARIANTS
+                .iter()
                 .filter(|&s| {
                     let (dx, dy) = s.delta();
                     hole.contains(&Point::new(c.x.saturating_add(dx), c.y.saturating_add(dy)))
