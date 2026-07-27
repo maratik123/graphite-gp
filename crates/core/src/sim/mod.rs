@@ -6,13 +6,8 @@
 
 use crate::geom::{Corridor, Point, Side, supercover};
 use crate::track::StartFinish;
-use enumflags2::bitflags;
+use enumflags2::{BitFlags, bitflags};
 use strum::VariantArray;
-
-/// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
-/// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
-/// guideline C-REEXPORT).
-pub use enumflags2::BitFlags;
 
 /// One car's state `(x, y, vx, vy)` (design doc §3). Start state has `v = (0,0)`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -59,6 +54,11 @@ pub enum Action {
     /// `(0, -1)`.
     South,
 }
+
+/// Re-exported so consumers of [`legal_mask`]'s `BitFlags<Action>` return type
+/// (e.g. `gp-ai`) do not need a direct `enumflags2` dependency (Rust API
+/// guideline C-REEXPORT).
+pub type Actions = BitFlags<Action>;
 
 impl Action {
     /// The acceleration `(a, b)` this action applies to velocity.

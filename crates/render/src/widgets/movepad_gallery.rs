@@ -15,7 +15,7 @@
 
 use super::movepad::MovePad;
 use egui::{Pos2, Rect};
-use gp_core::sim::{Action, BitFlags};
+use gp_core::sim::{Action, Actions};
 
 /// The gallery's fixed canvas: 640×260 logical points at
 /// `pixels_per_point = 1.0` — wide enough for 3 pads side by side at
@@ -51,7 +51,7 @@ fn draw_movepad_gallery(painter: &egui::Painter, rect: Rect) {
     MovePad::paint(
         painter,
         rect_1,
-        BitFlags::all(),
+        Actions::all(),
         Some(Action::North),
         None,
         PAD_SIZE,
@@ -64,7 +64,7 @@ fn draw_movepad_gallery(painter: &egui::Painter, rect: Rect) {
 
     let origin_3 = origin_2 + pad_extent + PAD_GAP;
     let rect_3 = Rect::from_min_size(Pos2::new(origin_3, y0), egui::vec2(pad_extent, pad_extent));
-    MovePad::paint(painter, rect_3, BitFlags::empty(), None, None, PAD_SIZE);
+    MovePad::paint(painter, rect_3, Actions::empty(), None, None, PAD_SIZE);
 }
 
 #[cfg(test)]

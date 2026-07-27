@@ -7,7 +7,7 @@
 
 use crate::tokens::{color, spacing};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Ui};
-use gp_core::sim::{Action, BitFlags};
+use gp_core::sim::{Action, Actions};
 
 /// Default cell edge (`MovePad.jsx` default; `Screens.jsx:129` overrides to
 /// `52`).
@@ -102,7 +102,7 @@ pub struct MovePadResponse {
 #[derive(Clone, Copy, Debug)]
 pub struct MovePad {
     /// The legal-action mask, consumed directly from `gp_core::sim::legal_mask`.
-    pub legal: BitFlags<Action>,
+    pub legal: Actions,
     /// The currently-chosen action (`.jsx` `value`); `None` = nothing chosen.
     pub selected: Option<Action>,
     /// Cell edge.
@@ -112,7 +112,7 @@ pub struct MovePad {
 impl MovePad {
     /// Builds an unselected, default-size (`SIZE` = 48.0) pad over `legal`.
     #[must_use]
-    pub const fn new(legal: BitFlags<Action>) -> Self {
+    pub const fn new(legal: Actions) -> Self {
         Self {
             legal,
             selected: None,
@@ -175,7 +175,7 @@ impl MovePad {
     pub(crate) fn paint(
         painter: &Painter,
         pad_rect: Rect,
-        legal: BitFlags<Action>,
+        legal: Actions,
         selected: Option<Action>,
         pressed: Option<Action>,
         size: f32,
@@ -291,7 +291,7 @@ fn cell_rect(pad_rect: Rect, row: u8, col: u8, size: f32, gap: f32) -> Rect {
 mod tests {
     use super::{MOVES, MovePad};
     use crate::tokens::color;
-    use gp_core::sim::{Action, BitFlags};
+    use gp_core::sim::{Action, Actions};
 
     /// AC5 — the three-row style table: selected wins over legal; legal
     /// unselected uses the resting trio; illegal uses the disabled trio.
@@ -345,7 +345,7 @@ mod tests {
     /// disabled, deterministically.
     #[test]
     fn all_illegal_mask_yields_all_disabled() {
-        let legal: BitFlags<Action> = BitFlags::empty();
+        let legal: Actions = Actions::empty();
         for cell in &MOVES {
             assert!(!legal.contains(cell.action));
             let style = MovePad::resolve(false, false);
@@ -358,7 +358,7 @@ mod tests {
     /// Builder defaults: `new` starts unselected at the default size.
     #[test]
     fn new_has_expected_defaults() {
-        let pad = MovePad::new(BitFlags::all());
+        let pad = MovePad::new(Actions::all());
         assert!(pad.selected.is_none());
         crate::test_util::assert_f32("MovePad::new size", pad.size, super::SIZE);
 

@@ -10,7 +10,7 @@
 //! `Some(a)` an implementation returns must already be a member of the
 //! `legal` mask it was given.
 
-use gp_core::sim::{Action, BitFlags, CarState};
+use gp_core::sim::{Action, Actions, CarState};
 use gp_core::track::TrackArtifact;
 
 pub mod keys;
@@ -54,7 +54,7 @@ pub struct PollContext<'a> {
     /// `gp_core::sim::legal_mask` (or, during a scrub tick, by
     /// `gp_core::sim::CrashOutcome::action_mask`). **Precondition:
     /// non-empty** — see this struct's own doc.
-    pub legal: BitFlags<Action>,
+    pub legal: Actions,
     /// This frame's input candidates. A seat that reads no UI input (an AI
     /// seat) ignores this field.
     pub input: FrameInput,
@@ -126,7 +126,7 @@ impl Default for Roster {
 /// `crate::controller::test_fixtures::*`.
 #[cfg(test)]
 pub(crate) mod test_fixtures {
-    use super::{Action, BitFlags, CarState, TrackArtifact};
+    use super::{Action, Actions, CarState, TrackArtifact};
     use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
     use gp_core::sim::{legal_mask, resolve_crash};
     use gp_core::track::{
@@ -228,7 +228,7 @@ pub(crate) mod test_fixtures {
     /// table, which stays the **empty**-mask fixture AC6 needs.
     pub(crate) fn scrub_state_with_singleton_coast_mask(
         track: &TrackArtifact,
-    ) -> (CarState, BitFlags<Action>) {
+    ) -> (CarState, Actions) {
         let outcome = resolve_crash(&track.corridor, crash_prone_state());
         let mask = outcome.action_mask(&track.corridor);
         (outcome.state, mask)
@@ -239,10 +239,8 @@ pub(crate) mod test_fixtures {
     /// [`fixture_track`]'s corridor — computed once so every consumer test
     /// asserts against the mask the state actually produces, rather than a
     /// hand-guessed one.
-    pub(crate) fn fixture_states_with_masks(
-        track: &TrackArtifact,
-    ) -> Vec<(CarState, BitFlags<Action>)> {
-        let mut fixtures: Vec<(CarState, BitFlags<Action>)> = [
+    pub(crate) fn fixture_states_with_masks(track: &TrackArtifact) -> Vec<(CarState, Actions)> {
+        let mut fixtures: Vec<(CarState, Actions)> = [
             mid_corridor_state(),
             wall_adjacent_state(),
             fast_approach_excludes_coast_state(),
@@ -274,7 +272,7 @@ pub(crate) mod test_fixtures {
 mod tests {
     use super::test_fixtures::{AlwaysCoastStub, fixture_states_with_masks, fixture_track};
     use super::{Controller, FrameInput, PollContext};
-    use gp_core::sim::{BitFlags, legal_move};
+    use gp_core::sim::{Actions, legal_move};
 
     #[test]
     fn poll_yields_only_legal_actions_for_the_state_it_was_asked_about() {
@@ -331,7 +329,7 @@ mod tests {
             let ctx = PollContext {
                 track: &track,
                 state,
-                legal: BitFlags::empty(),
+                legal: Actions::empty(),
                 input,
             };
             assert_eq!(stub.poll(ctx), None);
@@ -342,7 +340,7 @@ mod tests {
             let ctx = PollContext {
                 track: &track,
                 state,
-                legal: BitFlags::empty(),
+                legal: Actions::empty(),
                 input,
             };
             assert_eq!(player.poll(ctx), None);
@@ -353,7 +351,7 @@ mod tests {
     fn fixture_table_includes_a_required_singleton_coast_mask_row() {
         let track = fixture_track();
         let fixtures = fixture_states_with_masks(&track);
-        let singleton_coast = BitFlags::from(gp_core::sim::Action::Coast);
+        let singleton_coast = Actions::from(gp_core::sim::Action::Coast);
         assert!(
             fixtures.iter().any(|&(_, mask)| mask == singleton_coast),
             "fixture_states_with_masks must include a singleton-{{Coast}} mask row \
@@ -372,7 +370,7 @@ mod tests {
         // singleton-{Coast} row — so PlayerController::decide must consult
         // input.shell_action rather than auto-resolving (AC5 does not
         // apply here).
-        assert_ne!(legal, BitFlags::from(gp_core::sim::Action::Coast));
+        assert_ne!(legal, Actions::from(gp_core::sim::Action::Coast));
 
         let mut roster = super::Roster::new();
         roster.push(Box::new(crate::controller::player::PlayerController));

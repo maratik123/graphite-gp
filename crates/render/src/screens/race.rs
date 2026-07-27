@@ -18,7 +18,7 @@ use crate::widgets::{
 };
 use crate::{CarRender, Overlays, Scene};
 use egui::{Layout, Pos2, Rect, Response, Ui};
-use gp_core::sim::{Action, BitFlags, CarState, legal_mask};
+use gp_core::sim::{Action, Actions, CarState, legal_mask};
 use gp_core::track::TrackArtifact;
 
 /// Outer padding inset from the screen's `max_rect` (`Screens.jsx:98`
@@ -369,7 +369,7 @@ fn draw_canvas(ui: &mut Ui, rect: Rect, scene: Scene<'_>) {
 /// the mono helper caption, and a full-width secondary "Coast (·)" `Button`
 /// shortcut. Returns the `MovePad`'s response and the Coast button's
 /// response.
-fn draw_your_move(ui: &mut Ui, legal: BitFlags<Action>) -> (MovePadResponse, Response) {
+fn draw_your_move(ui: &mut Ui, legal: Actions) -> (MovePadResponse, Response) {
     let mut movepad_response = None;
     let mut coast_response = None;
     Card::new()
@@ -465,11 +465,7 @@ pub fn hud_readouts(state: CarState) -> (String, String, String) {
 /// Plain `fn` — calls `legal_mask` (not `const`), so `missing_const_for_fn`
 /// does not force `const`.
 #[must_use]
-pub fn active_legal_mask(
-    track: &TrackArtifact,
-    cars: &[CarRender<'_>],
-    active: usize,
-) -> BitFlags<Action> {
+pub fn active_legal_mask(track: &TrackArtifact, cars: &[CarRender<'_>], active: usize) -> Actions {
     legal_mask(&track.corridor, active_state(cars, active))
 }
 
