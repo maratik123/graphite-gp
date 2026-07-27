@@ -11,7 +11,7 @@ use gp_core::geom::{
     Corridor, Point, Side, bounded_complement_components, component_count, walls_from_boundary,
 };
 use gp_core::track::RaceDir;
-use rand::seq::IteratorRandom;
+use rand::seq::IndexedRandom;
 use rand::{Rng, RngExt};
 use strum::VariantArray;
 
@@ -253,9 +253,8 @@ fn rectangular_fallback(l_eff: i32) -> (BTreeSet<Point>, BTreeSet<Point>) {
 /// settles (success or fallback), so `dir` is seeded on every path (AC4).
 fn choose_dir(rng: &mut impl Rng) -> RaceDir {
     RaceDir::VARIANTS
-        .iter()
-        .copied()
         .choose(rng)
+        .copied()
         .expect("enum variants iterator should return correct size_hint")
 }
 
