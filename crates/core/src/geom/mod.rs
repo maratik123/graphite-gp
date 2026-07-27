@@ -415,7 +415,8 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
             inner_min: x_min,
             inner_max: x_max,
             bound,
-        };
+        }
+        .pre_eval();
 
         EitherIter::Left((a.y.min(b.y)..=a.y.max(b.y)).flat_map(move |cy| {
             let (lo, hi) = inner_range.evaluate(cy);
@@ -434,7 +435,8 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
             inner_min: y_min,
             inner_max: y_max,
             bound,
-        };
+        }
+        .pre_eval();
 
         EitherIter::Right((a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
             let (lo, hi) = inner_range.evaluate(cx);
@@ -453,7 +455,47 @@ struct InnerRange {
     bound: i64,
 }
 
+struct InnerRangePreEval {
+    outer_origin: i64,
+    across_delta: i64,
+    along_delta: i64,
+    inner_min: i64,
+    inner_max: i64,
+    bound: i64,
+    pre_center: i64,
+    m: i64,
+}
+
 impl InnerRange {
+    const fn pre_eval(self) -> InnerRangePreEval {
+        let Self {
+            outer_origin,
+            across_delta,
+            inner_origin,
+            along_delta,
+            inner_min,
+            inner_max,
+            bound,
+        } = self;
+        // Все входные величины получены из i32-координат (плюс небольшие
+        // константные множители вроде `2`), поэтому промежуточные значения
+        // остаются на порядки меньше границ i64 — переполнение здесь
+        // практически невозможно при разумных координатах карты.
+        #[allow(clippy::arithmetic_side_effects)]
+        InnerRangePreEval {
+            pre_center: along_delta * inner_origin,
+            m: 2 * along_delta,
+            outer_origin,
+            across_delta,
+            along_delta,
+            inner_min,
+            inner_max,
+            bound,
+        }
+    }
+}
+
+impl InnerRangePreEval {
     fn evaluate(&self, outer: Coord) -> (i32, i32) {
         let outer = i64::from(outer);
         let (lo, hi) = if self.along_delta == 0 {
@@ -464,18 +506,17 @@ impl InnerRange {
             // остаются на порядки меньше границ i64 — переполнение здесь
             // практически невозможно при разумных координатах карты.
             #[allow(clippy::arithmetic_side_effects)]
-            let (m, low, high) = {
+            let (low, high) = {
                 let cross = self.across_delta * (outer - self.outer_origin);
-                let m = 2 * self.along_delta;
-                let center = 2 * (cross + self.along_delta * self.inner_origin);
+                let center = 2 * (cross + self.pre_center);
                 let low = center - self.bound;
                 let high = center + self.bound;
-                (m, low, high)
+                (low, high)
             };
 
-            let (low, high) = if m > 0 { (low, high) } else { (high, low) };
+            let (low, high) = if self.m > 0 { (low, high) } else { (high, low) };
 
-            let (lo, hi) = (div_ceil(low, m), div_floor(high, m));
+            let (lo, hi) = (div_ceil(low, self.m), div_floor(high, self.m));
 
             (lo.max(self.inner_min), hi.min(self.inner_max))
         };
