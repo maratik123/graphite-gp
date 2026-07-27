@@ -458,12 +458,11 @@ struct InnerRange {
 struct InnerRangePreEval {
     outer_origin: i64,
     across_delta: i64,
+    pre_center: i64,
     along_delta: i64,
     inner_min: i64,
     inner_max: i64,
     bound: i64,
-    pre_center: i64,
-    m: i64,
 }
 
 impl InnerRange {
@@ -483,10 +482,9 @@ impl InnerRange {
         // практически невозможно при разумных координатах карты.
         #[allow(clippy::arithmetic_side_effects)]
         InnerRangePreEval {
-            pre_center: along_delta * inner_origin,
-            m: 2 * along_delta,
             outer_origin,
             across_delta,
+            pre_center: along_delta * inner_origin,
             along_delta,
             inner_min,
             inner_max,
@@ -506,17 +504,18 @@ impl InnerRangePreEval {
             // остаются на порядки меньше границ i64 — переполнение здесь
             // практически невозможно при разумных координатах карты.
             #[allow(clippy::arithmetic_side_effects)]
-            let (low, high) = {
+            let (m, low, high) = {
                 let cross = self.across_delta * (outer - self.outer_origin);
                 let center = 2 * (cross + self.pre_center);
+                let m = 2 * self.along_delta;
                 let low = center - self.bound;
                 let high = center + self.bound;
-                (low, high)
+                (m, low, high)
             };
 
-            let (low, high) = if self.m > 0 { (low, high) } else { (high, low) };
+            let (low, high) = if m > 0 { (low, high) } else { (high, low) };
 
-            let (lo, hi) = (div_ceil(low, self.m), div_floor(high, self.m));
+            let (lo, hi) = (div_ceil(low, m), div_floor(high, m));
 
             (lo.max(self.inner_min), hi.min(self.inner_max))
         };
