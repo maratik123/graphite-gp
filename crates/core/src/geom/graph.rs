@@ -8,7 +8,7 @@
 
 use std::ops::ControlFlow;
 
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 use super::{Coord, Corridor, Point, Wall};
 
@@ -17,7 +17,7 @@ use super::{Coord, Corridor, Point, Wall};
 /// The outward direction from a drivable cell toward a non-drivable neighbor
 /// (design doc §1). Variant order mirrors [`Point::neighbors4`]: east, west,
 /// north, south.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, strum::EnumIter)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, strum::VariantArray)]
 pub enum Side {
     /// The +x side — toward the eastern neighbor.
     East,
@@ -370,7 +370,7 @@ pub fn walls_from_boundary(d: &Corridor) -> Vec<Wall> {
         if !d.contains(cell) {
             continue;
         }
-        for side in Side::iter() {
+        for &side in Side::VARIANTS {
             let (dx, dy) = side.delta();
             // NOTE: does not reuse the saturating `Point::neighbors4` — a
             // saturated self-neighbor would test `d.contains(cell) == true`

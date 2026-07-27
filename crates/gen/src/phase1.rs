@@ -13,7 +13,7 @@ use gp_core::geom::{
 use gp_core::track::RaceDir;
 use rand::seq::IteratorRandom;
 use rand::{Rng, RngExt};
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 /// Documented supported domain floor for `l_min` (design doc, reviewer NOTE
 /// 2): below this, [`phase1_coarse_ring`] clamps up.
@@ -147,7 +147,7 @@ fn ring_from_p(p: &BTreeSet<Point>) -> BTreeSet<Point> {
 )]
 fn widen(ring: &BTreeSet<Point>, rng: &mut impl Rng) -> BTreeSet<Point> {
     let mut ring = ring.clone();
-    for side in Side::iter() {
+    for side in Side::VARIANTS {
         let amount = rng.random_range(0..=WIDEN_MAX);
         if amount == 0 {
             continue;
@@ -252,7 +252,9 @@ fn rectangular_fallback(l_eff: i32) -> (BTreeSet<Point>, BTreeSet<Point>) {
 /// Draws the fixed traversal orientation — one `u32` pick after the loop
 /// settles (success or fallback), so `dir` is seeded on every path (AC4).
 fn choose_dir(rng: &mut impl Rng) -> RaceDir {
-    RaceDir::iter()
+    RaceDir::VARIANTS
+        .iter()
+        .copied()
         .choose(rng)
         .expect("enum variants iterator should return correct size_hint")
 }

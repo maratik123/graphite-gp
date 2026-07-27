@@ -9,7 +9,7 @@
 
 use gp_core::geom::{Corridor, Orient, Point, Side, Wall};
 use gp_core::track::TrackMetrics;
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 use crate::phase4_defects::{axis_width, is_concave_chord_cut};
 use crate::phase5_runout::{end_of_ray, sink_to_sink_deficit, travel_dir};
@@ -43,8 +43,9 @@ pub(crate) fn add_edit_wall(d: &Corridor, q: Point) -> Option<Wall> {
     if !in_box(d, q) || d.contains(q) {
         return None;
     }
-    Side::iter()
-        .filter_map(|side| {
+    Side::VARIANTS
+        .iter()
+        .filter_map(|&side| {
             let (dx, dy) = side.delta();
             let cell = Point::new(q.x.checked_sub(dx)?, q.y.checked_sub(dy)?);
             d.contains(cell).then_some(Wall { cell, side })
@@ -63,11 +64,12 @@ pub(crate) fn remove_edit_wall(d: &Corridor, c: Point) -> Option<Wall> {
     if !d.contains(c) {
         return None;
     }
-    Side::iter()
-        .filter(|&side| {
+    Side::VARIANTS
+        .iter()
+        .filter(|&&side| {
             wall_neighbor(Wall { cell: c, side }).is_none_or(|neighbor| !d.contains(neighbor))
         })
-        .map(|side| Wall { cell: c, side })
+        .map(|&side| Wall { cell: c, side })
         .min()
 }
 

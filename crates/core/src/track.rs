@@ -7,7 +7,7 @@ use crate::geom::{Corridor, Orient, Point, Rect, Side, Wall, barrier_distance_fi
 /// Global traversal orientation of the ring, fixed during generation (design
 /// doc §2, Ф1). Everything downstream — the lap counter, AI progress/reward,
 /// the ideal line — is oriented by this.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, strum::EnumIter)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, strum::VariantArray)]
 pub enum RaceDir {
     /// Clockwise.
     Cw,

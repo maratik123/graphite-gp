@@ -21,15 +21,15 @@
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape};
 use gp_core::geom::{Corridor, Point};
 use std::collections::HashSet;
-use strum::IntoEnumIterator;
+use strum::VariantArray;
 
 /// The three regions [`fill`] draws, back-to-front (design doc §4, layer 1;
 /// AC9's documented layer order; Amendment — Rounded track, PR #100):
 /// `Outfield → Asphalt → Infield`. [`fill`] iterates
-/// [`RegionLayer::iter`](IntoEnumIterator::iter) and dispatches each
+/// [`RegionLayer::VARIANTS`] and dispatches each
 /// variant to its draw action, so this order **is** the draw order (no
 /// second, separately-maintained sequence to drift from it).
-#[derive(Clone, Copy, Debug, strum::EnumIter, strum::IntoStaticStr)]
+#[derive(Clone, Copy, Debug, strum::VariantArray, strum::IntoStaticStr)]
 #[strum(serialize_all = "kebab-case")]
 pub(crate) enum RegionLayer {
     /// The whole target rect filled `PAPER_1` — the outfield background,
@@ -496,7 +496,7 @@ pub(crate) fn fill(
     indices: &[Vec<[u32; 3]>],
     roles: &LoopRoles,
 ) {
-    for region in RegionLayer::iter() {
+    for &region in RegionLayer::VARIANTS {
         match region {
             RegionLayer::Outfield => {
                 painter.rect_filled(rect, 0, crate::tokens::color::SURFACE_PAGE);

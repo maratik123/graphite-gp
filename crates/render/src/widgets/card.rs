@@ -8,7 +8,7 @@ use egui::{
 };
 
 /// Card elevation (`Card.d.ts` `elevation: 0|1|2|3`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, strum::EnumIter)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, strum::VariantArray)]
 pub enum Elevation {
     /// No shadow.
     Level0,
