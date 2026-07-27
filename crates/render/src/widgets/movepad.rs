@@ -7,7 +7,7 @@
 
 use crate::tokens::{color, spacing};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Response, Sense, Ui};
-use gp_core::sim::{Action, BitFlags};
+use gp_core::sim::{Action, Actions};
 
 /// Default cell edge (`MovePad.jsx` default; `Screens.jsx:129` overrides to
 /// `52`).
@@ -102,7 +102,7 @@ pub struct MovePadResponse {
 #[derive(Clone, Copy, Debug)]
 pub struct MovePad {
     /// The legal-action mask, consumed directly from `gp_core::sim::legal_mask`.
-    pub legal: BitFlags<Action>,
+    pub legal: Actions,
     /// The currently-chosen action (`.jsx` `value`); `None` = nothing chosen.
     pub selected: Option<Action>,
     /// Cell edge.
@@ -112,7 +112,7 @@ pub struct MovePad {
 impl MovePad {
     /// Builds an unselected, default-size (`SIZE` = 48.0) pad over `legal`.
     #[must_use]
-    pub const fn new(legal: BitFlags<Action>) -> Self {
+    pub const fn new(legal: Actions) -> Self {
         Self {
             legal,
             selected: None,
@@ -175,7 +175,7 @@ impl MovePad {
     pub(crate) fn paint(
         painter: &Painter,
         pad_rect: Rect,
-        legal: BitFlags<Action>,
+        legal: Actions,
         selected: Option<Action>,
         pressed: Option<Action>,
         size: f32,

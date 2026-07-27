@@ -7,7 +7,7 @@
 //! replay-determinism test (AC9).
 
 use super::{Controller, FrameInput, PollContext};
-use gp_core::sim::{Action, BitFlags};
+use gp_core::sim::{Action, Actions, make_bitflags};
 
 /// The player seat. Stateless — every decision is a pure function of the
 /// [`PollContext`] it is handed.
@@ -25,8 +25,8 @@ impl PlayerController {
     /// of the [`PollContext`] precondition) makes the scan vacuously
     /// `None`, never an illegal `Some`.
     #[must_use]
-    pub fn decide(legal: BitFlags<Action>, input: FrameInput) -> Option<Action> {
-        if legal == BitFlags::from(Action::Coast) {
+    pub fn decide(legal: Actions, input: FrameInput) -> Option<Action> {
+        if legal == make_bitflags!(Action::Coast) {
             return Some(Action::Coast);
         }
         [input.shell_action, input.key_action]

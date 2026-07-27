@@ -6,7 +6,7 @@
 //! exactly like a `MovePad` cell.
 
 use eframe::egui::Key;
-use gp_core::sim::{Action, BitFlags};
+use gp_core::sim::{Action, Actions};
 
 /// The key → action map (spec Key decisions — R1-Q3), in [`Action`]
 /// declaration order, arrow key before its letter-key alias within a pair.
@@ -44,7 +44,7 @@ pub fn action_for_key(key: Key) -> Option<Action> {
 /// seam*). A production caller passes
 /// `|k| i.key_pressed(k)` from inside `ui.input(|i| ...)`.
 #[must_use]
-pub fn keyboard_action(legal: BitFlags<Action>, pressed: impl Fn(Key) -> bool) -> Option<Action> {
+pub fn keyboard_action(legal: Actions, pressed: impl Fn(Key) -> bool) -> Option<Action> {
     KEY_ORDER
         .iter()
         .find(|&&(k, a)| pressed(k) && legal.contains(a))

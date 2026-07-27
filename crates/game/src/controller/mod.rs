@@ -10,7 +10,7 @@
 //! `Some(a)` an implementation returns must already be a member of the
 //! `legal` mask it was given.
 
-use gp_core::sim::{Action, BitFlags, CarState};
+use gp_core::sim::{Action, Actions, CarState};
 use gp_core::track::TrackArtifact;
 
 pub mod keys;
@@ -54,7 +54,7 @@ pub struct PollContext<'a> {
     /// `gp_core::sim::legal_mask` (or, during a scrub tick, by
     /// `gp_core::sim::CrashOutcome::action_mask`). **Precondition:
     /// non-empty** — see this struct's own doc.
-    pub legal: BitFlags<Action>,
+    pub legal: Actions,
     /// This frame's input candidates. A seat that reads no UI input (an AI
     /// seat) ignores this field.
     pub input: FrameInput,
