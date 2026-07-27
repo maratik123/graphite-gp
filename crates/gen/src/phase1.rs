@@ -255,7 +255,7 @@ fn choose_dir(rng: &mut impl Rng) -> RaceDir {
     RaceDir::VARIANTS
         .choose(rng)
         .copied()
-        .expect("enum variants iterator should return correct size_hint")
+        .expect("enum variants should not be empty")
 }
 
 /// Clamps `l_min` into the documented supported coarse-block domain
