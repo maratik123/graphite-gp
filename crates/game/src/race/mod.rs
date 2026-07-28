@@ -5,6 +5,8 @@
 //! race threads through every round (spec § Key decisions — re-deriving the
 //! stream per round would replay one shuffle forever).
 
+pub mod round;
+
 use gp_core::geom::Point;
 use gp_core::sim::{CarState, CrashOutcome, LapCounter};
 use gp_core::track::TrackArtifact;
