@@ -368,14 +368,30 @@ impl Corridor {
 ///   anywhere (design doc §3a).
 /// - **Order-independent, duplicate-free.** The result is the exact cell set: as a
 ///   set `supercover(a, b) == supercover(b, a)`, each cell is yielded exactly once
-///   (the bounding-box scan visits every cell once), and both endpoint cells are
-///   always present (a degenerate `a == b` yields exactly `{a}`).
+///   (the outer loop visits each minor-axis coordinate once, and the inner range it
+///   yields is a contiguous major-axis interval), and both endpoint cells are always
+///   present (a degenerate `a == b` yields exactly `{a}`).
+///
+/// **Cost.** The walk does **not** scan the endpoints' bounding box. It loops over
+/// the *minor* axis and, per outer coordinate, solves the membership predicate for
+/// the exact major-axis interval that satisfies it (`InnerRangePreEval::evaluate`),
+/// so the work is proportional to the number of cells actually yielded rather than
+/// to `|dx| · |dy|`.
 ///
 /// **Overflow precondition:** endpoints are assumed separated by a bounded chord —
 /// one move's velocity, with `|v| ≪ 1.5×10⁹`. Within that domain the widened `i64`
 /// cross product never overflows (its operands are taken relative to `a`, so
 /// `|cr| ≤ 2·|dx|·|dy|`). Adversarial full-range `i32` endpoints lie outside the
 /// documented domain and are not supported.
+///
+/// # Panics
+///
+/// Panics — when the returned iterator is **advanced**, not when it is built — if
+/// an inner-interval bound falls outside `i32` while narrowing it back from the
+/// widened `i64` arithmetic. That requires violating the bounded-chord precondition
+/// above: within it, each bound is clamped against `inner_min` / `inner_max`, which
+/// are the endpoints' own `i32` coordinates, so both always fit. The two sites are
+/// catalogued in `ai-docs/panic-index.md`.
 ///
 /// # Examples
 ///
@@ -402,8 +418,9 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
     let ay = i64::from(a.y);
 
     if dx.abs() >= dy.abs() {
-        // Внутренний цикл по x, внешний — по y. Вдоль внешней оси (y) движется dy,
-        // поперёк (across) — dx.
+        // `x` is the major axis, so it becomes the inner loop and `y` the outer one.
+        // Along the inner axis the segment advances by `dy` per outer step; `dx` is
+        // the across-component that shifts the interval.
         let x_min = i64::from(a.x.min(b.x));
         let x_max = i64::from(a.x.max(b.x));
 
@@ -423,7 +440,8 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
             (lo..=hi).map(move |cx| Point::new(cx, cy))
         }))
     } else {
-        // Внутренний цикл по y, внешний — по x.
+        // Mirror of the branch above with the axes swapped: `y` is the major axis,
+        // so it becomes the inner loop and `x` the outer one.
         let y_min = i64::from(a.y.min(b.y));
         let y_max = i64::from(a.y.max(b.y));
 
@@ -445,27 +463,63 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
     }
 }
 
+/// [`supercover`]'s per-row inner-interval solver, in axis-agnostic terms.
+///
+/// "Outer" is the minor axis (the `flat_map` loop variable), "inner" the major axis
+/// (the contiguous range yielded per outer step). Both `supercover` branches build
+/// this with their axes swapped, so the arithmetic below is written once. Construct
+/// it, then call [`InnerRange::pre_eval`] — [`InnerRangePreEval`] is the only form
+/// that can [`evaluate`](InnerRangePreEval::evaluate).
 struct InnerRange {
+    /// The segment's start coordinate on the outer (minor) axis.
     outer_origin: i64,
+    /// Segment delta *across* the inner axis — what shifts the interval per outer step.
     across_delta: i64,
+    /// The segment's start coordinate on the inner (major) axis.
     inner_origin: i64,
+    /// Segment delta *along* the inner axis; `0` means the interval never narrows.
     along_delta: i64,
+    /// Inclusive inner-axis floor — the lower of the two endpoints' coordinates.
     inner_min: i64,
+    /// Inclusive inner-axis ceiling — the higher of the two endpoints' coordinates.
     inner_max: i64,
+    /// The membership predicate's right-hand side, `|dx| + |dy|`.
     bound: i64,
 }
 
+/// An [`InnerRange`] with its loop-invariant product hoisted out of the per-row path.
+///
+/// Identical to [`InnerRange`] except that `inner_origin` has been folded into
+/// [`pre_center`](Self::pre_center), which is the only term of the interval formula
+/// that does not depend on the outer coordinate.
 struct InnerRangePreEval {
+    /// The segment's start coordinate on the outer (minor) axis.
     outer_origin: i64,
+    /// Segment delta *across* the inner axis — what shifts the interval per outer step.
     across_delta: i64,
+    /// `along_delta * inner_origin`, the outer-invariant half of the interval centre.
     pre_center: i64,
+    /// Segment delta *along* the inner axis; `0` means the interval never narrows.
     along_delta: i64,
+    /// Inclusive inner-axis floor — the lower of the two endpoints' coordinates.
     inner_min: i64,
+    /// Inclusive inner-axis ceiling — the higher of the two endpoints' coordinates.
     inner_max: i64,
+    /// The membership predicate's right-hand side, `|dx| + |dy|`.
     bound: i64,
 }
 
 impl InnerRange {
+    /// Hoists the outer-invariant `along_delta * inner_origin` product out of the
+    /// per-row path, yielding the only form that can `evaluate`.
+    ///
+    /// Called once per [`supercover`] call, never inside the iteration.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "every field is i64-widened from an i32 coordinate, so the single \
+                  product here is bounded by 2^62 and cannot overflow i64 under \
+                  supercover's documented bounded-chord precondition"
+    )]
     const fn pre_eval(self) -> InnerRangePreEval {
         let Self {
             outer_origin,
@@ -476,11 +530,6 @@ impl InnerRange {
             inner_max,
             bound,
         } = self;
-        // Все входные величины получены из i32-координат (плюс небольшие
-        // константные множители вроде `2`), поэтому промежуточные значения
-        // остаются на порядки меньше границ i64 — переполнение здесь
-        // практически невозможно при разумных координатах карты.
-        #[allow(clippy::arithmetic_side_effects)]
         InnerRangePreEval {
             outer_origin,
             across_delta,
@@ -494,16 +543,32 @@ impl InnerRange {
 }
 
 impl InnerRangePreEval {
+    /// The inclusive inner-axis interval `[lo, hi]` whose cells satisfy the
+    /// membership predicate at outer coordinate `outer`.
+    ///
+    /// Solves `2·|cr| ≤ bound` for the inner coordinate instead of testing each
+    /// candidate: the admissible inner values are exactly those in
+    /// `[⌈low / m⌉, ⌊high / m⌋]`, clamped to the endpoints' own span. A returned
+    /// `lo > hi` denotes an empty row and yields no cells.
+    ///
+    /// # Panics
+    ///
+    /// Panics if either bound falls outside `i32`, which requires violating
+    /// [`supercover`]'s bounded-chord precondition — see that function's
+    /// `# Panics` section.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "same bounded-chord precondition as supercover: every operand is \
+                  i64-widened from an i32 coordinate and the only multipliers are \
+                  the constant 2 and the chord deltas, so |center| <= 2^63 holds \
+                  within the documented domain; `m` is non-zero on this arm because \
+                  the along_delta == 0 case returns above"
+    )]
     fn evaluate(&self, outer: Coord) -> (i32, i32) {
         let outer = i64::from(outer);
         let (lo, hi) = if self.along_delta == 0 {
             (self.inner_min, self.inner_max)
         } else {
-            // Все входные величины получены из i32-координат (плюс небольшие
-            // константные множители вроде `2`), поэтому промежуточные значения
-            // остаются на порядки меньше границ i64 — переполнение здесь
-            // практически невозможно при разумных координатах карты.
-            #[allow(clippy::arithmetic_side_effects)]
             let (m, low, high) = {
                 let cross = self.across_delta * (outer - self.outer_origin);
                 let center = 2 * (cross + self.pre_center);
@@ -526,8 +591,17 @@ impl InnerRangePreEval {
     }
 }
 
+/// Unifies two iterator types of the same `Item` behind one concrete type.
+///
+/// [`supercover`] picks its inner axis at runtime, so its two `flat_map` chains have
+/// different (unnameable) types that a single `impl Iterator` return cannot cover.
+/// Boxing would allocate on every legality check; this enum forwards by `match`
+/// instead, preserving [`ExactSizeIterator`] / [`DoubleEndedIterator`] where both
+/// sides provide them.
 enum EitherIter<A, B> {
+    /// The first alternative.
     Left(A),
+    /// The second alternative.
     Right(B),
 }
 
@@ -579,6 +653,19 @@ where
     }
 }
 
+/// `⌊a / b⌋` — division rounding toward negative infinity, for any sign of `b`.
+///
+/// `i64::div_euclid` rounds toward `-∞` only for positive divisors; for a negative
+/// one it rounds *up*, so the quotient is corrected by one on a non-exact division.
+/// Not `i64::div_floor` — that method is still unstable.
+///
+/// # Panics
+///
+/// Panics if `b == 0`, inheriting `i64::div_euclid`'s precondition.
+/// [`InnerRangePreEval::evaluate`] is the only caller and passes `2 * along_delta`
+/// on the arm where `along_delta != 0` is already established, so `b` is non-zero —
+/// and, being even, can never be the `-1` that would make `div_euclid` overflow on
+/// `i64::MIN`.
 const fn div_floor(a: i64, b: i64) -> i64 {
     let q = a.div_euclid(b);
     if b < 0 && a.rem_euclid(b) != 0 {
@@ -588,6 +675,15 @@ const fn div_floor(a: i64, b: i64) -> i64 {
     }
 }
 
+/// `⌈a / b⌉` — division rounding toward positive infinity, for any sign of `b`.
+///
+/// Mirror of [`div_floor`]: `i64::div_euclid` already rounds up for a negative
+/// divisor, so only the positive-divisor case needs the non-exact correction.
+/// Not `i64::div_ceil` — that method is still unstable.
+///
+/// # Panics
+///
+/// Panics if `b == 0`, under the same caller guarantee as [`div_floor`].
 const fn div_ceil(a: i64, b: i64) -> i64 {
     let q = a.div_euclid(b);
     if b > 0 && a.rem_euclid(b) != 0 {
