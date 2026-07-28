@@ -310,7 +310,15 @@ impl GameSession {
             Advance::Crashed { .. } => {
                 self.recorder.record_crash();
             }
-            Advance::Pending | Advance::RaceOver => {}
+            // Interactive-only arm (design § *Replay format*'s
+            // divergence-layer table): a deliberate defensive no-op.
+            // Unreachable for `PlayerController`, whose `decide` only ever
+            // returns mask members — `gp-core`/`gp-game` hold a
+            // zero-production-panics invariant and this workspace has no
+            // logging facility, so a hypothetical controller bug surfaces
+            // as a silent stall (re-polled every frame, no diagnostic)
+            // rather than a `panic!`/`expect`. Do NOT "fix" this later.
+            Advance::Illegal { .. } | Advance::Pending | Advance::RaceOver => {}
         }
         Some(outcome)
     }

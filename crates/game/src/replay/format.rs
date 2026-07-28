@@ -76,6 +76,21 @@ pub enum ReplayError {
         /// The unrecognised token.
         token: String,
     },
+    /// Divergence layer (a1) — structural: the `turn` block violates its
+    /// own well-formedness, checked with no track and no simulation
+    /// (design § *Replay format*, Design Amendment 1). `round` must be
+    /// non-decreasing; within one `round`, `seat` must strictly increase;
+    /// every `seat` must be `< seats`. Deliberately **not** a full
+    /// seat-cycle check — a crash turn emits no `turn` line, so the seat
+    /// sequence within a round is a *subsequence* of `0..seats`, never
+    /// necessarily the full cycle.
+    #[error("turn sequence violation at line {line}: {reason}")]
+    TurnSequence {
+        /// The 1-based source line the violation was found at.
+        line: usize,
+        /// A human-readable description of the violated invariant.
+        reason: String,
+    },
 }
 
 /// Writes `record` (paired with `config`'s provenance/regeneration fields)
@@ -153,7 +168,7 @@ pub fn parse_record(text: &str) -> Result<(GameConfig, ReplayRecord), ReplayErro
     let seats: usize = keyed_line(&mut lines, "seats", "seats")?;
     let total_processed_turns: u32 = keyed_line(&mut lines, "processed", "processed")?;
 
-    let (turns, pending) = parse_turns(&mut lines)?;
+    let (turns, pending) = parse_turns(&mut lines, seats)?;
     let finals = parse_finals(pending.into_iter().chain(lines))?;
     if finals.len() != seats {
         return Err(ReplayError::Malformed {
@@ -279,6 +294,11 @@ fn parse_tuning_line<'a>(
 /// Reads every `turn <round> <seat> <action>` line until a non-`turn` line
 /// is reached (returned as `pending`, to be re-fed into [`parse_finals`])
 /// or the input is exhausted.
+///
+/// Enforces divergence layer (a1) as it goes (design § *Replay format*,
+/// Design Amendment 1): `round` non-decreasing across the whole block;
+/// within one `round`, `seat` strictly increasing; every `seat < seats`.
+/// Deliberately not a full seat-cycle check — see [`ReplayError::TurnSequence`].
 #[allow(
     clippy::type_complexity,
     reason = "the pending-line carry-over is a plain (line_no, &str) pair; a named \
@@ -286,8 +306,11 @@ fn parse_tuning_line<'a>(
 )]
 fn parse_turns<'a>(
     lines: &mut impl Iterator<Item = (usize, &'a str)>,
+    seats: usize,
 ) -> Result<(Vec<RecordedTurn>, Option<(usize, &'a str)>), ReplayError> {
     let mut turns = Vec::new();
+    let mut last_round: Option<u32> = None;
+    let mut last_seat_in_round: Option<usize> = None;
     for (line_no, line) in lines {
         let mut words = line.split_whitespace();
         let Some(keyword) = words.next() else {
@@ -303,6 +326,39 @@ fn parse_turns<'a>(
             line: line_no,
             token: action_token.to_string(),
         })?;
+
+        if seat >= seats {
+            return Err(ReplayError::TurnSequence {
+                line: line_no,
+                reason: format!("seat {seat} is not < declared seats {seats}"),
+            });
+        }
+        if let Some(prev_round) = last_round {
+            if round < prev_round {
+                return Err(ReplayError::TurnSequence {
+                    line: line_no,
+                    reason: format!(
+                        "round {round} is less than the previous turn's round {prev_round}"
+                    ),
+                });
+            }
+            if round > prev_round {
+                last_seat_in_round = None;
+            }
+        }
+        if let Some(prev_seat) = last_seat_in_round
+            && seat <= prev_seat
+        {
+            return Err(ReplayError::TurnSequence {
+                line: line_no,
+                reason: format!(
+                    "seat {seat} does not strictly increase after seat {prev_seat} within round {round}"
+                ),
+            });
+        }
+        last_round = Some(round);
+        last_seat_in_round = Some(seat);
+
         turns.push(RecordedTurn {
             round,
             seat,

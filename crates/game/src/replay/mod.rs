@@ -86,6 +86,79 @@ pub struct ReplayRecord {
     pub total_processed_turns: u32,
 }
 
+/// Divergence layer (a2) — positional: compares each `Advance::Moved`
+/// outcome's `(round, seat, action)` against the next entry of the
+/// original recorded turn stream, in order (design § *Replay format*'s
+/// divergence-layer table). Shared by the replay drivers
+/// ([`playback::replay_headless`], [`playback::PlaybackDriver::tick`],
+/// [`replay_in_process`]) — `playback::run_headless_race` is the record
+/// *producer* and carries no cursor.
+///
+/// Owns a cloned `Vec<RecordedTurn>` rather than borrowing it, so it can be
+/// stored as a field on a long-lived driver (`PlaybackDriver`) with no
+/// lifetime coupling to the caller's `&ReplayRecord`.
+#[derive(Debug, Clone)]
+pub(crate) struct RecordCursor {
+    turns: Vec<RecordedTurn>,
+    index: usize,
+}
+
+impl RecordCursor {
+    /// A cursor at the start of `turns`.
+    #[must_use]
+    pub(crate) const fn new(turns: Vec<RecordedTurn>) -> Self {
+        Self { turns, index: 0 }
+    }
+
+    /// Checks one `Advance::Moved` outcome against the next recorded turn,
+    /// advancing past it regardless of the result. `round` must be the
+    /// value read **before** `RaceRound::advance` (Design Amendment 1 note
+    /// 3 — the round-wrapping seat's `round.round()` has already
+    /// incremented by the time `advance` returns).
+    ///
+    /// # Errors
+    /// The mismatch detail, if the stream is exhausted at this position or
+    /// the recorded turn there disagrees with `(round, seat, action)`.
+    pub(crate) fn check(
+        &mut self,
+        round: u32,
+        seat: usize,
+        action: Action,
+    ) -> Result<(), TurnMismatch> {
+        let actual = RecordedTurn {
+            round,
+            seat,
+            action,
+        };
+        let expected = self.turns.get(self.index).copied();
+        let mismatch = TurnMismatch {
+            index: self.index,
+            expected,
+            actual,
+        };
+        self.index = self.index.saturating_add(1);
+        if expected == Some(actual) {
+            Ok(())
+        } else {
+            Err(mismatch)
+        }
+    }
+}
+
+/// One [`RecordCursor::check`] mismatch — either the recorded stream was
+/// exhausted (`expected: None`) or its entry at `index` disagrees with
+/// `actual`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TurnMismatch {
+    /// The position in the recorded turn stream this check was at.
+    pub(crate) index: usize,
+    /// The recorded turn at that position, if the stream was not yet
+    /// exhausted.
+    pub(crate) expected: Option<RecordedTurn>,
+    /// The turn actually taken.
+    pub(crate) actual: RecordedTurn,
+}
+
 /// Feeds a [`ReplayRecord`] from a live race's `RaceRound::advance` calls
 /// (design § *Module decomposition* — "fed from A4's apply step").
 #[derive(Clone, Debug, Default)]
@@ -214,34 +287,64 @@ impl Controller for ReplayController {
 /// signals that case without ever panicking.
 ///
 /// Returns the replayed [`RaceState`]/[`RaceRound`] for the caller to
-/// compare against the original.
+/// compare against the original, plus `Some(divergence)` if the replay was
+/// cut short by one of layer (a2), (b), or exhaustion (design § *Replay
+/// format*'s divergence-layer table) — the caller decides what "surface
+/// it" means for its own context; this fn never panics and never spins
+/// (§ Risks — the pre-existing `Advance::Pending => {}` no-op hang this
+/// widening also fixes).
 #[must_use]
 pub fn replay_in_process(
     record: &ReplayRecord,
     track: TrackArtifact,
     geometry: BakedTrackGeometry,
     max_turns: u32,
-) -> (RaceState, RaceRound) {
+) -> (RaceState, RaceRound, Option<playback::HeadlessError>) {
     let mut race = RaceState::new(track, geometry, record.race.cars, record.collision_seed);
     let mut round = RaceRound::new(i32::try_from(record.race.laps).unwrap_or(i32::MAX));
     let mut roster = Roster::new();
     for seat in 0..race.cars.len() {
         roster.push(Box::new(ReplayController::for_seat(record, seat)));
     }
+    let mut cursor = RecordCursor::new(record.turns.clone());
 
     let mut processed = 0u32;
+    let mut divergence = None;
     while processed < max_turns {
+        let round_before = round.round();
         let outcome = round.advance(&mut race, &mut roster, FrameInput::default());
         match outcome {
             Advance::RaceOver => break,
-            Advance::Crashed { .. } | Advance::Moved { .. } => {
+            Advance::Crashed { .. } => {
                 processed = processed.saturating_add(1);
             }
-            Advance::Pending => {}
+            Advance::Moved { seat, action, .. } => {
+                if let Err(mismatch) = cursor.check(round_before, seat, action) {
+                    divergence = Some(playback::HeadlessError::TurnMismatch {
+                        index: mismatch.index,
+                        expected: mismatch.expected,
+                        actual: mismatch.actual,
+                    });
+                    break;
+                }
+                processed = processed.saturating_add(1);
+            }
+            // Must break and surface, never a no-op: `advance` mutates
+            // NOTHING on this outcome, so a bare `=> {}` arm would spin
+            // `while processed < max_turns` forever, not until the cap
+            // (this was a latent hang in shipped code — see § Risks).
+            Advance::Pending => {
+                divergence = Some(playback::HeadlessError::Diverged);
+                break;
+            }
+            Advance::Illegal { seat, action } => {
+                divergence = Some(playback::HeadlessError::IllegalRecordedAction { seat, action });
+                break;
+            }
         }
     }
 
-    (race, round)
+    (race, round, divergence)
 }
 
 #[cfg(test)]
@@ -319,6 +422,13 @@ mod tests {
 
         let mut processed = 0u32;
         while processed < TEST_MAX_TURNS {
+            // Captured BEFORE `advance` -- matches the production fix
+            // (self-review Round 1 finding 6): a round-wrapping `Moved` has
+            // already incremented `round.round()` by the time `advance`
+            // returns, so recording AFTER would persist that seat under
+            // the NEXT round's number, which the new (a2) divergence check
+            // below now catches if this regresses.
+            let round_before = round.round();
             let outcome = round.advance(&mut race, &mut roster, FrameInput::default());
             match outcome {
                 Advance::Moved {
@@ -326,7 +436,7 @@ mod tests {
                     action,
                     round_complete: _,
                 } => {
-                    recorder.record(round.round(), seat, action);
+                    recorder.record(round_before, seat, action);
                     processed = processed.saturating_add(1);
                 }
                 Advance::Crashed { .. } => {
@@ -334,6 +444,9 @@ mod tests {
                     processed = processed.saturating_add(1);
                 }
                 Advance::Pending | Advance::RaceOver => break,
+                Advance::Illegal { seat, action } => {
+                    panic!("scripted seat {seat} answered out-of-mask action {action:?}")
+                }
             }
         }
         assert_eq!(
@@ -368,11 +481,15 @@ mod tests {
 
         let track_for_replay = ring_track();
         let geometry_for_replay = BakedTrackGeometry::new(&track_for_replay);
-        let (replayed_race, replayed_round) = replay_in_process(
+        let (replayed_race, replayed_round, divergence) = replay_in_process(
             &record,
             track_for_replay,
             geometry_for_replay,
             TEST_MAX_TURNS,
+        );
+        assert!(
+            divergence.is_none(),
+            "a replay of a record produced from the same race must not diverge: {divergence:?}"
         );
 
         let replayed_states: Vec<_> = replayed_race.cars.iter().map(|c| c.state).collect();

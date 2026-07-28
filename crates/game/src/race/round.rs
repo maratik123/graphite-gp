@@ -43,6 +43,21 @@ pub enum Advance {
     /// The race has ended (spec § Key decisions — "play out the round,
     /// then stop"): no further `advance` calls should be made.
     RaceOver,
+    /// `seat` was polled and answered `action`, but `action` is **not** a
+    /// member of the mask `seat` was given — divergence layer (b) (design §
+    /// *Replay format*, Design Amendment 1). Nothing is applied and the
+    /// cursor does not advance: `resolve_crash`/`step`/`register_move` are
+    /// all skipped, so the car's state, `turn()`, `crashes()`, the cursor
+    /// and the round are all exactly as before this call. Unreachable for
+    /// [`crate::controller::player::PlayerController`], whose `decide`
+    /// only ever returns mask members — this is a defensive invariant, not
+    /// a controller-good-behaviour convention (AC2).
+    Illegal {
+        /// The seat that was polled.
+        seat: usize,
+        /// The out-of-mask action it answered with.
+        action: Action,
+    },
 }
 
 /// The turn/round cursor driving one [`RaceState`] (spec Scope 2).
@@ -198,6 +213,17 @@ impl RaceRound {
             // round does not advance.
             return Advance::Pending;
         };
+
+        // Divergence layer (b), unconditional (design § *Replay format*'s
+        // divergence-layer table — lives here, not in `Roster::poll`, since
+        // `Roster`/`Controller`/`PollContext` are the #42 seam spec §
+        // Scope-expansion dispositions keeps STILL OUT). `mask` is already
+        // computed above for this turn's `PollContext`, so this is one
+        // bitflag test on a value already in hand — applies nothing and
+        // does not advance the cursor.
+        if !mask.contains(action) {
+            return Advance::Illegal { seat, action };
+        }
 
         let from = state.pos();
         let car = &mut race.cars[seat];
@@ -366,6 +392,84 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A stub that always answers a fixed `action`, with no legality
+    /// assertion of its own (unlike `ScriptedOnce`) — needed to construct an
+    /// out-of-mask answer deliberately, which `ScriptedOnce` refuses to do.
+    struct AlwaysAnswer(Action);
+
+    impl Controller for AlwaysAnswer {
+        fn poll(&mut self, _ctx: PollContext<'_>) -> Option<Action> {
+            Some(self.0)
+        }
+    }
+
+    /// Amendment 1 — AC2's enforcement half: `RaceRound::advance` rejects an
+    /// out-of-mask answer itself, rather than relying on controller good
+    /// behaviour. Seat 1's seeded cell `(2,0)` is the ring's top edge:
+    /// `South` steps to `(2,-1)`, outside the corridor, so the legal mask
+    /// there is exactly `{Coast, East, West, North}` and `South` is
+    /// out-of-mask (seat 0's cell `(2,1)` has a FULL mask, so this case is
+    /// unwritable there — design § Test Design's AC2 row).
+    #[test]
+    fn out_of_mask_action_is_rejected_and_mutates_nothing() {
+        let track = ring_track();
+        let geometry = BakedTrackGeometry::new(&track);
+        let mut race = RaceState::new(track, geometry, 2, 0);
+        assert_eq!(
+            (race.cars[1].state.x, race.cars[1].state.y),
+            (2, 0),
+            "seating fixture assumption: seat 1 at the ring's top-edge cell"
+        );
+        let mask = legal_mask(&race.track.corridor, race.cars[1].state);
+        assert!(
+            !mask.contains(Action::South),
+            "test precondition: South must be out-of-mask at (2,0)"
+        );
+
+        let mut round = RaceRound::new(9);
+        let mut roster = Roster::new();
+        roster.push(Box::new(ScriptedOnce(Action::Coast)));
+        roster.push(Box::new(AlwaysAnswer(Action::South)));
+
+        // Seat 0's turn: Coast is legal everywhere at rest.
+        let outcome0 = round.advance(&mut race, &mut roster, FrameInput::default());
+        assert!(
+            matches!(outcome0, Advance::Moved { seat: 0, .. }),
+            "unexpected outcome0: {outcome0:?}"
+        );
+
+        let state_before = race.cars[1].state;
+        let cursor_before = round.cursor();
+        let round_before = round.round();
+        let turn_before = round.turn();
+        let crashes_before = round.crashes();
+
+        let outcome1 = round.advance(&mut race, &mut roster, FrameInput::default());
+        assert_eq!(
+            outcome1,
+            Advance::Illegal {
+                seat: 1,
+                action: Action::South,
+            }
+        );
+        assert_eq!(
+            race.cars[1].state, state_before,
+            "an illegal answer must not mutate car state"
+        );
+        assert_eq!(round.cursor(), cursor_before, "cursor must not advance");
+        assert_eq!(round.round(), round_before, "round must not advance");
+        assert_eq!(
+            round.turn(),
+            turn_before,
+            "turn() must be unchanged -- proves no side effect at all, not merely that step was skipped"
+        );
+        assert_eq!(
+            round.crashes(),
+            crashes_before,
+            "crashes() must be unchanged"
+        );
     }
 
     /// AC4 — an empty-mask car is never polled: it routes to

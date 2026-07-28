@@ -59,6 +59,12 @@ pub struct GraphiteGpApp {
     mode: AppMode,
     /// The playback driver, `Some` only in [`AppMode::Playback`].
     playback: Option<PlaybackDriver>,
+    /// Set once [`PlaybackDriver::tick`] returns `Err` (design § *Replay
+    /// format*'s divergence-layer table — `app/mod.rs` must stop
+    /// discarding `tick`'s return value): halts further ticking and
+    /// surfaces the divergence in the Setup error slot, the same slot a
+    /// live `GenerationFailure` uses on the interactive path.
+    playback_error: Option<String>,
 }
 
 impl GraphiteGpApp {
@@ -87,6 +93,7 @@ impl GraphiteGpApp {
                         finished_transitioned: false,
                         mode: AppMode::Playback,
                         playback: Some(playback),
+                        playback_error: None,
                     };
                 }
                 Err(message) => {
@@ -103,6 +110,7 @@ impl GraphiteGpApp {
             finished_transitioned: false,
             mode: AppMode::Interactive,
             playback: None,
+            playback_error: None,
         }
     }
 
@@ -163,10 +171,21 @@ impl GraphiteGpApp {
         // event time, so it need not busy-repaint every frame.
         ui.ctx().request_repaint_after(PLAYBACK_TURN_INTERVAL);
 
-        let Some(playback) = self.playback.as_mut() else {
+        // Once a divergence has fired, stop ticking (halt playback) rather
+        // than discarding the return value every frame after — the frozen
+        // last-good state stays on screen alongside the error (design §
+        // *Replay format*'s divergence-layer table — `app/mod.rs` must
+        // stop discarding `tick`'s return value).
+        if self.playback_error.is_none()
+            && let Some(playback) = self.playback.as_mut()
+            && let Err(err) = playback.tick(std::time::Instant::now())
+        {
+            self.playback_error = Some(format!("replay diverged: {err}"));
+        }
+
+        let Some(playback) = self.playback.as_ref() else {
             return;
         };
-        let _ = playback.tick(std::time::Instant::now());
 
         let race = playback.race();
         let round = playback.round();
@@ -193,7 +212,7 @@ impl GraphiteGpApp {
                 track: &race.track,
                 geometry: &race.geometry,
             },
-            setup_error: None,
+            setup_error: self.playback_error.as_deref(),
             cars: &car_renders,
             reduced_motion: false,
             active,
