@@ -3,7 +3,7 @@ name: ai-audit
 description: "Two-phase instruction audit. Phase 1 (subagent) verifies every learnings.md `Escalated?` claim points to a rule that actually exists AND that every `Superseded by:` reference resolves to a real later entry or merged PR; fixes drift in either field. Phase 2 (main session) reads all instruction files (AGENTS.md, ai-docs/*, .claude/skills/**, .claude/agents/**, hooks in settings.json) against official Claude Code docs and proposes fixes for inconsistencies, dead references, format violations, and refactor candidates."
 disable-model-invocation: true
 argument-hint: "[scope: 'phase1' | 'phase2' | omit for both]"
-allowed-tools: Bash(rg *) Bash(grep *) Bash(find *) Bash(realpath *) Bash(jq *) Bash(awk *) Bash(shellcheck *) Bash(wc *) Bash(basename *) Bash(git branch *) Bash(git status *) Bash(git checkout *) Bash(git rev-parse *) Bash(git diff *) Bash(git add *) Bash(git commit *) Bash(comm *) Bash(.claude/skills/ai-audit/scripts/check-citations.sh)
+allowed-tools: Bash(rg *) Bash(grep *) Bash(find *) Bash(realpath *) Bash(jq *) Bash(awk *) Bash(shellcheck *) Bash(wc *) Bash(basename *) Bash(git branch *) Bash(git status *) Bash(git checkout *) Bash(git rev-parse *) Bash(git diff *) Bash(git add *) Bash(git commit *) Bash(comm *) Bash(.claude/skills/ai-audit/scripts/check-citations.sh) Bash(.claude/skills/ai-audit/scripts/test-check-citations.sh)
 ---
 
 # AI Audit
@@ -113,7 +113,7 @@ For each item below, when a violation is found record: file path, line number (w
 | M | `agent-writing-style.md` conformance — 11 sub-checks (Patterns 1–7 + Anti-patterns + Sub-checks 9/10 + Cross-shape verbs) over the audited corpus | [`reference.md` § Checklist M — `agent-writing-style.md` conformance](reference.md#checklist-m--agent-writing-stylemd-conformance) |
 | N | Bidirectional `## Patterns` ↔ `Kind: validation` coherence — every promoted carrot round-trips both ways | [`reference.md` § Checklist N — Bidirectional `## Patterns` ↔ `Kind: validation` coherence](reference.md#checklist-n--bidirectional--patterns--kind-validation-coherence) |
 | O | Embedded-name clash scan — project-defined Tool / Subagent / Skill / Hook names MUST NOT clash with embedded names in `claude-tools-hierarchy.md` §§1a/1b/2a/3a/3b | [`reference.md` § Checklist O — Embedded-name clash scan](reference.md#checklist-o--embedded-name-clash-scan) |
-| P | Cross-repo citation resolvability — every cited `#N` (bare or `PR #N`) / `learnings.md` date / memory file resolves for its reader; run `scripts/check-citations.sh` | [`reference.md` § Checklist P — Cross-repo citation resolvability](reference.md#checklist-p--cross-repo-citation-resolvability) |
+| P | Cross-repo citation resolvability — every cited `#N` (bare or `PR #N`) / `learnings.md` date / memory file resolves for its reader; run `scripts/check-citations.sh`, then `scripts/test-check-citations.sh` (the guard's own regression test — it must stay 4/4; it covers the **check-(2)** exclusion, verifying that one is content-addressed rather than line-pinned. Check (1)'s two `file:line` pins remain uncovered — see `reference.md` § Checklist P) | [`reference.md` § Checklist P — Cross-repo citation resolvability](reference.md#checklist-p--cross-repo-citation-resolvability) |
 
 The audited corpus for Checklist M is enumerated in `reference.md § Checklist M — audited corpus`.
 
