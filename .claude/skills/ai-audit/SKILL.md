@@ -110,12 +110,12 @@ For each item below, when a violation is found record: file path, line number (w
 | J | Allow-list / permission consistency — `allowed-tools` covered by `permissions.allow`; no dead entries | [`reference.md` § Checklist J — Allow-list / permission consistency](reference.md#checklist-j--allow-list--permission-consistency) |
 | K | Skill-directory layout — oversized SKILL.md, multi-consumer supporting files, inline-script extraction candidates | [`reference.md` § Checklist K — Skill-directory layout (SKILL.md + supporting files + scripts/)](reference.md#checklist-k--skill-directory-layout-skillmd--supporting-files--scripts) |
 | L | Learning-Log field coherence — every Entry-format field covered in all four mandatory locations | [`reference.md` § Checklist L — Learning-Log field coherence](reference.md#checklist-l--learning-log-field-coherence) |
-| M | `agent-writing-style.md` conformance — 11 sub-checks (Patterns 1–7 + Anti-patterns + Sub-checks 9/10 + Cross-shape verbs) over the audited corpus | [`reference.md` § Checklist M — `agent-writing-style.md` conformance](reference.md#checklist-m--agent-writing-stylemd-conformance) |
+| M | `agent-writing-style.md` conformance — 11 sub-checks (Patterns 1–7 + Anti-patterns + Sub-checks 9/10 + Cross-shape verbs) over the audited corpus | [`checklist-m.md`](checklist-m.md) |
 | N | Bidirectional `## Patterns` ↔ `Kind: validation` coherence — every promoted carrot round-trips both ways | [`reference.md` § Checklist N — Bidirectional `## Patterns` ↔ `Kind: validation` coherence](reference.md#checklist-n--bidirectional--patterns--kind-validation-coherence) |
 | O | Embedded-name clash scan — project-defined Tool / Subagent / Skill / Hook names MUST NOT clash with embedded names in `claude-tools-hierarchy.md` §§1a/1b/2a/3a/3b | [`reference.md` § Checklist O — Embedded-name clash scan](reference.md#checklist-o--embedded-name-clash-scan) |
 | P | Cross-repo citation resolvability — every cited `#N` (bare or `PR #N`) / `learnings.md` date / memory file resolves for its reader; run `scripts/check-citations.sh`, then `scripts/test-check-citations.sh` (the guard's own regression test — it must stay 4/4; it covers the **check-(2)** exclusion, verifying that one is content-addressed rather than line-pinned. Check (1)'s two `file:line` pins remain uncovered — see `reference.md` § Checklist P) | [`reference.md` § Checklist P — Cross-repo citation resolvability](reference.md#checklist-p--cross-repo-citation-resolvability) |
 
-The audited corpus for Checklist M is enumerated in `reference.md § Checklist M — audited corpus`.
+The audited corpus for Checklist M is enumerated in [`checklist-m.md` § audited corpus](checklist-m.md#checklist-m--audited-corpus).
 
 ### Step 2.4: Categorise findings
 

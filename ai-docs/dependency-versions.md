@@ -1,6 +1,8 @@
 # Dependency Versions — live-lookup reference
 
-This page extracts the live-lookup table from [`AGENTS.md` § Dependency Versions](../AGENTS.md#dependency-versions). The AXIOM headline and pinning bullets stay in AGENTS.md.
+This page carries the per-category verification recipes for [`AGENTS.md` § Dependency Versions](../AGENTS.md#dependency-versions); the AXIOM headline, the STOP-substring trigger list, and the pinning bullets stay in AGENTS.md.
+
+**Despite the page title, the scope is wider than dependencies.** The AXIOM covers any claim whose truth lives outside your context, in five categories: crate / GitHub Action versions and behaviour, whether `X` is a dep here, **external-tool flags**, **a file's tracked / ignored / committed status**, and **an upstream issue's state**. The last three are in § *Beyond deps* below — look there for `git ls-files` / `git check-ignore` / `gh issue view`.
 
 ## Why query live first
 
@@ -15,6 +17,18 @@ Whenever you write a specific version of a Cargo crate or a GitHub Action — an
 | A version into a long-lived doc (won't be revisited for months) | Annotate `(verified current YYYY-MM-DD)` next to the version |
 | A **load-bearing claim about an Action's behaviour** (env vars it exports, defaults it sets, files it produces — anything the spec or design relies on) | `gh api /repos/<owner>/<repo>/contents/action.yml --jq '.content' \| base64 -d` AND `gh api /repos/<owner>/<repo>/contents/src/setup.ts --jq '.content' \| base64 -d \| grep -inE 'exportVariable\|process\.env\|GITHUB_ENV\|saveState'` (or `src/main.ts` for run-step actions). Cite the source-line evidence in the design — README narrative alone is **not** evidence. |
 | A **claim about whether dep `<X>` is / isn't / would-be-added-as a dep in this project** (any "would add X", "introduce X", "pull in X", "avoid X as a dep", "X is not currently a dependency") | `grep -rn '<X>' --include='Cargo.toml' .` to surface direct manifest hits; `cargo tree --invert <X>` to surface transitive presence via any leaf crate. Any hit → drop the false-premise wording; rewrite naming the actual concern (perf-sensitivity, feature-gate, test-prod parity, binary-size). This row exists because a crate is easily claimed as a would-be-new-dep when `cargo tree --invert <X>` would in fact show it already reached by every leaf crate via `gp-core`. |
+
+## Beyond deps — the other three categories the AXIOM covers
+
+`AGENTS.md` § *Dependency Versions* states the AXIOM and the STOP-substring trigger list; these are the per-category verification recipes it points at. The AXIOM's scope is deliberately wider than "dependencies": it covers **any** claim whose truth lives outside your context.
+
+| If you're about to write... | Verify first with |
+|---|---|
+| A specific flag / subcommand / capability of an external tool (`cargo`, `gh`, `actionlint`, …) — e.g. *"`cargo test` supports `--keep-going`"* | `cargo <cmd> --help` (or run the command), or read the offline docs at `~/.rustup/toolchains/stable-*/share/doc/`. **Never assert a tool flag from memory.** |
+| A claim that a file is **committed / tracked / ignored** (*"the repo commits X"*, *"X is gitignored"*, *"there are no stale Y"*) | **Match the command to the FILE CATEGORY, and name the category before choosing:** tracked → `git ls-files <path>`; ignored + which rule → `git check-ignore -v <path>`; untracked-but-not-ignored → `git status --porcelain`; ignored included → `git status --porcelain --ignored`; exists on disk at all → `ls` / `find`. `find`/`ls` prove on-disk presence, **never** tracked status. `git status` is **blind to ignored files** — empty output is NEVER proof a path is absent, and is actively misleading for any question about gitignored build/regen output, which is exactly where stale-artifact questions live. |
+| A claim about an **upstream issue/PR's current state** (*"bug X is unfixed"*, *"affects 1.98 beta"*, *"no fix released"*) | `gh issue view <N> --json state,comments` — the issue *body* is frozen at filing time; the **closing comment** carries the resolution. **When the user cites a URL with a `#fragment`, fetch THAT anchor** — the fragment is the citation, the page is merely where it lives; a user linking a specific comment has usually already found the answer. |
+
+> **The generalisation worth carrying:** an exit-0 command is evidence about *the question it asks*, not the question you meant. Before citing any command as proof, name the **category** the claim belongs to and confirm the command reaches that category — a tool blind to the category returns a clean, confident, wrong answer.
 
 ## Failure mode — `jq` + an error body = a silent `null`
 
