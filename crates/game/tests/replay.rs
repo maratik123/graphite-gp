@@ -16,6 +16,7 @@ use gp_game::replay::format::write_record;
 use gp_game::replay::run_headless_race;
 use gp_render::{Difficulty, RaceConfig};
 use std::process::Command;
+use strum::VariantArray;
 
 /// A cheap, deterministic config: `seeds.generation = 6` accepts on the
 /// first attempt at `seed_budget = 1` (the same fixture every other Group
@@ -45,26 +46,14 @@ const fn cheap_config() -> GameConfig {
     }
 }
 
-/// Every [`Action`] variant, in declaration order — a local array rather
-/// than `strum::VariantArray`/`Action::VARIANTS`: `strum` is not a direct
-/// `gp-game` dependency, and this workspace's dependency-addition gate is
-/// deliberately conservative (mirrors `race/round.rs`'s own `RecordingStub`
-/// fixture, which hand-lists the same five variants for the same reason).
-const ALL_ACTIONS: [Action; 5] = [
-    Action::Coast,
-    Action::East,
-    Action::West,
-    Action::North,
-    Action::South,
-];
-
-/// A test-local seat: picks the first action of [`ALL_ACTIONS`] that is in
-/// `ctx.legal`, starting the scan at `turn_index % 5` rather than index
-/// `0`. A naive "first legal in declaration order" pilot picks
-/// `Action::Coast` whenever it is legal, and `Coast` at `v = (0, 0)` never
-/// moves the car — the race would never advance. The rotating start makes
-/// the pilot actually drive while staying fully deterministic (design §
-/// *How `AC21`'s record is produced*).
+/// A test-local seat: picks the first action of [`Action::VARIANTS`] that
+/// is in `ctx.legal`, starting the scan at `turn_index % 5` rather than
+/// index `0` (design § *How `AC21`'s record is produced*, prescribing
+/// `Action::VARIANTS` by name). A naive "first legal in declaration order"
+/// pilot picks `Action::Coast` whenever it is legal, and `Coast` at
+/// `v = (0, 0)` never moves the car — the race would never advance. The
+/// rotating start makes the pilot actually drive while staying fully
+/// deterministic.
 struct FirstLegal {
     turn_index: usize,
 }
@@ -78,15 +67,16 @@ impl FirstLegal {
 impl Controller for FirstLegal {
     #[allow(
         clippy::arithmetic_side_effects,
-        reason = "ALL_ACTIONS.len() is the fixed compile-time constant 5 (never 0), so both \
-                  `%` operations are non-panicking by construction; `offset < ALL_ACTIONS.len()` \
-                  and `start < ALL_ACTIONS.len()` bound their sum comfortably under usize::MAX"
+        reason = "Action::VARIANTS.len() is the fixed compile-time constant 5 (never 0), so \
+                  both `%` operations are non-panicking by construction; \
+                  `offset < Action::VARIANTS.len()` and `start < Action::VARIANTS.len()` bound \
+                  their sum comfortably under usize::MAX"
     )]
     fn poll(&mut self, ctx: PollContext<'_>) -> Option<Action> {
-        let start = self.turn_index % ALL_ACTIONS.len();
+        let start = self.turn_index % Action::VARIANTS.len();
         self.turn_index = self.turn_index.wrapping_add(1);
-        (0..ALL_ACTIONS.len())
-            .map(|offset| ALL_ACTIONS[(start + offset) % ALL_ACTIONS.len()])
+        (0..Action::VARIANTS.len())
+            .map(|offset| Action::VARIANTS[(start + offset) % Action::VARIANTS.len()])
             .find(|&a| ctx.legal.contains(a))
     }
 }
@@ -190,7 +180,7 @@ fn tampered_action_token_exits_nonzero() {
             // `Actions::all()`, so at least one of the 5 tokens is
             // illegal from any real state -- try each until one
             // actually changes the line (never a no-op tamper).
-            for &candidate in &ALL_ACTIONS {
+            for &candidate in Action::VARIANTS {
                 let mut words: Vec<&str> = line.split_whitespace().collect();
                 let owned = candidate.to_string();
                 if let Some(last) = words.last_mut() {

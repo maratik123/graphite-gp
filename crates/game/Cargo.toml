@@ -34,3 +34,14 @@ rand_xoshiro = { workspace = true }
 # do not delete this as an "unused dependency" (spec `2026-07-17-render-onest-font-swap`
 # AC18 verifies it).
 winit = { workspace = true }
+
+[dev-dependencies]
+# `strum::VariantArray`/`Action::VARIANTS` (design § *How AC21's record is
+# produced*) — `crates/game/tests/replay.rs`'s `FirstLegal` seat needs the
+# trait in scope. `gp-core`/`gp-gen`/`gp-render` all pull `strum` in
+# transitively already (`cargo tree --invert strum` confirms), but a
+# transitive edge does not grant `use strum::VariantArray` from `gp-game`
+# itself — this is `gp-game`'s own direct edge for that reachability.
+# `strum` is already in `Cargo.lock` at the workspace-pinned version, so
+# this is not a new dependency class (no Miri re-check trigger).
+strum = { workspace = true }
