@@ -245,7 +245,7 @@ The style guide names the *shape*; the downstream consumers carry the
 **Procedure.** After adding or amending a pattern entry, run:
 
 ```
-grep -rn "<pattern-keyword>" .claude/agents/ .claude/skills/
+grep -rni "<pattern-keyword>" .claude/agents/ .claude/skills/
 ```
 
 …to find any file already half-using the pattern and reconcile. Pattern 7

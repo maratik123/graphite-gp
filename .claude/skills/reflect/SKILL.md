@@ -43,7 +43,7 @@ options:
 
 ## Per-route apply (parent thread, only after `Apply`)
 
-- **`learnings`** → append the subagent's proposed entry **verbatim** to the end of `ai-docs/learnings.md`: `Kind: validation` (good/keep-doing) or `Kind: correction` (bad/stop-doing), `Escalated? no`, honoring `AGENTS.md § Learning Log` Boundary rule 1 (append-only) and Boundary rule 2 (no same-turn instruction-file edit). **This skill never edits an instruction file**, so Boundary rule 2 holds by construction — reference it, do not restate it.
+- **`learnings`** → append the subagent's proposed entry **verbatim** to the end of `ai-docs/learnings.md`: `Kind: validation` (good/keep-doing) or `Kind: correction` (bad/stop-doing), `Escalated? no`, honoring `AGENTS.md § Learning Log` Boundary rule 1 (append-only) and Boundary rule 2 (no same-turn instruction-file edit). **This skill never edits an instruction file**, so Boundary rule 2 holds by construction — reference it, do not restate it. **Verbatim means no gate runs between the subagent and the log** — the factual claims must already have been verified inline by `self-reflect` when it drafted the entry (`.claude/agents/self-reflect.md` § Per-route contracts). That inline check is the compensating control for the `self-review` carve-out below; if an entry carries an unverified `file:line`, count, or command result, send it back rather than appending it.
 - **`ticket`** → `gh issue create` with the `process` label at pattern altitude. If the body text contains the substring `git commit`, use `--body-file <path>`, **not** inline `--body` (AGENTS.md § Workflow — the commit-block hook matches `git[[:space:]]+commit`).
 - **`none`** → no write. Already recorded in the ephemeral run report shown to the user (owner-fixed: ephemeral only, not persisted to any file).
 
@@ -54,6 +54,10 @@ Reflection-sourced `learnings` entries **feed** the existing `/improve` run thre
 ## Write guard
 
 The `AskUserQuestion` consent prompt is the **only** path to a project-side write in this skill. No `learnings.md` append and no `gh issue create` may originate without an `Apply` answer for that specific finding. `none` and `Downgrade`/`Drop` answers write nothing.
+
+## No `self-review` on this skill's output
+
+Do **NOT** spawn `self-review` over a `/reflect` run — `AGENTS.md § Workflow`'s self-review AXIOM carries an explicit `/reflect` carve-out. The reason is **structural**, not a cost judgement: this skill's **committed** product is `learnings.md` entries (the `ticket` route files gh issues, which are not a repo diff either), and every downstream consumer that **escalates or otherwise acts on** an entry is already contractually obliged to re-verify its claims — `learnings-escalation-audit` is the exception, re-verifying only `Escalated?` / `Superseded by:`. Verify each entry's factual claims **inline as you write it** — that is where the obligation actually lives.
 
 See also: `/improve` (`.claude/skills/improve/SKILL.md`) — the consumer of the `learnings.md` queue that reflection feeds; same batched-consent pattern, different mutation scope.
 
