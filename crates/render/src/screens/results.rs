@@ -20,6 +20,13 @@ use egui::{Align2, Color32, FontFamily, FontId, Layout, Pos2, Response, Sense, T
 /// The centered content column's fixed width (`Screens.jsx:207` `maxWidth:
 /// 560`), equal to `setup.rs::CONTENT_MAX_W`.
 const CONTENT_MAX_W: f32 = 560.0;
+/// Placeholder rendered for a non-finisher's finish-turn column (issue #43
+/// D3, design KD12) — a sentinel turn count would be a lie, so a
+/// non-finisher renders this instead. Module-private, mirroring
+/// `lab.rs::PLACEHOLDER` as a sibling-module idiom rather than a shared
+/// constant (design KD12 — two independent screens each owning a one-line
+/// display constant is cheaper than a cross-module coupling).
+const PLACEHOLDER: &str = "—";
 /// Gap below the header block (`Screens.jsx:207` `marginBottom: 28`).
 const HEADER_GAP: f32 = 28.0;
 /// Gap between the eyebrow and the title (`Screens.jsx:213` `marginTop: 6`).
@@ -46,7 +53,7 @@ const TITLE_PREFIX: &str = "You finished ";
 /// [`CAR_NAMES`] and *color* via [`car_color`]) — deliberately decoupled from
 /// `rank`: a real player can finish P3 with `car_index == 0` (design §
 /// *Resolving the Open question*).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StandingEntry {
     /// The car's stable identity (0 = the player's car by convention,
     /// though `kind` is the authoritative player/AI signal).
@@ -55,18 +62,21 @@ pub struct StandingEntry {
     pub kind: CarKind,
     /// Finishing rank.
     pub rank: u32,
-    /// Finish time, in seconds (formatted at draw time).
-    pub finish_time: f32,
+    /// The global turn index this car finished on, or `None` if it never
+    /// finished (design KD12; formatted at draw time — `None` renders the
+    /// `PLACEHOLDER` em-dash).
+    pub finish_turn: Option<u32>,
 }
 
 /// The race's summary metrics (fastest lap / tempo / crash count), numeric.
 ///
-/// Formatted at draw time (`{:.1}` / `{:.2}` / `to_string`), mirroring
+/// Formatted at draw time (`to_string` / `{:.2}` / `to_string`), mirroring
 /// `lab.rs::oracle_tile_strings`'s numeric-in / string-at-draw contract.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RaceSummary {
-    /// Fastest lap time, in seconds.
-    pub fastest_lap: f32,
+    /// The fewest turns any car spent on one lap (design KD13); `0` when
+    /// no car completed a lap.
+    pub fastest_lap: u32,
     /// Average tempo.
     pub tempo: f32,
     /// Total crash count.
@@ -86,13 +96,15 @@ pub struct StandingRow {
     pub kind: CarKind,
     /// Finishing rank.
     pub rank: u32,
-    /// The formatted finish time (`"{:.1}s"`).
+    /// The formatted finish turn (`"{n} turns"`, or the `PLACEHOLDER`
+    /// em-dash for a non-finisher).
     pub finish_time: String,
 }
 
-/// The three summary-tile labels, in [`summary_tiles`] order (`Fastest lap`,
-/// `Tempo`, `Crashes` — `Screens.jsx:223`).
-pub const SUMMARY_LABELS: [&str; 3] = ["Fastest lap", "Tempo", "Crashes"];
+/// The three summary-tile labels, in [`summary_tiles`] order (design §
+/// *The exact Results label wording*, issue #43 D3 — turn-count units
+/// replace the pre-#43 second-based wording).
+pub const SUMMARY_LABELS: [&str; 3] = ["Fastest lap, turns", "Tempo, cells/turn", "Crashes"];
 
 /// The rank of the `You`-kind entry in `entries`, or `None` if absent (an
 /// empty slice, or a slice with no `You` entry — the header then renders a
@@ -130,21 +142,23 @@ pub fn standings_rows(entries: &[StandingEntry]) -> Vec<StandingRow> {
                 color,
                 kind: entry.kind,
                 rank: entry.rank,
-                finish_time: format!("{:.1}s", entry.finish_time),
+                finish_time: entry
+                    .finish_turn
+                    .map_or_else(|| PLACEHOLDER.to_owned(), |turn| format!("{turn} turns")),
             }
         })
         .collect()
 }
 
 /// Formats `summary`'s three tile values, in [`SUMMARY_LABELS`] order:
-/// `fastest_lap` at `{:.1}`, `tempo` at `{:.2}`, `crashes` via
-/// `u32::to_string`.
+/// `fastest_lap` as an integer (`u32::to_string`), `tempo` at `{:.2}`,
+/// `crashes` via `u32::to_string`.
 ///
 /// Plain `fn` — calls `format!` (not const-stable).
 #[must_use]
 pub fn summary_tiles(summary: RaceSummary) -> [String; 3] {
     [
-        format!("{:.1}", summary.fastest_lap),
+        summary.fastest_lap.to_string(),
         format!("{:.2}", summary.tempo),
         summary.crashes.to_string(),
     ]
@@ -380,7 +394,6 @@ fn draw_standings_card(ui: &mut Ui, rows: &[StandingRow], tiles: &[String; 3]) {
             ui.horizontal(|ui| {
                 Telemetry::new(SUMMARY_LABELS[0], &tiles[0])
                     .tone(TelemetryTone::Accent)
-                    .unit("s")
                     .show(ui);
                 ui.add_space(spacing::SPACE_6);
                 Telemetry::new(SUMMARY_LABELS[1], &tiles[1]).show(ui);
@@ -437,7 +450,8 @@ fn draw_action_row(ui: &mut Ui, again_icon: Option<&TextureHandle>) -> (Response
 #[cfg(test)]
 mod tests {
     use super::{
-        RaceSummary, SUMMARY_LABELS, StandingEntry, player_position, standings_rows, summary_tiles,
+        PLACEHOLDER, RaceSummary, SUMMARY_LABELS, StandingEntry, player_position, standings_rows,
+        summary_tiles,
     };
     use crate::tokens::color::{CAR_COLORS, car_color};
     use crate::widgets::CarKind;
@@ -453,32 +467,32 @@ mod tests {
                 car_index: 2,
                 kind: CarKind::Ai,
                 rank: 1,
-                finish_time: 38.0,
+                finish_turn: Some(38),
             },
             StandingEntry {
                 car_index: 9,
                 kind: CarKind::Ai,
                 rank: 2,
-                finish_time: 39.6,
+                finish_turn: Some(40),
             },
             StandingEntry {
                 car_index: 0,
                 kind: CarKind::You,
                 rank: 3,
-                finish_time: 41.2,
+                finish_turn: Some(41),
             },
             StandingEntry {
                 car_index: 1,
                 kind: CarKind::Ai,
                 rank: 4,
-                finish_time: 42.8,
+                finish_turn: None,
             },
         ]
     }
 
     fn fixture_summary() -> RaceSummary {
         RaceSummary {
-            fastest_lap: 12.4,
+            fastest_lap: 12,
             tempo: 0.87,
             crashes: 1,
         }
@@ -498,13 +512,13 @@ mod tests {
                 car_index: 0,
                 kind: CarKind::Ai,
                 rank: 1,
-                finish_time: 10.0,
+                finish_turn: Some(10),
             },
             StandingEntry {
                 car_index: 1,
                 kind: CarKind::Ai,
                 rank: 2,
-                finish_time: 11.0,
+                finish_turn: Some(11),
             },
         ];
         assert_eq!(player_position(&all_ai), None);
@@ -547,12 +561,21 @@ mod tests {
         assert_eq!(rows[1].name, "Car");
     }
 
-    /// AC3 — finish-time formatting: `38.0 -> "38.0s"`, `39.6 -> "39.6s"`.
+    /// AC3 — finish-turn formatting: `Some(38) -> "38 turns"`, `Some(40) ->
+    /// "40 turns"`.
     #[test]
-    fn standings_rows_formats_finish_time() {
+    fn standings_rows_formats_finish_turn() {
         let rows = standings_rows(&fixture_standings());
-        assert_eq!(rows[0].finish_time, "38.0s");
-        assert_eq!(rows[1].finish_time, "39.6s");
+        assert_eq!(rows[0].finish_time, "38 turns");
+        assert_eq!(rows[1].finish_time, "40 turns");
+    }
+
+    /// Design KD12 — a non-finisher (`finish_turn: None`) renders
+    /// [`PLACEHOLDER`], never a fabricated turn count.
+    #[test]
+    fn standings_rows_formats_non_finisher_as_placeholder() {
+        let rows = standings_rows(&fixture_standings());
+        assert_eq!(rows[3].finish_time, PLACEHOLDER);
     }
 
     /// AC4 — tile values reflect the supplied data.
@@ -560,13 +583,16 @@ mod tests {
     fn summary_tiles_reflects_supplied_data() {
         assert_eq!(
             summary_tiles(fixture_summary()),
-            ["12.4".to_owned(), "0.87".to_owned(), "1".to_owned()]
+            ["12".to_owned(), "0.87".to_owned(), "1".to_owned()]
         );
     }
 
     /// AC4 — the three summary labels are present, in tile order.
     #[test]
     fn summary_labels_are_present_in_order() {
-        assert_eq!(SUMMARY_LABELS, ["Fastest lap", "Tempo", "Crashes"]);
+        assert_eq!(
+            SUMMARY_LABELS,
+            ["Fastest lap, turns", "Tempo, cells/turn", "Crashes"]
+        );
     }
 }

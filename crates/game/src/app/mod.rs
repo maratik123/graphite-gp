@@ -232,23 +232,18 @@ impl GraphiteGpApp {
     }
 }
 
-/// Converts a [`RaceOutcome`] (native `u32` turn counts) into today's
-/// `f32`-shaped `gp-render` boundary types — shared by
+/// Converts a [`RaceOutcome`] (native `u32` turn counts) into the
+/// `gp-render` boundary types, which (issue #43 D3) speak the same native
+/// `u32`/`Option<u32>` turn-count shape — shared by
 /// [`GraphiteGpApp::results_view`] (interactive) and
 /// [`GraphiteGpApp::ui_playback`] (C5). `None` (no race started/finished
-/// yet) renders as an empty, all-zero result. D3 deletes these casts once
-/// `results.rs` itself moves to turn-count labels.
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "turn counts are realistically tiny relative to f32's 24-bit exact-integer \
-              range; a temporary A9 boundary cast, deleted by D3"
-)]
+/// yet) renders as an empty, all-zero result.
 fn standings_and_summary(outcome: Option<RaceOutcome>) -> (Vec<StandingEntry>, RaceSummary) {
     let Some(outcome) = outcome else {
         return (
             Vec::new(),
             RaceSummary {
-                fastest_lap: 0.0,
+                fastest_lap: 0,
                 tempo: 0.0,
                 crashes: 0,
             },
@@ -261,11 +256,11 @@ fn standings_and_summary(outcome: Option<RaceOutcome>) -> (Vec<StandingEntry>, R
             car_index: entry.car_index,
             kind: CarKind::You,
             rank: entry.rank,
-            finish_time: entry.finish_turn.map_or(0.0, |turn| turn as f32),
+            finish_turn: entry.finish_turn,
         })
         .collect();
     let summary = RaceSummary {
-        fastest_lap: outcome.fastest_lap as f32,
+        fastest_lap: outcome.fastest_lap,
         tempo: outcome.tempo,
         crashes: outcome.crashes,
     };

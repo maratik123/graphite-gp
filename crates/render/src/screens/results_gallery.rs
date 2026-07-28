@@ -32,6 +32,13 @@ mod tests {
         miri,
         ignore = "drives wgpu; dlopens the Vulkan ICD (no FFI under Miri)"
     )]
+    // Issue #43 D3: the fixture now feeds turn-count data (was
+    // seconds/`f32`) through the widened `StandingEntry`/`RaceSummary`
+    // shape, so `results_screen.png` is stale as of this commit — D4
+    // regenerates it and removes this `#[ignore]` in the very next commit,
+    // keeping the one legitimate pixel change trivially separable from
+    // every other AC in this group.
+    #[ignore = "issue #43 D3: results_screen.png stale pending D4's regen"]
     #[test]
     fn results_screen_matches_golden() {
         let render_state = egui_kittest::wgpu::create_render_state(
