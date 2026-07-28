@@ -2,12 +2,12 @@
 //! spawn-per-request, off the main thread, with cooperative cancellation
 //! infrastructure and superseded-result discard.
 //!
-//! Calls `gp_gen::generate(params)` — the **current**, one-argument
-//! signature; B2 (Group B) widens it to `generate(params, obs: &mut dyn
-//! GenObserver)` and updates every call site, this one included. Until
-//! then the spawned thread has no way to observe the `Arc<AtomicBool>`
-//! cancel flag this module already threads through — B3 wires it into a
-//! `GenObserver` impl once B2 lands.
+//! Calls `gp_gen::generate(params, &mut ())` — B2 landed the two-argument
+//! `generate(params, obs: &mut dyn GenObserver)` signature and this is its
+//! updated call site, still passing the no-op `&mut ()` observer. The
+//! spawned thread does not yet observe the `Arc<AtomicBool>` cancel flag
+//! this module already threads through, nor forward per-phase events —
+//! B3 wires both into a real `GenObserver` impl.
 
 use gp_core::track::TrackArtifact;
 use gp_gen::{GenParams, GenerationError};
@@ -99,7 +99,8 @@ impl Worker {
 
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| gp_gen::generate(params)));
+            let outcome =
+                std::panic::catch_unwind(AssertUnwindSafe(|| gp_gen::generate(params, &mut ())));
             let result = match outcome {
                 Ok(Ok(artifact)) => Ok(artifact),
                 Ok(Err(err)) => Err(GenerationFailure::Pipeline(err)),

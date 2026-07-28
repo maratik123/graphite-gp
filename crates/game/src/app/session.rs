@@ -430,8 +430,8 @@ pub(crate) mod tests {
             seed_budget: 64,
             ..session.config().to_gen_params()
         };
-        let artifact_k1 =
-            gp_gen::generate(k1_params).expect("k=1 generous-budget generation must accept");
+        let artifact_k1 = gp_gen::generate(k1_params, &mut ())
+            .expect("k=1 generous-budget generation must accept");
 
         assert_ne!(
             format!("{artifact_k0:?}"),
