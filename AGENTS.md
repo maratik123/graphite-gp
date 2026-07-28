@@ -249,7 +249,7 @@ premise before amending; /task Step-9 per-AC sweep catching a delegate's
 | `ai-docs/corrections-log.md` | Learning-Log carve-outs + field glossary |
 | `ai-docs/key-decisions.md` | Key design-decision detail bodies |
 | `ai-docs/api-naming.md` | `_unchecked` AXIOM + naming rules |
-| `ai-docs/dependency-versions.md` | Live Cargo / GitHub Action version lookup recipes |
+| `ai-docs/dependency-versions.md` | Live-lookup recipes for all five AXIOM categories: crate / Action versions, dep-graph membership, external-tool flags, **VCS tracked-ignored-committed status**, upstream issue state |
 | `ai-docs/miri-gate.md` | Miri-gate mechanics + the two mechanical gp-render gate triggers — read on demand |
 | `ai-docs/rust-test-conventions.md` | `proptest` oracle-cost budget + `assert_matches!` `Debug` bounds — read on demand |
 | `ai-docs/delegation-rules.md` | The four-phase delegation lifecycle — read before any committing/long-running spawn |

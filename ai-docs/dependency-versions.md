@@ -1,6 +1,8 @@
 # Dependency Versions — live-lookup reference
 
-This page extracts the live-lookup table from [`AGENTS.md` § Dependency Versions](../AGENTS.md#dependency-versions). The AXIOM headline and pinning bullets stay in AGENTS.md.
+This page carries the per-category verification recipes for [`AGENTS.md` § Dependency Versions](../AGENTS.md#dependency-versions); the AXIOM headline, the STOP-substring trigger list, and the pinning bullets stay in AGENTS.md.
+
+**Despite the page title, the scope is wider than dependencies.** The AXIOM covers any claim whose truth lives outside your context, in five categories: crate versions, GitHub Action versions and behaviour, whether `X` is a dep here, **external-tool flags**, **a file's tracked / ignored / committed status**, and **an upstream issue's state**. The last three are in § *Beyond deps* below — look there for `git ls-files` / `git check-ignore` / `gh issue view`.
 
 ## Why query live first
 

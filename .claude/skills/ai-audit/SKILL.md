@@ -115,7 +115,7 @@ For each item below, when a violation is found record: file path, line number (w
 | O | Embedded-name clash scan — project-defined Tool / Subagent / Skill / Hook names MUST NOT clash with embedded names in `claude-tools-hierarchy.md` §§1a/1b/2a/3a/3b | [`reference.md` § Checklist O — Embedded-name clash scan](reference.md#checklist-o--embedded-name-clash-scan) |
 | P | Cross-repo citation resolvability — every cited `#N` (bare or `PR #N`) / `learnings.md` date / memory file resolves for its reader; run `scripts/check-citations.sh`, then `scripts/test-check-citations.sh` (the guard's own regression test — it must stay 4/4; it covers the **check-(2)** exclusion, verifying that one is content-addressed rather than line-pinned. Check (1)'s two `file:line` pins remain uncovered — see `reference.md` § Checklist P) | [`reference.md` § Checklist P — Cross-repo citation resolvability](reference.md#checklist-p--cross-repo-citation-resolvability) |
 
-The audited corpus for Checklist M is enumerated in [`checklist-m.md` § audited corpus](checklist-m.md).
+The audited corpus for Checklist M is enumerated in [`checklist-m.md` § audited corpus](checklist-m.md#checklist-m--audited-corpus).
 
 ### Step 2.4: Categorise findings
 

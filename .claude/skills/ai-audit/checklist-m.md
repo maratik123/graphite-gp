@@ -88,4 +88,5 @@ The audited corpus enumeration is identical to the Checklist M intro paragraph a
 - `ai-docs/doc-convention.md`
 - `ai-docs/agent-writing-style.md`
 - `ai-docs/corrections-log.md`
+- every `.claude/rules/**/*.md`
 

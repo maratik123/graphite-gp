@@ -1,6 +1,6 @@
 # `/improve` Step 6 — why the PARENT dispatches the evals
 
-> Extracted from `.claude/agents/self-improve.md` § Step 6. That file keeps the operative instruction; this page carries the provenance and the failure modes. Read when tempted to dispatch the reproducers from inside the Subagent, or to substitute a cheaper path.
+> Extracted from `.claude/agents/self-improve.md` § Step 6. That file carries a one-line summary of the contract and points here; **this page is the canonical statement** of why the parent dispatches, plus the provenance and the failure modes. Read when tempted to dispatch the reproducers from inside the Subagent, or to substitute a cheaper path.
 
 ## The contract is a MAY rule, not a CAN rule
 
