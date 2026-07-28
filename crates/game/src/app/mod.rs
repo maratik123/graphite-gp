@@ -12,7 +12,7 @@ use eframe::egui;
 use gp_core::sim::CarState;
 use gp_render::screens::{RaceSummary, StandingEntry};
 use gp_render::widgets::CarKind;
-use gp_render::{AppShell, CarRender, Nav, ShellSession, TrackView};
+use gp_render::{AppShell, CarRender, Nav, SeatedGrid, ShellSession, TrackView};
 use session::GameSession;
 
 use crate::controller::player::PlayerController;
@@ -213,6 +213,11 @@ impl GraphiteGpApp {
             // anything from this value. Flagged as a follow-up alongside
             // the transport controls § Playback pacing already defers.
             seed: 0,
+            // Not wired, same gap as `seed` above: `PlaybackDriver` does not
+            // carry the file's originally-requested `--cars` count, only
+            // the already-seated roster — so there is no `requested` to
+            // compare against. Cosmetic only (playback never re-seats).
+            seated: None,
             standings: &standings,
             summary,
         };
@@ -323,6 +328,12 @@ impl eframe::App for GraphiteGpApp {
 
         let seed = self.session.installed_generation_seed().unwrap_or(0);
 
+        let requested = self.session.config().race.cars;
+        let seated = self.session.race().map(|race| SeatedGrid {
+            seated: u32::try_from(race.seated()).unwrap_or(u32::MAX),
+            requested,
+        });
+
         let session_view = ShellSession {
             track: track_view,
             setup_error: self.session.setup_error(),
@@ -334,6 +345,7 @@ impl eframe::App for GraphiteGpApp {
             phases: self.session.phases(),
             valid: true,
             seed,
+            seated,
             standings: &standings,
             summary,
         };

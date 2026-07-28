@@ -17,7 +17,9 @@
 //! Context/painter*, which these do not).
 
 use crate::screens::setup::SetupScreen;
-use crate::screens::{LabInput, LabScreen, RaceInput, RaceScreen, ResultsInput, ResultsScreen};
+use crate::screens::{
+    LabInput, LabScreen, RaceInput, RaceScreen, ResultsInput, ResultsScreen, SeatedGrid,
+};
 use crate::tokens::{color, spacing, typography};
 use crate::{
     BakedTrackGeometry, CarRender, Overlays, PhaseStatus, RaceConfig, RaceSummary, Scene,
@@ -321,6 +323,7 @@ impl AppShell {
                         phases: session.phases,
                         valid: session.valid,
                         seed: session.seed,
+                        seated: session.seated,
                     };
                     let resp = LabScreen::new(input).show(ui);
                     let nav = if resp.test_lap {
@@ -409,6 +412,8 @@ pub struct ShellSession<'a> {
     pub valid: bool,
     /// The header `seed <N>` tag value — `Lab`.
     pub seed: u64,
+    /// The grid's seating outcome (`Lab`) — see [`SeatedGrid`].
+    pub seated: Option<SeatedGrid>,
     /// The rank-ordered standings slice — `Results`.
     pub standings: &'a [StandingEntry],
     /// The race summary metrics — `Results`.

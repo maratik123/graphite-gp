@@ -94,6 +94,7 @@ mod tests {
                     phases: FIXED_PHASES,
                     valid: true,
                     seed: FIXED_SEED,
+                    seated: None,
                 })
                 .show(ui);
             });
@@ -155,6 +156,7 @@ mod tests {
                     phases: FIXED_PHASES,
                     valid: true,
                     seed: FIXED_SEED,
+                    seated: None,
                 })
                 .show(ui);
                 if resp.regenerate {

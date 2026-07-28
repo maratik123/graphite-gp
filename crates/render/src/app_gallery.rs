@@ -132,6 +132,7 @@ fn shell_session<'a>(
         phases: [PhaseStatus::Ok; 7],
         valid: true,
         seed: 7,
+        seated: None,
         standings,
         summary: FIXED_SUMMARY,
     }
@@ -311,6 +312,7 @@ mod tests {
                 phases: [crate::PhaseStatus::Ok; 7],
                 valid: true,
                 seed: 7,
+                seated: None,
                 standings: &standings,
                 summary: FIXED_SUMMARY,
             };
