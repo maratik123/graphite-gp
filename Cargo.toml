@@ -49,6 +49,11 @@ egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
 # rusty-fork + tempfile for out-of-process case isolation this workspace
 # does not use; our properties are pure integer functions.
 proptest = { version = "1", default-features = false, features = ["std", "bit-set"] }
+# Benchmarking (dev-only, local-only — CI never runs `cargo bench`). Lean
+# feature set: `cargo_bench_support` is what `cargo bench` needs; `rayon`
+# (parallel analysis) and `plotters` (HTML report) are dropped. Re-add
+# "plotters", "html_reports" here if the charts are ever wanted.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 egui-wgpu = "0.35"
 image = "0.25"
 skrifa = "0.45"
@@ -99,3 +104,16 @@ opt-level = 1
 # packages, which stay at the `[profile.dev]` level above.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Benchmark codegen. Scoped to `[profile.bench]` rather than `[profile.release]`
+# deliberately: benchmarking settings should not silently change what ships.
+# `codegen-units = 1` lets LLVM see a whole crate at once (trading build time for
+# code quality); thin LTO extends that across crate boundaries, which matters
+# because the gp-core integer kernel is consumed from gp-gen / gp-game and would
+# otherwise stop at the crate edge. `opt-level = 3` is inherited from `release`.
+#
+# Golden-image tests are unaffected either way — they build under `test`, which
+# inherits `dev`.
+[profile.bench]
+lto = "thin"
+codegen-units = 1

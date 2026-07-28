@@ -172,3 +172,22 @@ The **`racing_line(d: &Corridor, gate: &TimingGate, race_dir: RaceDir) -> Center
 - **Input ranges are bounded by the oracle's cost, not by `i32`.** The reference is `O(|dx| · |dy|)`, so a free `±10_000` endpoint pair would scan up to 4·10⁸ cells in a single case. Anchors are drawn from `±4096` — `[measured]` worst Ф1 coarse-ring extent is 72 blocks over 64 masters × 5 `l_min` values, and `k ≤ 32`, so a generated corridor spans at most ~2304 cells per axis — and deltas from a one-move `±32` (`--v-target ≤ 10`, Ф5b deepening `V_ceil ≤ 16`).
 - **Iteration order is deliberately NOT asserted.** A first cut pinned it and was wrong to: no production caller depends on it (`legal_move` folds with `.all()`; `respawn_cell` imposes its own `max_by_key(|c| (proj(c), c.x, c.y))` precisely so it does not lean on the iterator; the third call site is `#[cfg(test)]`). The two orders in fact coincide on ascending chords and diverge only on descending ones, so a positional assertion would have been half-passing noise. Tests compare cell **sets**, plus a `Vec::len() == HashSet::len()` check that preserves the documented "each cell exactly once" a set comparison would absorb.
 - **Both the tests and the dev-profile change were validated, not assumed.** Two mutants — shrinking the membership bound by 1, and dropping the sign swap that reorders `div_ceil`/`div_floor` for negative `m` — are each caught by 5 of the 8 tests; the suite still passes at `PROPTEST_CASES=4096`. `[profile.dev] opt-level = 1` + `[profile.dev.package."*"] opt-level = 2` (taken from egui's root manifest) speed the compute-bound gp-gen sweeps; `debug-assertions` and `overflow-checks` keep their `dev` defaults, so #48's integer-safety posture is untouched.
+
+### ⚠ Measured: the #171/#172 supercover rewrite is a **pessimization at production velocities**
+
+`crates/core/benches/supercover.rs` (criterion, local-only — CI never runs `cargo bench`) benches the optimized walk against the pre-#171 bounding-box scan **through the two shapes production calls it in**: `legal_move`'s `.all(|c| d.contains(c))` fold and `respawn_cell`'s collect-project-`max_by_key`. Run with `RUSTFLAGS="-C target-cpu=native" cargo bench -p gp-core --bench supercover`; `[profile.bench]` carries `lto = "thin"` + `codegen-units = 1` (scoped to `bench`, **not** `release`, so benchmarking never silently changes shipped codegen).
+
+**Result — every row below has disjoint 95% CIs, and two independent runs agree:**
+
+| shape | verdict at `\|v\| ≤ 16` |
+|---|---|
+| `legal_move`, no short circuit | **1.03–1.30× SLOWER** at 5 of 7 velocities; faster only at `v=(16,1)` (1.18×) and break-even at `v=(1,0)` |
+| `legal_move`, short circuit on a wall | mixed — 1.09–1.57× faster on shallow chords, 1.06–1.48× **SLOWER** on near-diagonals |
+| `respawn_cell` | **1.05–1.61× SLOWER** at 6 of 7 velocities |
+| long chords (64–200 cells, *not* production-reachable) | 3.0–6.9× faster |
+
+**Why.** `--v-target ≤ 10` and Ф5b deepening reaches `V_ceil = 16`, so a real chord's bounding box is at most ~17×17 ≈ 289 cells — which the old nested-range scan walks as a tight, fully-inlinable loop of a couple of multiplies per cell. The rewrite replaces that with ~4 integer divisions **per outer row** (`div_ceil` and `div_floor` each call `div_euclid` *and* `rem_euclid`), and integer division is both slow and unvectorizable. The asymptotic win is real but only materializes on chords no legal move can produce.
+
+**Do not re-measure through a `Box<dyn Iterator>`.** A first cut unified the two walk types that way; the per-cell dynamic dispatch suppressed the reference's inlining and inverted the result, making the optimized version look 1.2–1.8× *faster* on the same hardware. The bench now takes `impl Iterator` by value so both sides monomorphize as they do in production.
+
+**Open decision:** whether to revert the rewrite, keep it for the asymptotics, or cut the per-row division count. Not actioned — this is a measurement, and the call is the owner's.
