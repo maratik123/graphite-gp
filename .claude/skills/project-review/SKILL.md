@@ -121,7 +121,7 @@ Agent(subagent_type="general-purpose", prompt="
 ")
 ```
 
-> **CI-2 applicability.** This Step-5 self-review runs **unconditionally** over the whole-branch review — its diff scope (the whole branch, from `base_commit`) is consistent with the `git diff <merge-base>..HEAD` row of the self-review invocation matrix ([`.claude/agents/self-review.md` § When self-review applies](../../agents/self-review.md)). The matrix's "docs-only / instruction-only commit → self-review optional" row does **NOT** exempt project-review: this is a review-driven gate, always run.
+> **CI-2 applicability.** This Step-5 self-review runs **unconditionally** over the whole-branch review — its diff scope (the whole branch, from `base_commit`) is consistent with the `git diff <merge-base>..HEAD` row of the self-review invocation matrix ([`.claude/agents/self-review.md` § When self-review applies](../../agents/self-review.md)). The matrix's docs-only / instruction-file-only row does **NOT** exempt project-review: that row is optional-only when the diff ships no executable code and alters no rule other surfaces enforce, and this is a review-driven gate — always run, regardless of which row the diff would otherwise fall in.
 
 **On APPROVE:**
 1. **Write progress at this phase boundary** before further tool calls: rewrite `**current_step:**` to `Phase 4 — self-review APPROVE (Round N)`; append a `## Decisions log` bullet recording the round count and any objections accepted (one line, prefixed `Phase 4:`).

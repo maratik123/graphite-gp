@@ -53,10 +53,22 @@ A doc consult (`claude-code-guide`, harness documentation) establishes that the 
 **can** populate the field. It is not evidence the field **is** populated for this caller —
 that is a CAN claim standing in for a DOES claim.
 
+**Archival evidence does not discharge this MUST either.** A prior hook in this repo that
+keys on the same field and works in production, a past incident where the field demonstrably
+carried a value, a documented earlier false positive — each establishes that the field WAS
+populated on *some other* invocation path, which is the same CAN-for-DOES substitution in a
+more convincing costume. The probe is cheap and the substitution is what has actually failed
+here: a MUST you authored binds you first and hardest, and the commit introducing a
+verification requirement is the worst place to take an exemption from it. If you believe
+archival evidence genuinely suffices, **amend this MUST and say so** — do not record a
+probe-shaped claim for a probe you did not run. A reviewer endorsing the substitution does
+not discharge it (AGENTS.md § *Patterns* 1 — relief invites acceptance).
+
 ## Why a green suite is not enough
 
 | What you ran | What it is evidence about | What stays unproven |
 |---|---|---|
 | N hand-written input JSON payloads | your enumeration of cases | the matcher's behaviour on cases you did not imagine |
 | A `claude-code-guide` / doc consult | the harness's documented capability | whether the field is populated on *this* invocation path |
+| Archival evidence — a prior hook keying on the same field, a past production incident | that the field was populated on *some other* invocation path | whether it is populated on *this* caller's path |
 | `jq . .claude/settings.json` | the file is valid JSON | nothing about the shell program inside it |

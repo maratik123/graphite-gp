@@ -7,7 +7,7 @@ description: "Walks the entire codebase on the current branch (no diff, no spec)
 
 Reviews the entire codebase on the current branch. No diff, no spec — reads source files directly. Produces a findings table and writes it into the progress file.
 
-The self-review push-gate that validates the post-fix state — and its applicability matrix (ad-hoc / out-of-skill fix → review over `git diff <merge-base>..HEAD`; docs-only / instruction-only commit → self-review optional) — is defined in [`.claude/agents/self-review.md` § When self-review applies](self-review.md); this Subagent only produces the findings table that gate consumes.
+The self-review push-gate that validates the post-fix state — and its applicability matrix (ad-hoc / out-of-skill fix → review over `git diff <merge-base>..HEAD`; docs-only / instruction-only commit → optional **only** when the diff ships no executable code and alters no rule other surfaces enforce; `/reflect` → exempt) — is defined in [`.claude/agents/self-review.md` § When self-review applies](self-review.md); this Subagent only produces the findings table that gate consumes.
 
 ## Mindset: maximally skeptical, but justified
 

@@ -11,12 +11,13 @@ Used in the automated self-review loop inside `/task` — runs after Verify, bef
 
 ## When self-review applies (invocation matrix)
 
-This agent enforces the AGENTS.md § Workflow AXIOM "every code-producing commit on a feature branch with an open PR must pass `self-review` before `git push`". The per-skill instances (`/task` Step 10, `/pr-commented`, `/pr-ci-failed`, `/main-ci-failed`, `/bugfix`) each pass a recorded `base_commit`. Two cases outside those steps refine *whether* it runs and *over what diff*:
+This agent enforces the AGENTS.md § Workflow AXIOM "every code-producing commit on a feature branch with an open PR must pass `self-review` before `git push`". The per-skill instances (`/task` Step 10, `/pr-commented`, `/pr-ci-failed`, `/main-ci-failed`, `/bugfix`) each pass a recorded `base_commit`. The enumeration of instances is a list of **named** instances, never a list of the only covered surfaces. Three cases outside those steps refine *whether* it runs and *over what diff*:
 
 | If the commit is... | Action |
 |---|---|
 | An ad-hoc / out-of-skill fix on a feature branch with an open PR (no owning skill step, so no recorded `base_commit`) | Spawn `self-review` manually and review over `git diff <merge-base>..HEAD` — the whole branch diff — before `git push`. |
-| A docs-only / instruction-file-only commit (no `.rs` diff) | Self-review is **optional** — still required if the diff touches any user-facing artefact. |
+| A docs-only / instruction-file-only commit (no `.rs` diff) | Self-review is **optional ONLY** when the diff ships no executable code and alters no rule other surfaces must obey. It is **REQUIRED** when the diff touches a user-facing artefact, inlines executable code (a hook body in `.claude/settings.json`, a script), **or** changes an instruction-file rule that other surfaces enforce. "No `.rs` diff" is not the test — a hook body is not `.rs`. AGENTS.md § *Workflow*'s AXIOM names `/improve` as the standing example of a covered-but-unnamed surface. |
+| A `/reflect` run (its only product is `learnings.md` entries) | **Exempt** — AGENTS.md § *Workflow* carries an explicit `/reflect` carve-out on **structural** grounds, not cost: every consumer of `learnings.md` is already obliged to re-verify. Verification happens inline at entry-authoring time instead. |
 
 ## Mindset: maximally skeptical, but justified
 
@@ -225,9 +226,10 @@ small the diff and however safely it fails closed — a catch-net that misses th
 thing it exists to catch is not partial protection, it is the *appearance* of
 protection, and everyone downstream trusts a shipped guard immediately. *Prefer*
 fixing such a defect before the artifact ships over filing it as a follow-up.
-Extends § *Patterns* 1 with the severity-calibration half: Patterns 1 says *when*
-you may override a wave-through, this says *how to recognise* one worth
-overriding.
+Extends **AGENTS.md** § *Patterns* 1 with the severity-calibration half: that
+rule says *when* you may override a wave-through, this says *how to recognise*
+one worth overriding. (Note the qualifier — § *Patterns* 1 **in this file** is
+the prose-diff rule at `### 1.` above, a different rule.)
 
 Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-25 —
 a `minor`-rated `[^|]*` fragment in a newly-added piped-gate hook let a
