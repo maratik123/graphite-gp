@@ -191,3 +191,24 @@ The **`racing_line(d: &Corridor, gate: &TimingGate, race_dir: RaceDir) -> Center
 **Do not re-measure through a `Box<dyn Iterator>`.** A first cut unified the two walk types that way; the per-cell dynamic dispatch suppressed the reference's inlining and inverted the result, making the optimized version look 1.2–1.8× *faster* on the same hardware. The bench now takes `impl Iterator` by value so both sides monomorphize as they do in production.
 
 **Open decision:** whether to revert the rewrite, keep it for the asymptotics, or cut the per-row division count. Not actioned — this is a measurement, and the call is the owner's.
+
+### Resolution: #171/#172 reverted; `supercover` is the bounding-box scan again
+
+The measurement above was acted on. `crates/core/src/geom/supercover.rs` ships the pre-#171 scan; the interval solver, `EitherIter`, `div_floor`/`div_ceil` are gone.
+
+**The revert was re-validated against the *best* version of the idea, not the shipped one.** The owner's `opt` branch replaced the per-row division with a Bresenham `FloorTracker`; grafting it onto the equivalence tests showed it **correct** (158 tests, 2048 proptest cases/strategy, exhaustive 9⁴ window) but only ~1.10× over #172 and still behind the scan. The benchmark's baseline is now that approach plus every review improvement — Bresenham tracker, a **third `Either3` variant** for axial chords instead of an `Option<FloorTracker>` checked per row, total `unwrap_or` narrowings, and **no `DoubleEndedIterator`**. Against that strongest form the scan still wins **16 of 21** production-domain cases.
+
+| shape | scan vs best interval walk |
+|---|---|
+| `legal_move`, full walk | scan 1.03–1.44× faster at 6/7; loses only at `v=(1,0)` |
+| `legal_move`, short circuit | scan faster at 4/7 (to 3.15×), slower at 3 |
+| `respawn_cell` | scan 1.12–1.29× faster at 6/7 |
+| long chords (not reachable) | interval walk 2.8–6.3× faster |
+
+**Consequences.**
+
+- **gp-core's zero-production-panics invariant is restored** — [`panic-index.md`](panic-index.md) has no `crates/core/` row again, and `.claude/agents/design.md` + `README.md` were corrected back under the Propagation Rule.
+- **The tests stay, with their role changed.** `supercover` and `supercover_reference` are now the same algorithm, so the differential assertion is a *ratchet*, tautological until someone rewrites. To keep the property tests live regardless, `check_same_cells` now also asserts three oracle-independent invariants: duplicate-freedom, both endpoints present, and endpoint symmetry (`supercover(a,b) == supercover(b,a)` as sets). A mutation of the shipped predicate is caught by all 8 tests.
+- **The bench stays as the acceptance test for the next attempt** — it carries the best-known interval walk as a baseline and self-checks it against the shipped walk over an exhaustive window before timing anything, so a drifted baseline fails loudly instead of producing meaningless numbers.
+- **Open, cheap, not taken:** the interval walk's axial fast path beats the scan at `v=(1,0)` (0.61–0.74×) because it skips the per-cell predicate entirely on a chord where it is constant. The same `dx == 0 || dy == 0` early return could be added to the scan.
+- **`.idea/codeStyles/` now pins `FORMAT_TABLES = false`** (taken from the `opt` branch) — the project-level fix for the RustRover markdown-table padding that inflated `INDEX.md` by 160 KB in PR #169.

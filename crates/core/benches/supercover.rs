@@ -1,6 +1,10 @@
-//! Differential benchmark: the optimized [`supercover`] against the
-//! bounding-box scan it replaced (PRs #171/#172), measured **through the two
-//! shapes production actually calls it in**.
+//! Benchmark guarding [`supercover`] against re-optimization that does not pay.
+//!
+//! `gp-core` ships the bounding-box scan. PRs #171/#172 replaced it with a per-row
+//! interval solver and were reverted after this benchmark measured the swap as a
+//! *loss* at every velocity the product can produce. The rejected walk is kept
+//! below as `supercover_v172` so the comparison stays one `cargo bench` away —
+//! **if you are about to optimize `supercover`, this file is the acceptance test.**
 //!
 //! # Running
 //!
@@ -18,65 +22,291 @@
 //! `opt-level = 3` (inherited from `release`) plus `lto = "thin"` and
 //! `codegen-units = 1`. Those live on `[profile.bench]`, not `[profile.release]`,
 //! so benchmarking settings never silently change the shipped binary's codegen.
-//! To compare against a saved run:
-//!
-//! ```text
-//! RUSTFLAGS="-C target-cpu=native" cargo bench -p gp-core --bench supercover -- --save-baseline before
-//! RUSTFLAGS="-C target-cpu=native" cargo bench -p gp-core --bench supercover -- --baseline before
-//! ```
 //!
 //! # What is measured
 //!
-//! Not `supercover` in isolation — it returns a lazy iterator, so timing it
-//! alone would measure iterator *construction* and nothing else. Each group
-//! instead reproduces a real consumer:
+//! Not `supercover` in isolation — it returns a lazy iterator, so timing it alone
+//! would measure iterator *construction*. Each group reproduces a real consumer:
 //!
 //! - **`legal_move`** (`sim/mod.rs`) — `supercover(a, b).all(|c| d.contains(c))`.
 //!   The hot path: every legality check and every oracle graph edge. Benched both
-//!   fully-inside-`D` (the walk runs to completion) and blocked (the fold
-//!   short-circuits), because the two implementations visit cells in different
-//!   orders and therefore hit a given wall at different points.
-//! - **`respawn_cell`** (`sim/mod.rs`) — collects the walk into a `Vec`, then
-//!   takes a min over projections and a `max_by_key`. Runs on every crash.
+//!   fully-inside-`D` and blocked, because two walks that visit cells in different
+//!   orders reach a given wall at different points.
+//! - **`respawn_cell`** (`sim/mod.rs`) — collects the walk, then takes a min over
+//!   projections and a `max_by_key`. Runs on every crash.
 //!
-//! # Reading the numbers
+//! # The result that got #171/#172 reverted
 //!
-//! At production velocities the win is bounded: `--v-target` is capped at 10 and
-//! Ф5b's deepening reaches `V_ceil = 16`, so the bounding box the old scan walked
-//! was at most a few hundred cells. The `long_chord` group is deliberately
-//! *outside* that domain — it exists to show the asymptotic separation
-//! (`O(bbox area)` vs `O(cells yielded)`) that the realistic groups cannot.
+//! `--v-target` caps at 10 and Ф5b's deepening reaches `V_ceil = 16`, so a real
+//! chord's bounding box is at most ~17×17 ≈ 289 cells — a tight counted loop LLVM
+//! strength-reduces. The interval walk was **1.03–1.29× slower** on `legal_move`
+//! and **1.08–1.69× slower** on `respawn_cell`, winning only on chords of 64+ cells
+//! that no legal move can produce. A Bresenham variant removing the per-row
+//! division landed within 10% of it and did not close the gap.
+//!
+//! **Do not benchmark through a `Box<dyn Iterator>`.** An early cut unified the two
+//! walk types that way; the per-cell dynamic dispatch suppressed inlining and
+//! *inverted* the verdict, showing the interval walk 1.2–1.8× faster on the same
+//! hardware. Both shapes take their iterator generically, by value.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use gp_core::geom::{Corridor, Point, supercover};
 use std::hint::black_box;
 
-/// The pre-#171 `supercover`, copied verbatim from `geom/mod.rs` at `e8620f1^`.
-///
-/// Deliberately duplicated from the copy in `geom/supercover.rs`'s
-/// `supercover_equivalence` test module: a `#[cfg(test)]` item is not compiled
-/// for a `benches/` target, and exposing it from the library just to share it
-/// would put frozen historical code on the public API. Both copies are the same
-/// dead implementation and neither will change again.
-///
-/// Returns `impl Iterator`, exactly as the shipped original did — collecting into
-/// a `Vec` here instead would charge the old implementation an allocation it
-/// never paid, and would defeat the short-circuit the `legal_move` shape relies on.
+// ---------------------------------------------------------------------------
+// The interval walk, in its best known form, as the baseline to beat.
+//
+// This is NOT PR #172 verbatim. It is that approach plus every improvement the
+// review of PR #171/#172 and of the follow-up Bresenham branch identified, so the
+// comparison below is against the strongest version of the idea rather than its
+// first draft:
+//
+//   * Bresenham-style `FloorTracker` — the per-row division is gone, replaced by
+//     an add/compare/branch that tracks `floor((x0 + i*step) / m)` incrementally.
+//   * `along_delta == 0` is a THIRD enum variant, not an `Option` checked once per
+//     row. That case is always a single outer step (a purely axial chord), so it
+//     needs no tracker at all — which also deletes the two `.expect()` unwraps the
+//     `Option` form required.
+//   * The remaining `i64 -> i32` narrowings are total (`unwrap_or`), so this
+//     version would not have cost gp-core its zero-production-panics invariant.
+//     An out-of-range bound can only mean an empty row, and both sentinels encode
+//     exactly that.
+//   * No `DoubleEndedIterator`. The trackers make the walk stateful, so a reverse
+//     traversal would silently desync; `impl Iterator` hides the impl today, which
+//     makes it a trap rather than a bug. Removed instead of documented.
+// ---------------------------------------------------------------------------
+
+/// The interval walk: one interval solve per outer row, no per-row division.
 #[allow(
     clippy::arithmetic_side_effects,
-    reason = "verbatim copy of the shipped pre-#171 implementation, benched only \
-              on bounded chords well inside its documented domain"
+    reason = "same bounded-chord precondition as the shipped supercover — the \
+              i64-widened deltas cannot overflow on the chords benched here"
 )]
-fn supercover_reference(a: Point, b: Point) -> impl Iterator<Item = Point> {
+fn supercover_interval(a: Point, b: Point) -> impl Iterator<Item = Point> {
     let dx = i64::from(b.x) - i64::from(a.x);
     let dy = i64::from(b.y) - i64::from(a.y);
     let bound = dx.abs() + dy.abs();
-    (a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
-        (a.y.min(b.y)..=a.y.max(b.y)).filter_map(move |cy| {
-            let cr = dx * (i64::from(cy) - i64::from(a.y)) - dy * (i64::from(cx) - i64::from(a.x));
-            (2 * cr.abs() <= bound).then(|| Point::new(cx, cy))
+    let (ax, ay) = (i64::from(a.x), i64::from(a.y));
+
+    // A purely axial chord spans exactly one outer coordinate, so it needs no
+    // interval machinery — this is the third-variant case.
+    let axial = |fixed: i32, horizontal: bool, lo: i32, hi: i32| {
+        (lo..=hi).map(move |i| {
+            if horizontal {
+                Point::new(i, fixed)
+            } else {
+                Point::new(fixed, i)
+            }
         })
-    })
+    };
+
+    if dx.abs() >= dy.abs() {
+        let (lo, hi) = (a.x.min(b.x), a.x.max(b.x));
+        if dy == 0 {
+            return Either3::Axial(axial(a.y, true, lo, hi));
+        }
+        let mut st = IntervalState::new(
+            ay,
+            dx,
+            ax,
+            dy,
+            i64::from(lo),
+            i64::from(hi),
+            bound,
+            i64::from(a.y.min(b.y)),
+        );
+        Either3::MajorX((a.y.min(b.y)..=a.y.max(b.y)).flat_map(move |cy| {
+            let (lo, hi) = st.step();
+            (lo..=hi).map(move |cx| Point::new(cx, cy))
+        }))
+    } else {
+        let (lo, hi) = (a.y.min(b.y), a.y.max(b.y));
+        if dx == 0 {
+            return Either3::Axial(axial(a.x, false, lo, hi));
+        }
+        let mut st = IntervalState::new(
+            ax,
+            dy,
+            ay,
+            dx,
+            i64::from(lo),
+            i64::from(hi),
+            bound,
+            i64::from(a.x.min(b.x)),
+        );
+        Either3::MajorY((a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
+            let (lo, hi) = st.step();
+            (lo..=hi).map(move |cy| Point::new(cx, cy))
+        }))
+    }
+}
+
+/// Per-row interval state. `along_delta != 0` is a constructor precondition, which
+/// is what lets the two trackers be unconditional rather than `Option`s.
+struct IntervalState {
+    /// Tracks `ceil(low / m)` across rows.
+    lo: FloorTracker,
+    /// Tracks `floor(high / m)` across rows.
+    hi: FloorTracker,
+    /// Inner-axis floor.
+    inner_min: i64,
+    /// Inner-axis ceiling.
+    inner_max: i64,
+}
+
+impl IntervalState {
+    /// Seeds both trackers at the first outer coordinate actually iterated.
+    #[allow(clippy::arithmetic_side_effects, reason = "bounded chords only")]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "bench-local, mirrors the shape under test"
+    )]
+    fn new(
+        outer_origin: i64,
+        across_delta: i64,
+        inner_origin: i64,
+        along_delta: i64,
+        inner_min: i64,
+        inner_max: i64,
+        bound: i64,
+        outer_start: i64,
+    ) -> Self {
+        debug_assert!(along_delta != 0, "axial chords take the third variant");
+        // Normalise to a positive divisor: negating both deltas maps
+        // (low, high, m) -> (-high, -low, -m), which is the old m < 0 swap.
+        let (across_delta, along_delta) = if along_delta < 0 {
+            (-across_delta, -along_delta)
+        } else {
+            (across_delta, along_delta)
+        };
+        let m = 2 * along_delta;
+        let step = 2 * across_delta;
+        let center0 =
+            2 * (across_delta * (outer_start - outer_origin) + along_delta * inner_origin);
+        Self {
+            // ceil(x/m) == floor((x + m - 1)/m) for m > 0.
+            lo: FloorTracker::new(center0 - bound + m - 1, step, m),
+            hi: FloorTracker::new(center0 + bound, step, m),
+            inner_min,
+            inner_max,
+        }
+    }
+
+    /// The interval for the current row, then advance. Exactly once per row, in order.
+    fn step(&mut self) -> (i32, i32) {
+        let lo = self.lo.q.max(self.inner_min);
+        let hi = self.hi.q.min(self.inner_max);
+        self.lo.advance();
+        self.hi.advance();
+        // Total by construction: `lo >= inner_min` and `hi <= inner_max` are both
+        // i32-derived, so only the far side can escape i32 — and either sentinel
+        // yields an empty `lo..=hi`, which is the correct answer for such a row.
+        (
+            i32::try_from(lo).unwrap_or(i32::MAX),
+            i32::try_from(hi).unwrap_or(i32::MIN),
+        )
+    }
+}
+
+/// Tracks `floor((x0 + i * step) / m)` for `i = 0, 1, 2, …` without dividing.
+struct FloorTracker {
+    /// Current quotient.
+    q: i64,
+    /// Current remainder, always in `[0, m)`.
+    r: i64,
+    /// Integer part of one step's increment.
+    step_q: i64,
+    /// Remainder part of one step's increment, in `[0, m)`.
+    step_r: i64,
+    /// The (positive) divisor.
+    m: i64,
+}
+
+impl FloorTracker {
+    /// Requires `m > 0`.
+    fn new(x0: i64, step: i64, m: i64) -> Self {
+        debug_assert!(m > 0);
+        Self {
+            q: x0.div_euclid(m),
+            r: x0.rem_euclid(m),
+            step_q: step.div_euclid(m),
+            step_r: step.rem_euclid(m),
+            m,
+        }
+    }
+
+    /// One step. `r + step_r < 2m`, so at most one carry.
+    #[allow(
+        clippy::arithmetic_side_effects,
+        reason = "r and step_r are both in [0, m)"
+    )]
+    fn advance(&mut self) {
+        let r = self.r + self.step_r;
+        let carry = r >= self.m;
+        self.r = if carry { r - self.m } else { r };
+        self.q += self.step_q + i64::from(carry);
+    }
+}
+
+/// Three-way iterator union: major-x, major-y, and the axial degenerate case.
+///
+/// Deliberately implements `Iterator` only. `ExactSizeIterator` could never apply
+/// (`FlatMap` is not one), and `DoubleEndedIterator` must not — [`IntervalState`]
+/// is stateful and advances forward, so a reverse traversal would desync it and
+/// silently return the wrong cells.
+enum Either3<A, B, C> {
+    /// `|dx| >= |dy|`, inner loop over `x`.
+    MajorX(A),
+    /// `|dy| > |dx|`, inner loop over `y`.
+    MajorY(B),
+    /// A purely axial chord — one outer step, no interval solve.
+    Axial(C),
+}
+
+impl<A, B, C, T> Iterator for Either3<A, B, C>
+where
+    A: Iterator<Item = T>,
+    B: Iterator<Item = T>,
+    C: Iterator<Item = T>,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Self::MajorX(i) => i.next(),
+            Self::MajorY(i) => i.next(),
+            Self::Axial(i) => i.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::MajorX(i) => i.size_hint(),
+            Self::MajorY(i) => i.size_hint(),
+            Self::Axial(i) => i.size_hint(),
+        }
+    }
+}
+
+/// Panics unless the baseline agrees with the shipped walk over an exhaustive
+/// window. A baseline that has drifted makes every number below meaningless, so
+/// this runs on every `cargo bench` before any timing is taken.
+fn verify_baseline() {
+    const R: i32 = 4;
+    for ax in -R..=R {
+        for ay in -R..=R {
+            for bx in -R..=R {
+                for by in -R..=R {
+                    let (a, b) = (Point::new(ax, ay), Point::new(bx, by));
+                    let mut got: Vec<Point> = supercover_interval(a, b).collect();
+                    let mut want: Vec<Point> = supercover(a, b).collect();
+                    got.sort_unstable();
+                    want.sort_unstable();
+                    assert_eq!(got, want, "interval baseline disagrees for {a:?} -> {b:?}");
+                }
+            }
+        }
+    }
 }
 
 /// Corridor edge, in cells.
@@ -153,16 +383,17 @@ const fn target(dx: i32, dy: i32) -> Point {
 /// `legal_move` over a corridor with no walls — the fold never short-circuits, so
 /// this times the complete walk. The common case: most polled moves are legal.
 fn bench_legal_move_full(c: &mut Criterion) {
+    verify_baseline();
     let d = filled_corridor();
     let mut g = c.benchmark_group("legal_move/no_short_circuit");
     for (dx, dy) in MOVE_VELOCITIES {
         let b = target(dx, dy);
         let id = format!("v=({dx},{dy})");
-        g.bench_with_input(BenchmarkId::new("optimized", &id), &b, |bench, &b| {
+        g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover(ANCHOR, black_box(b))));
         });
-        g.bench_with_input(BenchmarkId::new("reference", &id), &b, |bench, &b| {
-            bench.iter(|| legal_move_shape(&d, supercover_reference(ANCHOR, black_box(b))));
+        g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
+            bench.iter(|| legal_move_shape(&d, supercover_interval(ANCHOR, black_box(b))));
         });
     }
     g.finish();
@@ -185,11 +416,11 @@ fn bench_legal_move_blocked(c: &mut Criterion) {
         d.set(blocker, false);
 
         let id = format!("v=({dx},{dy})");
-        g.bench_with_input(BenchmarkId::new("optimized", &id), &b, |bench, &b| {
+        g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover(ANCHOR, black_box(b))));
         });
-        g.bench_with_input(BenchmarkId::new("reference", &id), &b, |bench, &b| {
-            bench.iter(|| legal_move_shape(&d, supercover_reference(ANCHOR, black_box(b))));
+        g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
+            bench.iter(|| legal_move_shape(&d, supercover_interval(ANCHOR, black_box(b))));
         });
     }
     g.finish();
@@ -203,16 +434,16 @@ fn bench_respawn_cell(c: &mut Criterion) {
     for (dx, dy) in MOVE_VELOCITIES {
         let b = target(dx, dy);
         let id = format!("v=({dx},{dy})");
-        g.bench_with_input(BenchmarkId::new("optimized", &id), &b, |bench, &b| {
+        g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| respawn_shape(&d, ANCHOR, b, supercover(ANCHOR, black_box(b)).collect()));
         });
-        g.bench_with_input(BenchmarkId::new("reference", &id), &b, |bench, &b| {
+        g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
             bench.iter(|| {
                 respawn_shape(
                     &d,
                     ANCHOR,
                     b,
-                    supercover_reference(ANCHOR, black_box(b)).collect(),
+                    supercover_interval(ANCHOR, black_box(b)).collect(),
                 )
             });
         });
@@ -229,11 +460,11 @@ fn bench_long_chords(c: &mut Criterion) {
     for (dx, dy) in LONG_CHORDS {
         let b = target(dx, dy);
         let id = format!("d=({dx},{dy})");
-        g.bench_with_input(BenchmarkId::new("optimized", &id), &b, |bench, &b| {
+        g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover(ANCHOR, black_box(b))));
         });
-        g.bench_with_input(BenchmarkId::new("reference", &id), &b, |bench, &b| {
-            bench.iter(|| legal_move_shape(&d, supercover_reference(ANCHOR, black_box(b))));
+        g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
+            bench.iter(|| legal_move_shape(&d, supercover_interval(ANCHOR, black_box(b))));
         });
     }
     g.finish();

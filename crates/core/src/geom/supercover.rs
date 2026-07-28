@@ -1,15 +1,29 @@
-//! The strict supercover predicate (design doc §3 C4) and its fast-path solver.
+//! The strict supercover predicate (design doc §3 C4).
 //!
 //! [`supercover`] is the single geometric primitive behind both the runtime
 //! legality rule (`legal_move`) and the passability oracle's graph edge, so it is
-//! the most correctness-critical routine in the crate — and the hottest. The
-//! interval solver it delegates to ([`InnerRange`] → [`InnerRangePreEval`]) and the
-//! two rounding helpers below are private implementation detail; only
-//! [`supercover`] is re-exported flat at [`crate::geom`].
+//! the most correctness-critical routine in the crate — and the hottest.
+//!
+//! **This is the pre-#171 bounding-box scan, restored.** PRs #171/#172 replaced it
+//! with a per-row interval solver that is asymptotically better (`O(cells yielded)`
+//! rather than `O(|dx| · |dy|)`), and `benches/supercover.rs` measured that
+//! asymptote as unreachable in this product: `--v-target` caps at 10 and Ф5b's
+//! deepening reaches `V_ceil = 16`, so a real chord's box is at most ~17×17 ≈ 289
+//! cells, which this scan walks as a tight counted loop LLVM strength-reduces and
+//! vectorizes. Measured on the two shapes production actually calls, the interval
+//! walk was **1.03–1.29× slower** on `legal_move` and **1.08–1.69× slower** on
+//! `respawn_cell`; a follow-up Bresenham variant that removed the per-row division
+//! landed within 10% of it and did not close the gap. Reverting also restores
+//! gp-core's zero-production-panics invariant, which the interval walk's
+//! `i32::try_from(..).expect(..)` bounds had broken.
+//!
+//! Before optimizing this again, run `benches/supercover.rs` — it still carries the
+//! rejected interval walk as a baseline — and `supercover_equivalence` below, which
+//! turns into a live differential test the moment the two implementations diverge.
 //!
 //! Pure, deterministic, integer-only, std-only — no floating point anywhere.
 
-use super::{Coord, Point};
+use super::Point;
 
 /// Strict supercover of the segment `a → b`: every cell whose **closed** unit
 /// square `[c.x ± ½] × [c.y ± ½]` the closed segment touches — corner- and
@@ -31,39 +45,26 @@ use super::{Coord, Point};
 ///   anywhere (design doc §3a).
 /// - **Endpoint-order-independent, duplicate-free.** The result is the exact cell
 ///   set: as a set `supercover(a, b) == supercover(b, a)`, each cell is yielded
-///   exactly once (the outer loop visits each minor-axis coordinate once, and the
-///   inner range it yields is a contiguous major-axis interval), and both endpoint
+///   exactly once (the bounding-box scan visits every cell once), and both endpoint
 ///   cells are always present (a degenerate `a == b` yields exactly `{a}`).
 ///
-/// **The order cells are yielded in is unspecified.** Only the *set* is contractual
-/// — treat the sequence as implementation-defined and free to change. It already
-/// has: before the fast-path rewrite this iterated `x`-outer for every chord, and it
-/// now iterates whichever axis is minor, so a shallow chord comes back transposed
-/// relative to the old walk. Consume it with an order-insensitive fold, or impose
-/// your own total order; `respawn_cell` (`sim/mod.rs`) is the in-tree example of the
-/// latter, picking its cell by `max_by_key(|c| (proj(c), c.x, c.y))` rather than by
-/// position in the stream.
+/// **The order cells are yielded in is unspecified.** Only the *set* is
+/// contractual — treat the sequence as implementation-defined and free to change.
+/// It has changed before: the #171/#172 interval walk emitted shallow chords
+/// transposed relative to this scan, and reverting changed it back. Consume the
+/// result with an order-insensitive fold, or impose your own total order;
+/// `respawn_cell` (`sim/mod.rs`) is the in-tree example of the latter, picking its
+/// cell by `max_by_key(|c| (proj(c), c.x, c.y))` rather than by stream position.
 ///
-/// **Cost.** The walk does **not** scan the endpoints' bounding box. It loops over
-/// the *minor* axis and, per outer coordinate, solves the membership predicate for
-/// the exact major-axis interval that satisfies it (`InnerRangePreEval::evaluate`),
-/// so the work is proportional to the number of cells actually yielded rather than
-/// to `|dx| · |dy|`.
+/// **Cost.** `O(|dx| · |dy|)` — the endpoints' whole bounding box is scanned and
+/// filtered. Deliberate: see this module's header for the measurement that chose
+/// this over an asymptotically better per-row interval solver.
 ///
 /// **Overflow precondition:** endpoints are assumed separated by a bounded chord —
 /// one move's velocity, with `|v| ≪ 1.5×10⁹`. Within that domain the widened `i64`
 /// cross product never overflows (its operands are taken relative to `a`, so
 /// `|cr| ≤ 2·|dx|·|dy|`). Adversarial full-range `i32` endpoints lie outside the
 /// documented domain and are not supported.
-///
-/// # Panics
-///
-/// Panics — when the returned iterator is **advanced**, not when it is built — if
-/// an inner-interval bound falls outside `i32` while narrowing it back from the
-/// widened `i64` arithmetic. That requires violating the bounded-chord precondition
-/// above: within it, each bound is clamped against `inner_min` / `inner_max`, which
-/// are the endpoints' own `i32` coordinates, so both always fit. The two sites are
-/// catalogued in `ai-docs/panic-index.md`.
 ///
 /// # Examples
 ///
@@ -85,284 +86,12 @@ pub fn supercover(a: Point, b: Point) -> impl Iterator<Item = Point> {
     let dx = i64::from(b.x) - i64::from(a.x);
     let dy = i64::from(b.y) - i64::from(a.y);
     let bound = dx.abs() + dy.abs();
-
-    let ax = i64::from(a.x);
-    let ay = i64::from(a.y);
-
-    if dx.abs() >= dy.abs() {
-        // `x` is the major axis, so it becomes the inner loop and `y` the outer one.
-        // Along the inner axis the segment advances by `dy` per outer step; `dx` is
-        // the across-component that shifts the interval.
-        let x_min = i64::from(a.x.min(b.x));
-        let x_max = i64::from(a.x.max(b.x));
-
-        let inner_range = InnerRange {
-            outer_origin: ay,
-            across_delta: dx,
-            inner_origin: ax,
-            along_delta: dy,
-            inner_min: x_min,
-            inner_max: x_max,
-            bound,
-        }
-        .pre_eval();
-
-        EitherIter::Left((a.y.min(b.y)..=a.y.max(b.y)).flat_map(move |cy| {
-            let (lo, hi) = inner_range.evaluate(cy);
-            (lo..=hi).map(move |cx| Point::new(cx, cy))
-        }))
-    } else {
-        // Mirror of the branch above with the axes swapped: `y` is the major axis,
-        // so it becomes the inner loop and `x` the outer one.
-        let y_min = i64::from(a.y.min(b.y));
-        let y_max = i64::from(a.y.max(b.y));
-
-        let inner_range = InnerRange {
-            outer_origin: ax,
-            across_delta: dy,
-            inner_origin: ay,
-            along_delta: dx,
-            inner_min: y_min,
-            inner_max: y_max,
-            bound,
-        }
-        .pre_eval();
-
-        EitherIter::Right((a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
-            let (lo, hi) = inner_range.evaluate(cx);
-            (lo..=hi).map(move |cy| Point::new(cx, cy))
-        }))
-    }
-}
-
-/// [`supercover`]'s per-row inner-interval solver, in axis-agnostic terms.
-///
-/// "Outer" is the minor axis (the `flat_map` loop variable), "inner" the major axis
-/// (the contiguous range yielded per outer step). Both `supercover` branches build
-/// this with their axes swapped, so the arithmetic below is written once. Construct
-/// it, then call [`InnerRange::pre_eval`] — [`InnerRangePreEval`] is the only form
-/// that can [`evaluate`](InnerRangePreEval::evaluate).
-struct InnerRange {
-    /// The segment's start coordinate on the outer (minor) axis.
-    outer_origin: i64,
-    /// Segment delta *across* the inner axis — what shifts the interval per outer step.
-    across_delta: i64,
-    /// The segment's start coordinate on the inner (major) axis.
-    inner_origin: i64,
-    /// Segment delta *along* the inner axis; `0` means the interval never narrows.
-    along_delta: i64,
-    /// Inclusive inner-axis floor — the lower of the two endpoints' coordinates.
-    inner_min: i64,
-    /// Inclusive inner-axis ceiling — the higher of the two endpoints' coordinates.
-    inner_max: i64,
-    /// The membership predicate's right-hand side, `|dx| + |dy|`.
-    bound: i64,
-}
-
-/// An [`InnerRange`] with its loop-invariant product hoisted out of the per-row path.
-///
-/// Identical to [`InnerRange`] except that `inner_origin` has been folded into
-/// [`pre_center`](Self::pre_center), which is the only term of the interval formula
-/// that does not depend on the outer coordinate.
-struct InnerRangePreEval {
-    /// The segment's start coordinate on the outer (minor) axis.
-    outer_origin: i64,
-    /// Segment delta *across* the inner axis — what shifts the interval per outer step.
-    across_delta: i64,
-    /// `along_delta * inner_origin`, the outer-invariant half of the interval centre.
-    pre_center: i64,
-    /// Segment delta *along* the inner axis; `0` means the interval never narrows.
-    along_delta: i64,
-    /// Inclusive inner-axis floor — the lower of the two endpoints' coordinates.
-    inner_min: i64,
-    /// Inclusive inner-axis ceiling — the higher of the two endpoints' coordinates.
-    inner_max: i64,
-    /// The membership predicate's right-hand side, `|dx| + |dy|`.
-    bound: i64,
-}
-
-impl InnerRange {
-    /// Hoists the outer-invariant `along_delta * inner_origin` product out of the
-    /// per-row path, yielding the only form that can `evaluate`.
-    ///
-    /// Called once per [`supercover`] call, never inside the iteration.
-    #[allow(
-        clippy::arithmetic_side_effects,
-        reason = "every field is i64-widened from an i32 coordinate, so the single \
-                  product here is bounded by 2^62 and cannot overflow i64 under \
-                  supercover's documented bounded-chord precondition"
-    )]
-    const fn pre_eval(self) -> InnerRangePreEval {
-        let Self {
-            outer_origin,
-            across_delta,
-            inner_origin,
-            along_delta,
-            inner_min,
-            inner_max,
-            bound,
-        } = self;
-        InnerRangePreEval {
-            outer_origin,
-            across_delta,
-            pre_center: along_delta * inner_origin,
-            along_delta,
-            inner_min,
-            inner_max,
-            bound,
-        }
-    }
-}
-
-impl InnerRangePreEval {
-    /// The inclusive inner-axis interval `[lo, hi]` whose cells satisfy the
-    /// membership predicate at outer coordinate `outer`.
-    ///
-    /// Solves `2·|cr| ≤ bound` for the inner coordinate instead of testing each
-    /// candidate: the admissible inner values are exactly those in
-    /// `[⌈low / m⌉, ⌊high / m⌋]`, clamped to the endpoints' own span. A returned
-    /// `lo > hi` denotes an empty row and yields no cells.
-    ///
-    /// # Panics
-    ///
-    /// Panics if either bound falls outside `i32`, which requires violating
-    /// [`supercover`]'s bounded-chord precondition — see that function's
-    /// `# Panics` section.
-    #[allow(
-        clippy::arithmetic_side_effects,
-        reason = "same bounded-chord precondition as supercover: every operand is \
-                  i64-widened from an i32 coordinate and the only multipliers are \
-                  the constant 2 and the chord deltas, so |center| <= 2^63 holds \
-                  within the documented domain; `m` is non-zero on this arm because \
-                  the along_delta == 0 case returns above"
-    )]
-    fn evaluate(&self, outer: Coord) -> (i32, i32) {
-        let outer = i64::from(outer);
-        let (lo, hi) = if self.along_delta == 0 {
-            (self.inner_min, self.inner_max)
-        } else {
-            let (m, low, high) = {
-                let cross = self.across_delta * (outer - self.outer_origin);
-                let center = 2 * (cross + self.pre_center);
-                let m = 2 * self.along_delta;
-                let low = center - self.bound;
-                let high = center + self.bound;
-                (m, low, high)
-            };
-
-            let (low, high) = if m > 0 { (low, high) } else { (high, low) };
-
-            let (lo, hi) = (div_ceil(low, m), div_floor(high, m));
-
-            (lo.max(self.inner_min), hi.min(self.inner_max))
-        };
-        (
-            i32::try_from(lo).expect("lo clamped within i32-derived inner_min..=inner_max"),
-            i32::try_from(hi).expect("hi clamped within i32-derived inner_min..=inner_max"),
-        )
-    }
-}
-
-/// Unifies two iterator types of the same `Item` behind one concrete type.
-///
-/// [`supercover`] picks its inner axis at runtime, so its two `flat_map` chains have
-/// different (unnameable) types that a single `impl Iterator` return cannot cover.
-/// Boxing would allocate on every legality check; this enum forwards by `match`
-/// instead, preserving [`ExactSizeIterator`] / [`DoubleEndedIterator`] where both
-/// sides provide them.
-enum EitherIter<A, B> {
-    /// The first alternative.
-    Left(A),
-    /// The second alternative.
-    Right(B),
-}
-
-impl<A, B, T> Iterator for EitherIter<A, B>
-where
-    A: Iterator<Item = T>,
-    B: Iterator<Item = T>,
-{
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        match self {
-            Self::Left(a) => a.next(),
-            Self::Right(b) => b.next(),
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::Left(a) => a.size_hint(),
-            Self::Right(b) => b.size_hint(),
-        }
-    }
-}
-
-impl<A, B, T> ExactSizeIterator for EitherIter<A, B>
-where
-    A: ExactSizeIterator<Item = T>,
-    B: ExactSizeIterator<Item = T>,
-{
-    fn len(&self) -> usize {
-        match self {
-            Self::Left(a) => a.len(),
-            Self::Right(b) => b.len(),
-        }
-    }
-}
-
-impl<A, B, T> DoubleEndedIterator for EitherIter<A, B>
-where
-    A: DoubleEndedIterator<Item = T>,
-    B: DoubleEndedIterator<Item = T>,
-{
-    fn next_back(&mut self) -> Option<T> {
-        match self {
-            Self::Left(a) => a.next_back(),
-            Self::Right(b) => b.next_back(),
-        }
-    }
-}
-
-/// `⌊a / b⌋` — division rounding toward negative infinity, for any sign of `b`.
-///
-/// `i64::div_euclid` rounds toward `-∞` only for positive divisors; for a negative
-/// one it rounds *up*, so the quotient is corrected by one on a non-exact division.
-/// Not `i64::div_floor` — that method is still unstable.
-///
-/// # Panics
-///
-/// Panics if `b == 0`, inheriting `i64::div_euclid`'s precondition.
-/// [`InnerRangePreEval::evaluate`] is the only caller and passes `2 * along_delta`
-/// on the arm where `along_delta != 0` is already established, so `b` is non-zero —
-/// and, being even, can never be the `-1` that would make `div_euclid` overflow on
-/// `i64::MIN`.
-const fn div_floor(a: i64, b: i64) -> i64 {
-    let q = a.div_euclid(b);
-    if b < 0 && a.rem_euclid(b) != 0 {
-        q.wrapping_sub(1)
-    } else {
-        q
-    }
-}
-
-/// `⌈a / b⌉` — division rounding toward positive infinity, for any sign of `b`.
-///
-/// Mirror of [`div_floor`]: `i64::div_euclid` already rounds up for a negative
-/// divisor, so only the positive-divisor case needs the non-exact correction.
-/// Not `i64::div_ceil` — that method is still unstable.
-///
-/// # Panics
-///
-/// Panics if `b == 0`, under the same caller guarantee as [`div_floor`].
-const fn div_ceil(a: i64, b: i64) -> i64 {
-    let q = a.div_euclid(b);
-    if b > 0 && a.rem_euclid(b) != 0 {
-        q.wrapping_add(1)
-    } else {
-        q
-    }
+    (a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
+        (a.y.min(b.y)..=a.y.max(b.y)).filter_map(move |cy| {
+            let cr = dx * (i64::from(cy) - i64::from(a.y)) - dy * (i64::from(cx) - i64::from(a.x));
+            (2 * cr.abs() <= bound).then(|| Point::new(cx, cy))
+        })
+    })
 }
 
 #[cfg(test)]
@@ -547,8 +276,12 @@ mod supercover_equivalence {
     /// Half-extent of the free-endpoint window.
     const COMPACT_HALF_EXTENT: i32 = 48;
 
-    /// The pre-#171 `supercover`, copied verbatim from `geom/mod.rs` at
-    /// `e8620f1^` and used only as the behavioural oracle.
+    /// The frozen specification implementation — the design doc's §3 C4 predicate
+    /// evaluated over the endpoints' whole bounding box.
+    ///
+    /// Identical to the shipped [`supercover`] again since the #171/#172 revert.
+    /// Kept separate anyway: it is the fixed point the next optimization attempt
+    /// gets measured against, and it must not be edited to track a new walk.
     ///
     /// Scans the endpoints' entire bounding box and keeps every cell satisfying
     /// `2·|cr| ≤ |dx| + |dy|`. That is `O(|dx| · |dy|)`, which is why every
@@ -575,30 +308,36 @@ mod supercover_equivalence {
             .collect()
     }
 
-    /// Asserts that [`supercover`] and the reference yield the same cells for
-    /// `a → b`, each without duplicates.
+    /// Asserts every contractual property of [`supercover`] for the chord `a → b`.
     ///
-    /// **Set equality, not iteration order — deliberately.** Order is *not* part of
-    /// the contract, and no production caller depends on it: `legal_move`
-    /// (`sim/mod.rs`) folds the walk with `.all()`, and `respawn_cell` imposes its
-    /// own explicit total order (`min()` over projections, then
-    /// `max_by_key(|c| (proj(c), c.x, c.y))`) precisely so it does not lean on the
-    /// iterator. The remaining call site is `#[cfg(test)]`. Pinning the order would
-    /// therefore fail a future legal change to the axis-branch pick for no gain —
-    /// and it would be flaky-looking besides, since the two orders happen to
-    /// coincide on ascending chords (both reduce to `(x, y)`-lex) and diverge only
-    /// on descending ones.
+    /// **Four checks, and only the last one is differential.** Since the #171/#172
+    /// revert, [`supercover`] and `supercover_reference` are the *same* algorithm,
+    /// so the oracle comparison is tautological **today** — it is a ratchet, armed
+    /// for the next rewrite, and it costs nothing while disarmed. The first three
+    /// are live properties of whatever implementation is compiled:
     ///
-    /// The `len` checks are what a bare set comparison would lose: they re-assert
-    /// the documented "each cell is yielded exactly once", which collecting into a
-    /// [`HashSet`] would otherwise silently absorb. The reference is checked too,
-    /// so a broken oracle cannot quietly excuse a broken subject.
+    /// 1. **Duplicate-free** — the documented "each cell exactly once". A bare
+    ///    `HashSet` comparison would absorb a repeat; comparing `Vec::len()` to
+    ///    `HashSet::len()` catches it.
+    /// 2. **Both endpoints present** — the guarantee `legal_move` leans on, since a
+    ///    walk that dropped `b` would call an into-wall move legal.
+    /// 3. **Endpoint symmetry** — `supercover(a, b) == supercover(b, a)` as sets.
+    ///    This is the check that actually bit during the rewrite: the interval walk
+    ///    picks its loop axis from `|dx| >= |dy|`, which is symmetric, but its
+    ///    rounding was not obviously so.
+    /// 4. **Matches the frozen reference** — the differential ratchet.
+    ///
+    /// **Sets, never iteration order.** Order is not contractual and no production
+    /// caller depends on it: `legal_move` folds with `.all()`, and `respawn_cell`
+    /// imposes its own `max_by_key(|c| (proj(c), c.x, c.y))` precisely so it does
+    /// not lean on the iterator; the third call site is `#[cfg(test)]`.
     fn check_same_cells(a: Point, b: Point) -> Result<(), TestCaseError> {
         let got: Vec<Point> = supercover(a, b).collect();
         let want: Vec<Point> = supercover_reference(a, b);
         let got_set: HashSet<Point> = got.iter().copied().collect();
         let want_set: HashSet<Point> = want.iter().copied().collect();
 
+        // (1) duplicate-free, subject and oracle alike.
         prop_assert_eq!(
             got.len(),
             got_set.len(),
@@ -614,6 +353,23 @@ mod supercover_equivalence {
             b
         );
 
+        // (2) both endpoint cells present.
+        prop_assert!(
+            got_set.contains(&a) && got_set.contains(&b),
+            "supercover({a:?}, {b:?}) dropped an endpoint cell"
+        );
+
+        // (3) endpoint symmetry, as sets.
+        let swapped: HashSet<Point> = supercover(b, a).collect();
+        prop_assert_eq!(
+            &got_set,
+            &swapped,
+            "supercover({:?}, {:?}) is not symmetric in its endpoints",
+            a,
+            b
+        );
+
+        // (4) the differential ratchet.
         if got_set != want_set {
             let mut missing: Vec<Point> = want_set.difference(&got_set).copied().collect();
             let mut extra: Vec<Point> = got_set.difference(&want_set).copied().collect();
@@ -752,8 +508,8 @@ mod supercover_equivalence {
     /// The dual-vertex tie is the correctness-critical case of the whole predicate
     /// (design doc §3 C4): a diagonal crosses `(i + ½, j + ½)`, where all four
     /// sharing cells must be returned. All four sign combinations are covered
-    /// because the optimized walk's `div_ceil` / `div_floor` swap roles with the
-    /// sign of `m = 2 · along_delta`.
+    /// because a rounding-based walk's floor/ceil swap roles with the sign of the
+    /// along-axis delta — the defect class the #171 sign swap existed to handle.
     #[test]
     fn exact_diagonals_match_reference() {
         for anchor in [

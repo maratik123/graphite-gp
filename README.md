@@ -137,11 +137,8 @@ integer `supercover` predicate (full §3 C4 test table) plus the corridor-graph
 helpers — 4-conn flood-fill / connected-component counting,
 `bounded_complement_components` (the §2 Ф4 infield-hole test), in-`D` geodesic
 BFS, and `walls_from_boundary` (dual edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
-value types, so `Corridor` dimensions are unsigned and `Rect::index` is total
-via `checked_sub` + `try_from`. gp-core carried **zero production panics** until
-the `supercover` fast-path rewrite (PR #171) introduced two `i32::try_from(..)
-.expect(..)` inner-bound conversions — the crate's only panic-class calls, both
-catalogued with their invariants in `ai-docs/panic-index.md`. All
+value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
+production panics** (`Rect::index` is total via `checked_sub` + `try_from`). All
 integer arithmetic is **overflow- and signedness-safe**, machine-enforced by a
 workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The `sim`
 `step` (accelerate-then-advance state advance) is implemented alongside the
