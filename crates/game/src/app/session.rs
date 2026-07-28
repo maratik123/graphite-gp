@@ -262,6 +262,23 @@ impl GameSession {
         }
     }
 
+    /// **Test-only.** Injects `result` through [`Worker::inject_result`]
+    /// (the same real channel `poll_generation` reads, no thread and no
+    /// `gp_gen::generate` call) and sets `self.pending` to the returned id
+    /// at attempt `k` — `poll_generation` early-returns while `pending` is
+    /// `None`, so this is the second half of the seam AC11's gp-game-side
+    /// transition test needs. `#[cfg(test)]` only; never compiled into a
+    /// non-test build.
+    #[cfg(test)]
+    pub(crate) fn inject_generation_result(
+        &mut self,
+        result: Result<TrackArtifact, GenerationFailure>,
+        k: u32,
+    ) {
+        let id = self.worker.inject_result(result);
+        self.pending = Some((id, k));
+    }
+
     /// The current race's computed outcome, if a race has been started —
     /// `RaceRound::crashes()` feeds `RaceOutcome::from_race`'s `crashes`
     /// argument.
@@ -701,6 +718,52 @@ pub(crate) mod tests {
                 .iter()
                 .any(|entry| entry.finish_turn.is_some()),
             "at least one car must have a real finish"
+        );
+    }
+
+    /// AC11's gp-game-side half — `setup_error` is set by a
+    /// `GenerationError` and clears on a later successful install.
+    /// Exercises the REAL `poll_generation`/`Worker::poll` code path via
+    /// `GameSession::inject_generation_result`'s `#[cfg(test)]` channel
+    /// injection (`Worker::inject_result`) — no thread, no
+    /// `gp_gen::generate` call. The `Ok` half installs A3's hand-built
+    /// ring fixture (`crate::test_fixtures::ring_track`, KD14 — not a real
+    /// generation), so the whole test costs milliseconds.
+    #[test]
+    fn setup_error_is_set_on_failure_and_cleared_on_a_later_success() {
+        use crate::gen_worker::GenerationFailure;
+        use crate::test_fixtures::ring_track;
+        use gp_gen::GenerationError;
+
+        let mut session = GameSession::new(test_config());
+        assert_eq!(session.setup_error(), None, "starts with no error");
+
+        session.inject_generation_result(
+            Err(GenerationFailure::Pipeline(
+                GenerationError::SeedBudgetExhausted,
+            )),
+            0,
+        );
+        session.poll_generation();
+        let message = session
+            .setup_error()
+            .expect("a GenerationError must populate the Setup error slot");
+        assert!(
+            message.contains("seed budget"),
+            "error text must be the GenerationError's own Display: {message}"
+        );
+        assert!(session.landed().is_none(), "a failure must not install");
+
+        session.inject_generation_result(Ok(ring_track()), 1);
+        session.poll_generation();
+        assert_eq!(
+            session.setup_error(),
+            None,
+            "a later successful install must clear the Setup error slot"
+        );
+        assert!(
+            session.landed().is_some(),
+            "the successful result must install as the landed track"
         );
     }
 }

@@ -278,6 +278,28 @@ impl Worker {
         self.current_id.is_some()
     }
 
+    /// **Test-only.** Injects a terminal result through the SAME channel a
+    /// real spawned thread's `WorkerMsg::Done` would arrive on, so
+    /// [`Self::poll`]'s real logic (the `current_id` match,
+    /// `apply_terminal_rule`, the `Done` arm) actually runs — no thread, no
+    /// `gp_gen::generate` call, no mock type. Sets `current_id` to a fresh
+    /// id (mirroring `request`'s own id/phase-reset bookkeeping, minus the
+    /// spawn) and sends the result on `self.sender`; returns the id so the
+    /// caller can pair it with a `pending` entry before polling (AC11's
+    /// gp-game-side transition test, `app::session::tests`).
+    #[cfg(test)]
+    pub(crate) fn inject_result(
+        &mut self,
+        result: Result<TrackArtifact, GenerationFailure>,
+    ) -> GenerationId {
+        let id = GenerationId(self.next_id);
+        self.next_id = self.next_id.saturating_add(1);
+        self.current_id = Some(id);
+        self.current_phases = INITIAL_PHASES;
+        let _ = self.sender.send(WorkerMsg::Done(id, Box::new(result)));
+        id
+    }
+
     /// The current (or most recently finished) request's `[PhaseStatus;
     /// 7]` aggregate, in `Ф1..Ф7` order (AC9 — the Lab screen's source).
     /// `INITIAL_PHASES` (all `Pending`) before any request has ever been
