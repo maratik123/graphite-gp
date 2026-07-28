@@ -57,7 +57,7 @@ Extract `(date, category, description, rule, escalated)` for each entry.
 For each entry where `Escalated?` is **not** `no`:
 
 - For each target in the comma-separated list:
-  - **`AGENTS.md`** — `rg -n "<keyword from rule>" AGENTS.md`. The rule keyword should be a distinctive phrase from the `Rule:` field, not generic (avoid "test", "commit"). If no match → mismatch.
+  - **`AGENTS.md`** — `rg -ni "<keyword from rule>" AGENTS.md`. The rule keyword should be a distinctive phrase from the `Rule:` field, not generic (avoid "test", "commit"). If no match → mismatch.
   - **`skill:<name>`** — verify `.claude/skills/<name>/SKILL.md` exists, then grep for keyword. If file missing → blocker (file deleted or renamed). If file exists but no keyword → mismatch.
   - **`agent:<name>`** — same as `skill:` against `.claude/agents/<name>.md`.
   - **`rules:<name>`** — same as `skill:` against `.claude/rules/<name>.md`. If file missing → blocker (file deleted or renamed). If file exists but no keyword → mismatch.
@@ -65,6 +65,8 @@ For each entry where `Escalated?` is **not** `no`:
   - **`settings`** — scan `.claude/settings.json` `permissions.allow`, `permissions.deny`, `env`. Mismatch if absent.
   - **`doc-convention`** — verify `ai-docs/doc-convention.md` exists, then grep for keyword. If file missing → blocker. If keyword absent → mismatch.
   - **`code-style`** — verify `ai-docs/code-style.md` exists, then grep for keyword. If file missing → blocker. If keyword absent → mismatch.
+
+> **Every keyword match above is `-i`, always** (`rg -ni` / `grep -ni`). This is a sweep over **prose**, and the phrase you are matching was lifted from a `Rule:` field into an instruction file that routinely re-cases and bolds it on escalation — so the emphatic occurrence is exactly the one a case-sensitive pattern misses (AGENTS.md § *Propagation Rule*; [`.claude/rules/ast-index.md` § Negative results are NOT evidence](../rules/ast-index.md#negative-results-are-not-evidence)). A false negative here is **not inert**: it yields `⚠️ Mismatch`, which authorises an in-place `Escalated?` rewrite on an append-only log. Before recording any mismatch, vary the pattern — shorten to a distinctive root substring, and try `rg -Uni` for a phrase rustfmt or prose wrapping may have split across lines. A miss on a construct that should exist is a **search-method failure first**.
 
 Record each entry's status:
 
