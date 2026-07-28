@@ -9,6 +9,7 @@
 //! states") true *by construction*.
 
 pub mod format;
+pub mod playback;
 
 use crate::controller::{Controller, FrameInput, PollContext, Roster};
 use crate::race::RaceState;
@@ -17,6 +18,8 @@ use gp_core::sim::{Action, CarState};
 use gp_core::track::TrackArtifact;
 use gp_render::{BakedTrackGeometry, RaceConfig};
 use std::collections::VecDeque;
+
+pub use playback::run_headless_race;
 
 /// One recorded turn: which round/seat it was, and the action applied.
 ///
@@ -70,6 +73,17 @@ pub struct ReplayRecord {
     /// format's `final` lines; A8's own in-memory `replay_in_process`
     /// re-derives finals by simulation, so it does not read this field).
     pub finals: Vec<FinalCarState>,
+    /// The total number of `RaceRound::advance` outcomes that were
+    /// `Moved` OR `Crashed` while this record was fed (C4) — **not**
+    /// `turns.len()`, which counts `Moved` outcomes only (crash turns emit
+    /// no `turn` line, § *Replay format*). A persisted replay's headless
+    /// driver needs this EXACT count as its `max_turns` bound: a record
+    /// capped by an external turn budget (rather than ending at
+    /// `RaceOver`) must replay to the SAME point and then stop cleanly,
+    /// not run past the last recorded action and register a false
+    /// divergence, nor stop `turns.len()` short whenever the source race
+    /// crashed at least once.
+    pub total_processed_turns: u32,
 }
 
 /// Feeds a [`ReplayRecord`] from a live race's `RaceRound::advance` calls
@@ -77,24 +91,40 @@ pub struct ReplayRecord {
 #[derive(Clone, Debug, Default)]
 pub struct Recorder {
     turns: Vec<RecordedTurn>,
+    /// See [`ReplayRecord::total_processed_turns`].
+    processed: u32,
 }
 
 impl Recorder {
     /// A fresh, empty recorder.
     #[must_use]
     pub const fn new() -> Self {
-        Self { turns: Vec::new() }
+        Self {
+            turns: Vec::new(),
+            processed: 0,
+        }
     }
 
     /// Records one seat's applied action. Call this on every
     /// `Advance::Moved` outcome — never on `Crashed`/`Pending`/`RaceOver`
-    /// (crash turns are recomputed deterministically, never recorded).
+    /// (crash turns are recomputed deterministically, never recorded as a
+    /// `turn` line, though they DO count towards
+    /// [`ReplayRecord::total_processed_turns`] — see [`Self::record_crash`]).
     pub fn record(&mut self, round: u32, seat: usize, action: Action) {
         self.turns.push(RecordedTurn {
             round,
             seat,
             action,
         });
+        self.processed = self.processed.saturating_add(1);
+    }
+
+    /// Records one seat's crash turn — no `turn` line (crash turns are
+    /// recomputed deterministically, never polled), but it still counts
+    /// towards [`ReplayRecord::total_processed_turns`]. Call this on
+    /// every `Advance::Crashed` outcome.
+    pub const fn record_crash(&mut self) {
+        self.processed = self.processed.saturating_add(1);
     }
 
     /// Consumes this recorder into a full [`ReplayRecord`], pairing its
@@ -114,6 +144,7 @@ impl Recorder {
             race,
             turns: self.turns,
             finals,
+            total_processed_turns: self.processed,
         }
     }
 }
@@ -298,7 +329,10 @@ mod tests {
                     recorder.record(round.round(), seat, action);
                     processed = processed.saturating_add(1);
                 }
-                Advance::Crashed { .. } => processed = processed.saturating_add(1),
+                Advance::Crashed { .. } => {
+                    recorder.record_crash();
+                    processed = processed.saturating_add(1);
+                }
                 Advance::Pending | Advance::RaceOver => break,
             }
         }
@@ -362,6 +396,7 @@ mod tests {
             race: TEST_RACE_CONFIG,
             turns: vec![],
             finals: vec![],
+            total_processed_turns: 0,
         };
         let mut controller = ReplayController::for_seat(&record, 0);
         assert!(!controller.diverged());

@@ -208,6 +208,7 @@ impl eframe::App for GraphiteGpApp {
             .round()
             .is_some_and(crate::race::round::RaceRound::is_race_over);
         if race_over && !self.finished_transitioned {
+            self.session.write_record_if_requested();
             self.shell.apply(Nav::Finish);
             self.finished_transitioned = true;
         }

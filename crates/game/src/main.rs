@@ -34,6 +34,16 @@ fn main() -> eframe::Result {
         Ok(config) => config,
         Err(err) => err.exit(),
     };
+
+    // `--replay <PATH> --replay-mode headless` (C4, AC21): never opens the
+    // window, and the startup echo below is skipped on this path — there
+    // is no fresh race being started to echo the config of.
+    if let (Some(path), config::ReplayMode::Headless) = (&config.replay, config.replay_mode) {
+        std::process::exit(gp_game::replay::playback::run_headless_replay_from_file(
+            path,
+        ));
+    }
+
     // `let _ = writeln!`, not `println!` — `println!` panics on a broken
     // pipe, which would be a new production panic path (AC14 in spirit).
     let _ = writeln!(

@@ -13,6 +13,18 @@
 //!
 //! An unrecognised version (AC22) is rejected before any other line is
 //! interpreted, via [`ReplayError::UnsupportedVersion`].
+//!
+//! **`processed <u32>` (C4 addition to the design's own grammar sketch):**
+//! the total number of `Moved`-OR-`Crashed` outcomes the source race
+//! processed — `turns.len()` alone undercounts whenever the source race
+//! crashed at least once (a crash turn emits no `turn` line, since it polls
+//! no controller). A persisted replay driven from a `--record` file that
+//! stopped at an external turn cap (not `RaceOver`) must replay to the
+//! SAME point and stop cleanly; using `turns.len()` as that bound would
+//! either stop short (if there were crashes) or, if the caller instead
+//! guesses a large `max_turns`, run the `ReplayController`s dry past the
+//! last recorded turn and register a false divergence. See
+//! `ReplayRecord::total_processed_turns`'s own doc for the full rationale.
 
 use crate::config::GameConfig;
 use crate::replay::{FinalCarState, RecordedTurn, ReplayRecord};
@@ -99,6 +111,7 @@ pub fn write_record(config: &GameConfig, record: &ReplayRecord) -> String {
         config.min_straight, config.block_size, config.seed_budget, config.repair_budget,
     );
     let _ = writeln!(out, "seats {}", record.finals.len());
+    let _ = writeln!(out, "processed {}", record.total_processed_turns);
     for turn in &record.turns {
         let _ = writeln!(out, "turn {} {} {}", turn.round, turn.seat, turn.action);
     }
@@ -138,6 +151,7 @@ pub fn parse_record(text: &str) -> Result<(GameConfig, ReplayRecord), ReplayErro
     let (cars, laps, v_target, difficulty) = parse_race_line(&mut lines)?;
     let (min_straight, block_size, seed_budget, repair_budget) = parse_tuning_line(&mut lines)?;
     let seats: usize = keyed_line(&mut lines, "seats", "seats")?;
+    let total_processed_turns: u32 = keyed_line(&mut lines, "processed", "processed")?;
 
     let (turns, pending) = parse_turns(&mut lines)?;
     let finals = parse_finals(pending.into_iter().chain(lines))?;
@@ -183,6 +197,7 @@ pub fn parse_record(text: &str) -> Result<(GameConfig, ReplayRecord), ReplayErro
         race: config.race,
         turns,
         finals,
+        total_processed_turns,
     };
 
     Ok((config, record))
@@ -464,6 +479,7 @@ mod tests {
                     lap_raw: -1,
                 },
             ],
+            total_processed_turns: 2,
         }
     }
 

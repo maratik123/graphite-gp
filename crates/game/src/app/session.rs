@@ -274,18 +274,27 @@ impl GameSession {
     /// Advances the current race by at most one seat (A9's per-frame
     /// driving call — `RaceRound::advance`'s own contract), recording
     /// every `Advance::Moved` outcome into this session's [`Recorder`]
-    /// (A8, design § *Module decomposition* — "fed from A4's apply step").
+    /// (A8, design § *Module decomposition* — "fed from A4's apply step"),
+    /// and every `Advance::Crashed` outcome towards the recorder's
+    /// `total_processed_turns` (C4 — needed so a persisted `--record`
+    /// carries the EXACT processed-turn count a headless replay's
+    /// `max_turns` bound needs, not just the `Moved`-only `turns.len()`).
     /// `None` if no race has been started.
     pub fn advance_race(&mut self, roster: &mut Roster, input: FrameInput) -> Option<Advance> {
         let (race, round) = (self.race.as_mut()?, self.round.as_mut()?);
         let outcome = round.advance(race, roster, input);
-        if let Advance::Moved {
-            seat,
-            action,
-            round_complete: _,
-        } = outcome
-        {
-            self.recorder.record(round.round(), seat, action);
+        match outcome {
+            Advance::Moved {
+                seat,
+                action,
+                round_complete: _,
+            } => {
+                self.recorder.record(round.round(), seat, action);
+            }
+            Advance::Crashed { .. } => {
+                self.recorder.record_crash();
+            }
+            Advance::Pending | Advance::RaceOver => {}
         }
         Some(outcome)
     }
@@ -316,6 +325,31 @@ impl GameSession {
             self.config.race,
             finals,
         ))
+    }
+
+    /// Writes this session's replay record to `--record`'s path, if given
+    /// (spec § Replay CLI, C4) — call once, at race end
+    /// (`app/mod.rs`'s race-over detection). A no-op if `--record` was not
+    /// given, or if no race has started. A write failure is reported to
+    /// stderr (`writeln!`, not `eprintln!`, matching `main.rs`'s own
+    /// avoid-a-broken-pipe-panic precedent) rather than propagated — A9's
+    /// per-frame render loop has nowhere to route a `Result` to.
+    pub fn write_record_if_requested(&self) {
+        let Some(path) = self.config.record.as_deref() else {
+            return;
+        };
+        let Some(record) = self.replay_record() else {
+            return;
+        };
+        let text = crate::replay::format::write_record(&self.config, &record);
+        if let Err(err) = std::fs::write(path, text) {
+            use std::io::Write as _;
+            let _ = writeln!(
+                std::io::stderr(),
+                "graphite-gp: failed to write --record file {}: {err}",
+                path.display()
+            );
+        }
     }
 }
 
