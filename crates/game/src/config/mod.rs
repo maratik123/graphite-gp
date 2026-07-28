@@ -97,6 +97,11 @@ pub struct GameConfig {
     /// The resolved per-source seeds — the master expanded via
     /// `Seeds::from_master`, with any supplied per-source override applied.
     pub seeds: Seeds,
+    /// The raw `--seed` master value (issue #43 § Seed policy) — request
+    /// `k`'s effective seeds are `Seeds::from_master(master.wrapping_add(k))`
+    /// for `k > 0`; `k = 0` uses `seeds` verbatim (preserving this field's
+    /// own per-source override contract above).
+    pub master: u64,
     /// `L_min` — minimum straight length before a corner.
     pub min_straight: i32,
     /// `k` — coarse-block size / nominal corridor width.
@@ -133,6 +138,7 @@ impl TryFrom<Cli> for GameConfig {
                 difficulty: cli.difficulty,
             },
             seeds,
+            master: cli.seed,
             min_straight: cli.min_straight,
             block_size: cli.block_size,
             seed_budget: cli.seed_budget,
