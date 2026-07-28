@@ -292,17 +292,30 @@ impl GameSession {
 
     /// The current race's in-memory replay record, built from this
     /// session's [`Recorder`] plus the resolved seeds/config the current
-    /// race actually used (A8, AC20) — `None` until a race has been
-    /// started at least once.
+    /// race actually used (A8, AC20), plus every seat's final state (C2,
+    /// the persisted format's `final` lines) — `None` until a race has
+    /// been started at least once.
     #[must_use]
     pub fn replay_record(&self) -> Option<ReplayRecord> {
         let generation_seed = self.installed_seeds?.generation;
         let collision_seed = self.current_collision_seed?;
-        Some(
-            self.recorder
-                .clone()
-                .into_record(generation_seed, collision_seed, self.config.race),
-        )
+        let race = self.race.as_ref()?;
+        let finals = race
+            .cars
+            .iter()
+            .enumerate()
+            .map(|(seat, car)| crate::replay::FinalCarState {
+                seat,
+                state: car.state,
+                lap_raw: car.laps.raw(),
+            })
+            .collect();
+        Some(self.recorder.clone().into_record(
+            generation_seed,
+            collision_seed,
+            self.config.race,
+            finals,
+        ))
     }
 }
 
@@ -479,7 +492,7 @@ pub(crate) mod tests {
             !session
                 .recorder
                 .clone()
-                .into_record(0, 0, test_config().race)
+                .into_record(0, 0, test_config().race, vec![])
                 .turns
                 .is_empty()
         );
@@ -503,7 +516,7 @@ pub(crate) mod tests {
             session
                 .recorder
                 .clone()
-                .into_record(0, 0, test_config().race)
+                .into_record(0, 0, test_config().race, vec![])
                 .turns
                 .is_empty(),
             "Race-again must discard the prior in-memory record (AC13)"

@@ -8,10 +8,12 @@
 //! this is what makes AC20 ("replaying reproduces identical final car
 //! states") true *by construction*.
 
+pub mod format;
+
 use crate::controller::{Controller, FrameInput, PollContext, Roster};
 use crate::race::RaceState;
 use crate::race::round::{Advance, RaceRound};
-use gp_core::sim::Action;
+use gp_core::sim::{Action, CarState};
 use gp_core::track::TrackArtifact;
 use gp_render::{BakedTrackGeometry, RaceConfig};
 use std::collections::VecDeque;
@@ -31,11 +33,27 @@ pub struct RecordedTurn {
     pub action: Action,
 }
 
+/// One seat's final kinematic state at the point recording stopped.
+///
+/// The persisted format's `final` line (design § *Replay format*), and
+/// layer (c) of its three-layer divergence check: "a `final` line
+/// disagreeing with the recomputed end state".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FinalCarState {
+    /// The seat this final state belongs to.
+    pub seat: usize,
+    /// The car's final kinematic state.
+    pub state: CarState,
+    /// The car's final `LapCounter::raw()` (signed — may be `-1` if the
+    /// car never crossed the gate).
+    pub lap_raw: i32,
+}
+
 /// A per-race record (spec Scope 8).
 ///
-/// The resolved seeds actually used, the resolved race configuration, and
-/// every seat's per-turn action — enough to reproduce the race exactly,
-/// self-contained (design § *Replay format*).
+/// The resolved seeds actually used, the resolved race configuration,
+/// every seat's per-turn action, and every seat's final state — enough to
+/// reproduce the race exactly, self-contained (design § *Replay format*).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplayRecord {
     /// The resolved generation seed (provenance; A8's in-memory driver
@@ -48,6 +66,10 @@ pub struct ReplayRecord {
     pub race: RaceConfig,
     /// Every seat's per-turn action, in the order they were applied.
     pub turns: Vec<RecordedTurn>,
+    /// Every seat's final state, in seat order (C2 — the persisted
+    /// format's `final` lines; A8's own in-memory `replay_in_process`
+    /// re-derives finals by simulation, so it does not read this field).
+    pub finals: Vec<FinalCarState>,
 }
 
 /// Feeds a [`ReplayRecord`] from a live race's `RaceRound::advance` calls
@@ -76,19 +98,22 @@ impl Recorder {
     }
 
     /// Consumes this recorder into a full [`ReplayRecord`], pairing its
-    /// turn history with the race's resolved seeds/config.
+    /// turn history with the race's resolved seeds/config and every seat's
+    /// final state (C2 — the persisted format's `final` lines).
     #[must_use]
     pub fn into_record(
         self,
         generation_seed: u64,
         collision_seed: u64,
         race: RaceConfig,
+        finals: Vec<FinalCarState>,
     ) -> ReplayRecord {
         ReplayRecord {
             generation_seed,
             collision_seed,
             race,
             turns: self.turns,
+            finals,
         }
     }
 }
@@ -289,8 +314,19 @@ mod tests {
         let original_states: Vec<_> = race.cars.iter().map(|c| c.state).collect();
         let original_raw_laps: Vec<_> = race.cars.iter().map(|c| c.laps.raw()).collect();
         let original_outcome = RaceOutcome::from_race(&race, round.crashes());
+        let finals: Vec<super::FinalCarState> = race
+            .cars
+            .iter()
+            .enumerate()
+            .map(|(seat, car)| super::FinalCarState {
+                seat,
+                state: car.state,
+                lap_raw: car.laps.raw(),
+            })
+            .collect();
 
-        let record: ReplayRecord = recorder.into_record(0, collision_seed, TEST_RACE_CONFIG);
+        let record: ReplayRecord =
+            recorder.into_record(0, collision_seed, TEST_RACE_CONFIG, finals);
 
         // Drop the source race entirely -- replay from the record alone.
         drop(race);
@@ -325,6 +361,7 @@ mod tests {
             collision_seed: 0,
             race: TEST_RACE_CONFIG,
             turns: vec![],
+            finals: vec![],
         };
         let mut controller = ReplayController::for_seat(&record, 0);
         assert!(!controller.diverged());
