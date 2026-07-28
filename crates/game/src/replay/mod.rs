@@ -283,16 +283,19 @@ impl Controller for ReplayController {
 /// seat is not guaranteed to reach the recorded race's own natural end
 /// within this call (e.g. a caller comparing an in-progress snapshot,
 /// never `RaceOver`), and a replay whose stream is shorter than expected
-/// must terminate rather than spin — [`ReplayController::diverged`]
-/// signals that case without ever panicking.
+/// must terminate rather than spin.
 ///
 /// Returns the replayed [`RaceState`]/[`RaceRound`] for the caller to
-/// compare against the original, plus `Some(divergence)` if the replay was
-/// cut short by one of layer (a2), (b), or exhaustion (design § *Replay
-/// format*'s divergence-layer table) — the caller decides what "surface
-/// it" means for its own context; this fn never panics and never spins
-/// (§ Risks — the pre-existing `Advance::Pending => {}` no-op hang this
-/// widening also fixes).
+/// compare against the original, plus `Some(divergence)` — the returned
+/// [`playback::HeadlessError`] — if the replay was cut short by one of
+/// layer (a2), (b), or exhaustion (design § *Replay format*'s
+/// divergence-layer table); that returned value, not
+/// [`ReplayController::diverged`] (which lives on a per-seat controller
+/// this fn's local, function-scoped [`Roster`] drops before returning, so
+/// no caller can observe it), is what a caller inspects — the caller
+/// decides what "surface it" means for its own context; this fn never
+/// panics and never spins (§ Risks — the pre-existing
+/// `Advance::Pending => {}` no-op hang this widening also fixes).
 #[must_use]
 pub fn replay_in_process(
     record: &ReplayRecord,

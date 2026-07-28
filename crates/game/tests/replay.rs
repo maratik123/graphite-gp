@@ -246,6 +246,27 @@ fn retoken_turn_action(text: &str, turn_index: usize, new_action: Action) -> Str
     lines.join("\n")
 }
 
+/// (c) — end-state: rewrites the `final` line for `seat`, bumping its `x`
+/// field by 1, leaving `<seat>`/`vx`/`vy`/`lap-raw` untouched. Format:
+/// `final <seat> <x> <y> <vx> <vy> <lap-raw>` (`format.rs`'s
+/// `write_record`/`parse_finals`).
+fn tamper_final_x(text: &str, seat: usize) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    for line in &mut lines {
+        if line.starts_with("final ") {
+            let mut words: Vec<String> = line.split_whitespace().map(str::to_string).collect();
+            let line_seat: usize = words[1].parse().expect("final line seat must be a usize");
+            if line_seat == seat {
+                let x: i32 = words[2].parse().expect("final line x must be an i32");
+                words[2] = (x.wrapping_add(1)).to_string();
+                *line = words.join(" ");
+                return lines.join("\n");
+            }
+        }
+    }
+    panic!("fixture record must contain a final line for seat {seat}");
+}
+
 #[test]
 #[cfg_attr(
     miri,
@@ -394,6 +415,40 @@ fn legality_tamper_b_diverges_mid_replay_after_a_clean_parse() {
     assert!(
         stderr.contains("is illegal for seat"),
         "expected the (b) IllegalRecordedAction needle: {stderr}"
+    );
+}
+
+/// (c) — end-state: bumping seat 0's recorded `final` `x` by one leaves
+/// every `turn` line untouched, so (a1)/(a2)/(b) all pass cleanly and the
+/// full replay runs to completion — only the post-replay `final`-line
+/// comparison (`playback.rs::finals_agree`) can disagree. This is the
+/// **only** layer able to catch a crash/collision-induced desync: a crash
+/// turn emits no `turn` line, so it is invisible to (a1)/(a2), and it
+/// applies nothing so (b) never sees an out-of-mask action either (design §
+/// *`AC21` tamper construction*, self-review Round 2 finding 1). Costs one
+/// `generate` in the child process, on top of `FIXTURE`'s own — expected
+/// and already budgeted (design § Risks' cost table).
+#[test]
+#[cfg_attr(
+    miri,
+    ignore = "spawns the built binary via std::process::Command; process \
+              spawning is unsupported under Miri"
+)]
+fn end_state_tamper_c_diverges_after_a_full_clean_replay() {
+    let scratch = ScratchFile::new("c-end-state");
+    let tampered = tamper_final_x(&FIXTURE.text, 0);
+    std::fs::write(&scratch.0, tampered).expect("failed to write the tampered scratch file");
+
+    let output = run_replay(&scratch.0);
+
+    assert!(
+        !output.status.success(),
+        "an end-state-tampered record must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("recomputed end state disagrees"),
+        "expected the (c) finals_agree needle: {stderr}"
     );
 }
 
