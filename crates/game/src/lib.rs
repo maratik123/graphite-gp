@@ -1,11 +1,18 @@
-//! `gp-game` library surface (design `2026-07-25-game-controller-player` § Q4).
+//! `gp-game` library surface (design `2026-07-25-game-controller-player` §
+//! Q4; widened by design `2026-07-28-game-loop-orchestration` A2).
 //!
-//! `crates/game`'s runnable binary (`src/main.rs`) keeps its own,
-//! independent `mod config;` subtree and does **not** `use gp_game::…` — the
-//! controller abstraction below is a #43-facing seam, proven by test today
-//! (issue #42), not yet consumed in-binary (owner ruling R2-Q2: `main.rs`
-//! behaviour is out of this task's scope). The lib target exists so the
-//! seam's public items are reachable from the crate root — a bin-only crate
-//! would hard-error every `pub` item here under `dead_code` with
-//! `-D warnings`, since nothing reachable from `fn main` names them yet.
+//! `crates/game`'s runnable binary (`src/main.rs`) is now a thin CLI-parse →
+//! dispatch → `run_native` shim over this lib target: [`config`] (CLI
+//! parsing + validated [`config::GameConfig`]) and [`app`] (the
+//! `eframe::App` glue) both live here, reached from the bin as
+//! `gp_game::config::…` / `gp_game::app::…`. The lib target also carries the
+//! #42 controller seam ([`controller`]) and the game-loop-orchestration
+//! modules ([`race`], [`replay`], [`gen_worker`]) — [`race`]/[`replay`]/
+//! [`gen_worker`]/[`app::session`] are empty skeletons as of A2, populated
+//! by later subtasks (A3, A6, A7, A8).
+pub mod app;
+pub mod config;
 pub mod controller;
+pub mod gen_worker;
+pub mod race;
+pub mod replay;

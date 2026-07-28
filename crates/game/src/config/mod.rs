@@ -2,12 +2,17 @@
 //!
 //! Owns the bound/default constants, the seed resolution, the validated
 //! [`GameConfig`], and the [`GenParams`]/temperature mapping. The
-//! [`clap`]-derived raw `Cli` struct lives in [`cli`] (stays private to the
+//! [`clap`]-derived raw `Cli` struct lives in `cli` (stays private to the
 //! whole `config` tree — it never escapes into the mapping logic); the
-//! cross-field [`ConfigError`] lives in [`error`]; the startup-echo formatter
-//! ([`render_startup_echo`]) lives in [`echo`] — all three split out of
+//! cross-field [`ConfigError`] lives in `error`; the startup-echo formatter
+//! ([`render_startup_echo`]) lives in `echo` — all three split out of
 //! this file to keep it under the workspace's 800-line soft cap (AGENTS.md §
 //! Code Style).
+//!
+//! Lives in the **lib** target (design `2026-07-28-game-loop-orchestration`
+//! § *Module decomposition*, KD15) — both `src/main.rs` (the bin) and
+//! `src/app/session.rs` need [`GameConfig`], and the lib is where headless
+//! tests reach it. `src/main.rs` reaches it as `gp_game::config::…`.
 
 mod cli;
 mod echo;
@@ -19,8 +24,8 @@ use gp_gen::GenParams;
 use gp_render::screens::RaceConfig;
 
 use cli::Cli;
-pub(crate) use echo::render_startup_echo;
-pub(crate) use error::ConfigError;
+pub use echo::render_startup_echo;
+pub use error::ConfigError;
 
 /// Minimum accepted `--cars` (mirrors `SetupScreen`, AC9).
 const CARS_MIN: u32 = 2;
@@ -83,23 +88,23 @@ const DEFAULT_SEED_BUDGET: u32 = 1;
 /// Default `--repair-budget` — `gp-gen`'s cheap always-on e2e case.
 const DEFAULT_REPAIR_BUDGET: u32 = 8;
 
-/// The validated game configuration assembled from [`Cli`] (issue #41).
+/// The validated game configuration assembled from `Cli` (issue #41).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GameConfig {
+pub struct GameConfig {
     /// The player-facing race configuration, reused from `gp-render` — the
     /// same type `AppShell::new` and the Setup screen already speak.
-    pub(crate) race: RaceConfig,
+    pub race: RaceConfig,
     /// The resolved per-source seeds — the master expanded via
     /// `Seeds::from_master`, with any supplied per-source override applied.
-    pub(crate) seeds: Seeds,
+    pub seeds: Seeds,
     /// `L_min` — minimum straight length before a corner.
-    pub(crate) min_straight: i32,
+    pub min_straight: i32,
     /// `k` — coarse-block size / nominal corridor width.
-    pub(crate) block_size: i32,
+    pub block_size: i32,
     /// Outer-loop seed budget.
-    pub(crate) seed_budget: u32,
+    pub seed_budget: u32,
     /// Inner-loop repair budget.
-    pub(crate) repair_budget: u32,
+    pub repair_budget: u32,
 }
 
 impl TryFrom<Cli> for GameConfig {
@@ -156,7 +161,7 @@ impl GameConfig {
     /// [`RaceConfig::temperature`], the single source of truth for the
     /// mapping (AC10). FORCED `const fn` — a pure delegation over `Copy`
     /// fields (`clippy::missing_const_for_fn`, nursery = deny).
-    pub(crate) const fn temperature(self) -> f32 {
+    pub const fn temperature(self) -> f32 {
         self.race.temperature()
     }
 
@@ -164,14 +169,14 @@ impl GameConfig {
     /// *total* (non-panicking) conversion — `self.race.laps` is validated
     /// into `[1, 9]`, so the `i32::MAX` sentinel is unreachable in practice,
     /// but the form stays total rather than relying on that invariant.
-    pub(crate) fn total_laps(self) -> i32 {
+    pub fn total_laps(self) -> i32 {
         i32::try_from(self.race.laps).unwrap_or(i32::MAX)
     }
 
     /// Maps this config onto a [`GenParams`], mapping `v_target` onto
     /// `v_ceiling` (AC7). FORCED `const fn` — a pure struct literal over
     /// `Copy` fields (`clippy::missing_const_for_fn`, nursery = deny).
-    pub(crate) const fn to_gen_params(self) -> GenParams {
+    pub const fn to_gen_params(self) -> GenParams {
         GenParams {
             cars: self.race.cars,
             min_straight: self.min_straight,
@@ -186,7 +191,13 @@ impl GameConfig {
 
 /// Parses `args` (never `std::env::args` internally — the iterator is the
 /// caller's responsibility) into a validated [`GameConfig`] (AC1).
-pub(crate) fn parse_from<I, T>(args: I) -> Result<GameConfig, ConfigError>
+///
+/// # Errors
+/// Returns [`ConfigError::Cli`] for any `clap` tokenizing/validation
+/// failure (unknown flag, missing/unparseable/out-of-range value), and
+/// [`ConfigError::BlockSizeBelowWidthFloor`] when `--block-size` sits below
+/// the corridor-width floor `--cars` implies (AC5).
+pub fn parse_from<I, T>(args: I) -> Result<GameConfig, ConfigError>
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,

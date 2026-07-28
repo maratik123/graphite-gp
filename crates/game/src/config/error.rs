@@ -14,7 +14,7 @@ use super::Cli;
 /// per-flag ranges, plus the cross-field invariant `block_size ≥
 /// ⌈cars/2⌉`.
 #[derive(Debug, Error)]
-pub(crate) enum ConfigError {
+pub enum ConfigError {
     /// A `clap` parsing/validation error (unknown flag, missing value,
     /// unparseable value, out-of-range value, unrecognised difficulty).
     #[error(transparent)]
@@ -40,7 +40,7 @@ impl ConfigError {
     /// `clap`-formatted for every variant, including the cross-field one
     /// (via `Cli::command().error(..)`, so its rendering matches `clap`'s
     /// own diagnostics).
-    pub(crate) fn exit(self) -> ! {
+    pub fn exit(self) -> ! {
         match self {
             Self::Cli(err) => err.exit(),
             other @ Self::BlockSizeBelowWidthFloor { .. } => Cli::command()
