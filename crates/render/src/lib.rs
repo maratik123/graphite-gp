@@ -28,7 +28,7 @@ pub mod tokens;
 pub mod track;
 pub mod widgets;
 
-pub use app::{AppShell, Screen, ShellResponse, ShellSession};
+pub use app::{AppShell, Nav, Screen, ShellResponse, ShellSession, TrackView};
 pub use screens::{
     Difficulty, LabInput, LabResponse, LabScreen, PhaseStatus, RaceConfig, RaceInput, RaceResponse,
     RaceScreen, RaceSummary, ResultsInput, ResultsResponse, ResultsScreen, StandingEntry,

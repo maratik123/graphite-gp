@@ -93,6 +93,28 @@ const NAV_ITEMS: [(Screen, &str); 3] = [
     (Screen::Lab, "Track lab"),
 ];
 
+/// The window between a generation request and the artifact landing (Scope
+/// 11) — `gp-game` never fabricates a placeholder `TrackArtifact`.
+///
+/// Folds `geometry` into `Ready` so a present-track/absent-geometry pair is
+/// unrepresentable (the prior two-independent-field `ShellSession` shape
+/// allowed it).
+#[derive(Clone, Copy, Debug)]
+pub enum TrackView<'a> {
+    /// No artifact has landed yet — Lab/Race draw `draw_pending` instead
+    /// of their normal body.
+    Pending,
+    /// The generated artifact plus its baked geometry, built from the same
+    /// `track` (caller invariant, mirrors [`crate::Scene::geometry`]'s own
+    /// same-call contract).
+    Ready {
+        /// The landed track fixture.
+        track: &'a TrackArtifact,
+        /// `track`'s baked geometry.
+        geometry: &'a BakedTrackGeometry,
+    },
+}
+
 /// One frame's navigation intent, derived from a screen's `*Response` or a
 /// top-bar nav click (design § *Navigation intent enum*).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -264,6 +286,7 @@ impl AppShell {
             screen: self.screen,
             advance_rect,
             action,
+            nav,
         }
     }
 
@@ -279,7 +302,9 @@ impl AppShell {
     ) -> (Option<Nav>, Rect, Option<Action>) {
         match self.screen {
             Screen::Setup => {
-                let resp = SetupScreen::new(self.config).show(ui);
+                let resp = SetupScreen::new(self.config)
+                    .error(session.setup_error)
+                    .show(ui);
                 self.config = resp.config;
                 (
                     resp.generated.then_some(Nav::Generate),
@@ -287,47 +312,53 @@ impl AppShell {
                     None,
                 )
             }
-            Screen::Lab => {
-                let input = LabInput {
-                    track: session.track,
-                    geometry: session.geometry,
-                    phases: session.phases,
-                    valid: session.valid,
-                    seed: session.seed,
-                };
-                let resp = LabScreen::new(input).show(ui);
-                let nav = if resp.test_lap {
-                    Some(Nav::TestLap)
-                } else if resp.menu {
-                    Some(Nav::Menu)
-                } else if resp.regenerate {
-                    Some(Nav::Regenerate)
-                } else {
-                    None
-                };
-                (nav, resp.test_lap_response.rect, None)
-            }
-            Screen::Race => {
-                let input = RaceInput {
-                    scene: Scene {
-                        track: session.track,
-                        geometry: session.geometry,
-                        cars: session.cars,
-                        reduced_motion: session.reduced_motion,
-                        overlays: self.overlays,
-                    },
-                    active: session.active,
-                    laps_done: session.laps_done,
-                    total_laps: session.total_laps,
-                };
-                let resp = RaceScreen::new(input).show(ui);
-                self.overlays = resp.overlays;
-                (
-                    resp.finish.then_some(Nav::Finish),
-                    resp.finish_response.rect,
-                    resp.action,
-                )
-            }
+            Screen::Lab => match session.track {
+                TrackView::Pending => (None, draw_pending(ui), None),
+                TrackView::Ready { track, geometry } => {
+                    let input = LabInput {
+                        track,
+                        geometry,
+                        phases: session.phases,
+                        valid: session.valid,
+                        seed: session.seed,
+                    };
+                    let resp = LabScreen::new(input).show(ui);
+                    let nav = if resp.test_lap {
+                        Some(Nav::TestLap)
+                    } else if resp.menu {
+                        Some(Nav::Menu)
+                    } else if resp.regenerate {
+                        Some(Nav::Regenerate)
+                    } else {
+                        None
+                    };
+                    (nav, resp.test_lap_response.rect, None)
+                }
+            },
+            Screen::Race => match session.track {
+                TrackView::Pending => (None, draw_pending(ui), None),
+                TrackView::Ready { track, geometry } => {
+                    let input = RaceInput {
+                        scene: Scene {
+                            track,
+                            geometry,
+                            cars: session.cars,
+                            reduced_motion: session.reduced_motion,
+                            overlays: self.overlays,
+                        },
+                        active: session.active,
+                        laps_done: session.laps_done,
+                        total_laps: session.total_laps,
+                    };
+                    let resp = RaceScreen::new(input).show(ui);
+                    self.overlays = resp.overlays;
+                    (
+                        resp.finish.then_some(Nav::Finish),
+                        resp.finish_response.rect,
+                        resp.action,
+                    )
+                }
+            },
             Screen::Results => {
                 let input = ResultsInput {
                     standings: session.standings,
@@ -355,11 +386,12 @@ impl AppShell {
 /// fields for a screen not currently active are simply unread that frame.
 #[derive(Clone, Copy, Debug)]
 pub struct ShellSession<'a> {
-    /// The track fixture — `Lab`'s canvas + oracle tiles, `Race`'s canvas.
-    pub track: &'a TrackArtifact,
-    /// The baked geometry for `track` (design
-    /// `2026-07-22-cache-track-geometry`) — `Lab`'s and `Race`'s canvas.
-    pub geometry: &'a BakedTrackGeometry,
+    /// The track/geometry window — `Lab`'s canvas + oracle tiles, `Race`'s
+    /// canvas; `Pending` draws `draw_pending` instead (Scope 11).
+    pub track: TrackView<'a>,
+    /// A `GenerationError`'s rendered text, shown in the Setup error slot
+    /// (Scope 12); `None` clears it.
+    pub setup_error: Option<&'a str>,
     /// Per-frame car render input — `Race`'s canvas.
     pub cars: &'a [CarRender<'a>],
     /// Snaps every car's move animation to its final position — `Race`'s
@@ -400,6 +432,51 @@ pub struct ShellResponse {
     /// (spec `2026-07-25-game-controller-player` Scope 6). This is the
     /// `MovePad`/Coast-button path's only route out of the shell.
     pub action: Option<Action>,
+    /// This frame's navigation intent, if any — surfaced so `gp-game` can
+    /// react to `Nav::Generate`/`Nav::Regenerate`/`Nav::Again`/`Nav::Menu`
+    /// (Scope 13; `AppShell::apply` already consumed it internally, this is
+    /// a read-only echo of what fired).
+    pub nav: Option<Nav>,
+}
+
+/// Placeholder card size while pending (Scope 11) — big enough to hold the
+/// caption with generous padding, small enough to read as a centered card
+/// rather than filling the screen.
+const PENDING_CARD_SIZE: egui::Vec2 = egui::Vec2::new(320.0, 96.0);
+
+/// Draws a centered "Generating track…" card in place of the Lab/Race body
+/// while [`TrackView::Pending`] (Scope 11). There is no forward control to
+/// click while pending, so the card's own rect is returned as
+/// `advance_rect`.
+fn draw_pending(ui: &Ui) -> Rect {
+    let full = ui.max_rect();
+    let card_rect = Rect::from_center_size(full.center(), PENDING_CARD_SIZE);
+
+    ui.painter()
+        .rect_filled(card_rect, spacing::RADIUS_2, color::PAPER_0);
+    ui.painter().rect_stroke(
+        card_rect,
+        spacing::RADIUS_2,
+        Stroke::new(spacing::BW_1, color::BORDER_HAIRLINE),
+        egui::StrokeKind::Inside,
+    );
+
+    let font = FontId::new(
+        typography::FS_BODY,
+        FontFamily::Name(crate::fonts::ONEST_MEDIUM.into()),
+    );
+    let galley =
+        ui.painter()
+            .layout_no_wrap("Generating track…".to_owned(), font, color::TEXT_BODY);
+    crate::text::paint_galley(
+        ui.painter(),
+        card_rect.center(),
+        Align2::CENTER_CENTER,
+        galley,
+        color::TEXT_BODY,
+    );
+
+    card_rect
 }
 
 /// Draws the top bar (wordmark + interactive nav row) into `ui`'s

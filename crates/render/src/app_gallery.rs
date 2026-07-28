@@ -4,7 +4,7 @@
 //! idiom. Drives the real [`AppShell::show`] inside a `Harness` — no
 //! separate manual-layout `paint` path to keep in sync.
 
-use crate::app::{AppShell, ShellSession};
+use crate::app::{AppShell, ShellSession, TrackView};
 use crate::gallery_support::{FIXED_SUMMARY, fixture_standings};
 use crate::track::test_support::scene_track_with_metrics;
 use crate::{BakedTrackGeometry, CarRender, Difficulty, PhaseStatus, RaceConfig, StandingEntry};
@@ -122,8 +122,8 @@ fn shell_session<'a>(
     standings: &'a [StandingEntry],
 ) -> ShellSession<'a> {
     ShellSession {
-        track,
-        geometry,
+        track: TrackView::Ready { track, geometry },
+        setup_error: None,
         cars,
         reduced_motion: false,
         active: 0,
@@ -192,8 +192,8 @@ fn render_shell_golden(
 #[cfg(test)]
 mod tests {
     use super::{
-        CANVAS_SIZE, FIXED_CONFIG, fixture_race_cars, fixture_standings, fixture_track,
-        render_shell_golden, shell_session,
+        CANVAS_SIZE, FIXED_CONFIG, FIXED_SUMMARY, fixture_race_cars, fixture_standings,
+        fixture_track, render_shell_golden, shell_session,
     };
     use crate::BakedTrackGeometry;
     use crate::app::{AppShell, Nav, Screen, TOP_BAR_H};
@@ -267,6 +267,93 @@ mod tests {
 
         assert!(vertex_count > 0, "tessellated meshes carried zero vertices");
         assert!(index_count > 0, "tessellated meshes carried zero indices");
+    }
+
+    /// AC10 — the render-side half: a driven `TrackView::Pending` frame
+    /// tessellates non-empty output (the placeholder card, `app.rs`'s
+    /// `draw_pending`) with no `TrackArtifact` in scope at all, and a
+    /// `TrackView::Ready` frame on `Screen::Lab` tessellates strictly more
+    /// geometry — proof it actually reaches `LabScreen`'s canvas + oracle
+    /// report rather than staying on the placeholder. The gp-game-side half
+    /// (a structural scan for "no placeholder `TrackArtifact` constructed
+    /// anywhere in `gp-game`") lands at A9, once `main.rs`'s fixture
+    /// constructor is deleted (AC24) — asserting it here would fail against
+    /// today's still-fixture-backed `main.rs`.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drawing text rasterises glyphs via vello_cpu, whose checked \
+                  u8->u32 pixmap cast panics under Miri's 1-byte allocator \
+                  alignment (TargetAlignmentGreaterAndInputNotAligned)"
+    )]
+    fn pending_frame_tessellates_and_ready_reaches_lab_body() {
+        let standings = fixture_standings();
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::fonts::definitions());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, CANVAS_SIZE)),
+            ..Default::default()
+        };
+
+        // Frame 1: Pending, on Lab (Generate latches has_generated + Lab).
+        let mut pending_shell = AppShell::new(FIXED_CONFIG);
+        pending_shell.apply(Nav::Generate);
+        assert_eq!(pending_shell.screen(), Screen::Lab);
+        let pending_output = ctx.run_ui(input.clone(), |ui| {
+            let session = crate::ShellSession {
+                track: crate::TrackView::Pending,
+                setup_error: None,
+                cars: &[],
+                reduced_motion: false,
+                active: 0,
+                laps_done: 0,
+                total_laps: 1,
+                phases: [crate::PhaseStatus::Ok; 7],
+                valid: true,
+                seed: 7,
+                standings: &standings,
+                summary: FIXED_SUMMARY,
+            };
+            let _ = pending_shell.show(ui, session);
+        });
+        let pending_primitives =
+            ctx.tessellate(pending_output.shapes, pending_output.pixels_per_point);
+        let pending_vertex_count: usize = pending_primitives
+            .iter()
+            .filter_map(|p| match &p.primitive {
+                Primitive::Mesh(mesh) => Some(mesh.vertices.len()),
+                Primitive::Callback(_) => None,
+            })
+            .sum();
+        assert!(
+            pending_vertex_count > 0,
+            "Pending body produced no tessellated geometry"
+        );
+
+        // Frame 2: Ready, same Lab screen — real track + oracle report.
+        let track = fixture_track();
+        let geometry = BakedTrackGeometry::new(&track);
+        let mut ready_shell = AppShell::new(FIXED_CONFIG);
+        ready_shell.apply(Nav::Generate);
+        let ready_output = ctx.run_ui(input, |ui| {
+            let session = shell_session(&track, &geometry, &[], &standings);
+            let _ = ready_shell.show(ui, session);
+        });
+        let ready_primitives = ctx.tessellate(ready_output.shapes, ready_output.pixels_per_point);
+        let ready_vertex_count: usize = ready_primitives
+            .iter()
+            .filter_map(|p| match &p.primitive {
+                Primitive::Mesh(mesh) => Some(mesh.vertices.len()),
+                Primitive::Callback(_) => None,
+            })
+            .sum();
+        assert!(
+            ready_vertex_count > pending_vertex_count,
+            "Ready-Lab frame ({ready_vertex_count} vertices) did not render \
+             strictly more geometry than the Pending placeholder \
+             ({pending_vertex_count} vertices) — it did not reach LabScreen's \
+             canvas/oracle body"
+        );
     }
 
     /// AC3 — one wgpu frame renders the composed shell (top bar + fresh

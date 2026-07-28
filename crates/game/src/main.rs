@@ -32,7 +32,7 @@ use gp_core::track::{
 };
 use gp_render::screens::{PhaseStatus, RaceSummary, StandingEntry};
 use gp_render::widgets::CarKind;
-use gp_render::{AppShell, BakedTrackGeometry, CarRender, ShellSession};
+use gp_render::{AppShell, BakedTrackGeometry, CarRender, ShellSession, TrackView};
 use std::io::Write;
 
 mod config;
@@ -113,8 +113,11 @@ impl eframe::App for GraphiteGpApp {
             .collect();
 
         let session = ShellSession {
-            track: &self.track,
-            geometry: &self.geometry,
+            track: TrackView::Ready {
+                track: &self.track,
+                geometry: &self.geometry,
+            },
+            setup_error: None,
             cars: &cars,
             reduced_motion: false,
             active: 0,
