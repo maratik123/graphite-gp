@@ -232,6 +232,28 @@ impl GraphiteGpApp {
     }
 }
 
+/// The "seated N of M" notice (AC14), derived from the LANDED track, not
+/// the current race (self-review Round 1 finding 4).
+///
+/// `GameSession::race()` is `Some` only after `Nav::TestLap`/`Nav::Again`,
+/// but `ShellSession::seated` is consumed **only** on `Screen::Lab`
+/// (`gp_render::app::AppShell::show`), which is reached straight from
+/// `Nav::Generate` — before any race has started. `landed`'s
+/// `start_grid.positions.len()` is available the moment generation lands,
+/// per owner ruling R3-Q3 / design KD3 ("a property of the generated track
+/// paired with the config — the same class as the seed, the VALID badge
+/// and the oracle report"). `None` while no track has landed yet.
+fn seated_grid(
+    landed: Option<&(gp_core::track::TrackArtifact, gp_render::BakedTrackGeometry)>,
+    requested: u32,
+) -> Option<SeatedGrid> {
+    let (track, _) = landed?;
+    Some(SeatedGrid {
+        seated: u32::try_from(track.start_grid.positions.len()).unwrap_or(u32::MAX),
+        requested,
+    })
+}
+
 /// Converts a [`RaceOutcome`] (native `u32` turn counts) into the
 /// `gp-render` boundary types, which (issue #43 D3) speak the same native
 /// `u32`/`Option<u32>` turn-count shape — shared by
@@ -324,10 +346,7 @@ impl eframe::App for GraphiteGpApp {
         let seed = self.session.installed_generation_seed().unwrap_or(0);
 
         let requested = self.session.config().race.cars;
-        let seated = self.session.race().map(|race| SeatedGrid {
-            seated: u32::try_from(race.seated()).unwrap_or(u32::MAX),
-            requested,
-        });
+        let seated = seated_grid(self.session.landed(), requested);
 
         let session_view = ShellSession {
             track: track_view,
@@ -487,19 +506,75 @@ mod tests {
             out
         }
 
-        let haystack = code_lines(include_str!("../main.rs"))
+        // AC10 says "anywhere in gp-game" — every one of gp-game's 18
+        // PRODUCTION sources (self-review Round 1 finding 7; the prior
+        // 7-file list left 11 unscanned, including `replay/playback.rs`,
+        // where a production `TrackArtifact {` literal would have gone
+        // undetected). `test_fixtures.rs` (the crate's 19th `.rs` file) is
+        // deliberately still excluded, not an oversight: it opens with an
+        // INNER `#![cfg(test)]` (not the `code_lines` idiom's `#[cfg(test)]`
+        // marker line this helper looks for), so it is entirely non-production
+        // regardless — including it would just make its own legitimate
+        // `TrackArtifact { .. }` fixture constructors false positives.
+        let haystack = code_lines(include_str!("../lib.rs"))
+            + &code_lines(include_str!("../main.rs"))
             + &code_lines(include_str!("mod.rs"))
             + &code_lines(include_str!("session.rs"))
-            + &code_lines(include_str!("../race/mod.rs"))
+            + &code_lines(include_str!("../config/mod.rs"))
+            + &code_lines(include_str!("../config/cli.rs"))
+            + &code_lines(include_str!("../config/echo.rs"))
+            + &code_lines(include_str!("../config/error.rs"))
+            + &code_lines(include_str!("../controller/mod.rs"))
+            + &code_lines(include_str!("../controller/keys.rs"))
+            + &code_lines(include_str!("../controller/player.rs"))
             + &code_lines(include_str!("../gen_worker.rs"))
+            + &code_lines(include_str!("../race/mod.rs"))
+            + &code_lines(include_str!("../race/round.rs"))
+            + &code_lines(include_str!("../race/standings.rs"))
+            + &code_lines(include_str!("../replay/format.rs"))
             + &code_lines(include_str!("../replay/mod.rs"))
-            + &code_lines(include_str!("../controller/mod.rs"));
+            + &code_lines(include_str!("../replay/playback.rs"));
 
         assert!(
             !haystack.contains("TrackArtifact {"),
             "production gp-game source constructs a `TrackArtifact` struct \
              literal — AC10 requires every artifact to come from generation, \
              never a placeholder built in gp-game"
+        );
+    }
+
+    /// AC14 — self-review Round 1 finding 4: `seated_grid` derives its
+    /// notice from the LANDED track, not the current race, so it is
+    /// `Some` the moment generation lands — before `Nav::TestLap` starts
+    /// any race. Mutation-proven (see the Step 11 progress-file entry):
+    /// replacing `seated_grid`'s body with `None` previously left every
+    /// test in the workspace green.
+    #[test]
+    fn seated_grid_is_some_the_moment_a_track_has_landed_even_with_no_race_started() {
+        use crate::test_fixtures::{ring_track, short_grid_track};
+        use gp_render::BakedTrackGeometry;
+
+        let ring = ring_track();
+        let geometry = BakedTrackGeometry::new(&ring);
+        let landed = (ring, geometry);
+        let seated = super::seated_grid(Some(&landed), 6)
+            .expect("a landed track (no race started) must still yield a SeatedGrid");
+        assert_eq!(
+            seated.seated, 4,
+            "ring_track's 4-position grid, independent of any race"
+        );
+        assert_eq!(seated.requested, 6);
+
+        let short = short_grid_track();
+        let geometry = BakedTrackGeometry::new(&short);
+        let landed_short = (short, geometry);
+        let seated_short = super::seated_grid(Some(&landed_short), 6)
+            .expect("a landed short-grid track must still yield a SeatedGrid");
+        assert_eq!(seated_short.seated, 3);
+
+        assert!(
+            super::seated_grid(None, 6).is_none(),
+            "no landed track yet -> no notice"
         );
     }
 
@@ -512,6 +587,13 @@ mod tests {
     /// pays no `gp_gen::generate` cost, unlike a genuine playback-load test
     /// would.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "does real filesystem I/O (std::fs::write, remove_file, and \
+                  the SUT's read_to_string) -- Miri aborts with 'unsupported \
+                  operation: `open` not available when isolation is enabled', \
+                  not a cost concern"
+    )]
     fn load_playback_rejects_an_unrecognised_version() {
         struct ScratchFile(std::path::PathBuf);
         impl ScratchFile {

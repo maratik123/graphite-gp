@@ -98,7 +98,7 @@ pub struct StandingRow {
     pub rank: u32,
     /// The formatted finish turn (`"{n} turns"`, or the `PLACEHOLDER`
     /// em-dash for a non-finisher).
-    pub finish_time: String,
+    pub finish_turn: String,
 }
 
 /// The three summary-tile labels, in [`summary_tiles`] order (design §
@@ -142,7 +142,7 @@ pub fn standings_rows(entries: &[StandingEntry]) -> Vec<StandingRow> {
                 color,
                 kind: entry.kind,
                 rank: entry.rank,
-                finish_time: entry
+                finish_turn: entry
                     .finish_turn
                     .map_or_else(|| PLACEHOLDER.to_owned(), |turn| format!("{turn} turns")),
             }
@@ -356,8 +356,9 @@ fn draw_header(ui: &mut Ui, position: Option<u32>) {
 
 /// Draws the Final-standings `Card`: one row per `StandingRow` (a `CarChip`
 /// left, mono right-aligned finish time), a hairline divider, then the
-/// summary `Telemetry` row (`Fastest lap` accent+`s`, `Tempo` default,
-/// `Crashes` danger).
+/// summary `Telemetry` row (`Fastest lap` accent, `Tempo` default, `Crashes`
+/// danger — the label itself, `SUMMARY_LABELS[0]`, carries the `", turns"`
+/// unit text; D3 removed the separate `.unit("s")` suffix).
 fn draw_standings_card(ui: &mut Ui, rows: &[StandingRow], tiles: &[String; 3]) {
     Card::new()
         .title(STANDINGS_TITLE)
@@ -376,7 +377,7 @@ fn draw_standings_card(ui: &mut Ui, rows: &[StandingRow], tiles: &[String; 3]) {
                         .show(ui);
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            egui::RichText::new(&row.finish_time)
+                            egui::RichText::new(&row.finish_turn)
                                 .font(FontId::new(
                                     typography::FS_SM,
                                     FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
@@ -566,8 +567,8 @@ mod tests {
     #[test]
     fn standings_rows_formats_finish_turn() {
         let rows = standings_rows(&fixture_standings());
-        assert_eq!(rows[0].finish_time, "38 turns");
-        assert_eq!(rows[1].finish_time, "40 turns");
+        assert_eq!(rows[0].finish_turn, "38 turns");
+        assert_eq!(rows[1].finish_turn, "40 turns");
     }
 
     /// Design KD12 — a non-finisher (`finish_turn: None`) renders
@@ -575,7 +576,7 @@ mod tests {
     #[test]
     fn standings_rows_formats_non_finisher_as_placeholder() {
         let rows = standings_rows(&fixture_standings());
-        assert_eq!(rows[3].finish_time, PLACEHOLDER);
+        assert_eq!(rows[3].finish_turn, PLACEHOLDER);
     }
 
     /// AC4 — tile values reflect the supplied data.

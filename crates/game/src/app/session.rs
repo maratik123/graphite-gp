@@ -43,11 +43,6 @@ pub struct GameSession {
     /// (`Nav::Generate` or `Nav::Regenerate` alike — "k=0 for the first
     /// Generate, +1 per Regenerate or later Generate").
     next_k: u32,
-    /// `installed_seeds`'s attempt `k` — the request `k` the currently
-    /// landed track came from (needed for `race_again`'s seed derivation
-    /// to stay tied to the SAME landed track's `k`, not `next_k`, which
-    /// may already have advanced past it).
-    installed_k: u32,
     /// The resolved seeds of the currently landed track's generation
     /// request — `None` until a track has landed at least once.
     installed_seeds: Option<Seeds>,
@@ -80,7 +75,6 @@ impl GameSession {
             landed: None,
             setup_error: None,
             next_k: 0,
-            installed_k: 0,
             installed_seeds: None,
             r: 0,
             race: None,
@@ -209,8 +203,8 @@ impl GameSession {
 
     /// `Nav::Again` — a fresh race on the SAME track (AC13): re-seated,
     /// counters reset, collision seed advanced (`r += 1`), the track
-    /// reused (not regenerated — `installed_k`/`next_k` are untouched). A
-    /// no-op if no track has landed.
+    /// reused (not regenerated — `next_k` is untouched). A no-op if no
+    /// track has landed.
     fn race_again(&mut self) {
         let Some(track) = self.landed.as_ref().map(|(track, _)| track.clone()) else {
             return;
@@ -252,7 +246,6 @@ impl GameSession {
             Ok(track) => {
                 let geometry = BakedTrackGeometry::new(&track);
                 self.installed_seeds = Some(self.seeds_for_attempt(pending_k));
-                self.installed_k = pending_k;
                 self.landed = Some((track, geometry));
                 self.setup_error = None;
             }
@@ -299,6 +292,12 @@ impl GameSession {
     /// `None` if no race has been started.
     pub fn advance_race(&mut self, roster: &mut Roster, input: FrameInput) -> Option<Advance> {
         let (race, round) = (self.race.as_mut()?, self.round.as_mut()?);
+        // Captured BEFORE `advance` — a `Moved`/`Crashed` outcome that
+        // wraps the cursor (`round_complete: true`) has already incremented
+        // `round.round()` by the time `advance` returns, so recording
+        // *after* the call would persist the round's LAST seat under the
+        // NEXT round's number.
+        let round_before = round.round();
         let outcome = round.advance(race, roster, input);
         match outcome {
             Advance::Moved {
@@ -306,7 +305,7 @@ impl GameSession {
                 action,
                 round_complete: _,
             } => {
-                self.recorder.record(round.round(), seat, action);
+                self.recorder.record(round_before, seat, action);
             }
             Advance::Crashed { .. } => {
                 self.recorder.record_crash();
@@ -443,6 +442,14 @@ pub(crate) mod tests {
     /// AC12 — every raise (`Generate` or `Regenerate`) advances `next_k`
     /// by exactly one, and a request is pending immediately after.
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "on_nav(Generate)/on_nav(Regenerate) each spawn a real \
+                  gp_gen::generate worker thread (Worker::request -> \
+                  thread::spawn) that this test never joins before \
+                  returning -- Miri aborts with 'the main thread terminated \
+                  without waiting for all remaining threads'"
+    )]
     fn generate_and_regenerate_each_advance_next_k_by_one() {
         let mut session = GameSession::new(test_config());
         assert_eq!(session.next_k, 0);
@@ -517,10 +524,10 @@ pub(crate) mod tests {
 
     /// AC13 — `Nav::Again` re-seats on the SAME track: the collision seed
     /// advances by exactly `r`, the track is reused (byte-identical, never
-    /// regenerated — `next_k`/`installed_k` untouched), and the prior
-    /// in-memory record is discarded (A8's `Recorder`, wired into
-    /// `spawn_race`). Directly installs a landed track (bypassing the
-    /// worker) for a fast, deterministic setup.
+    /// regenerated — `next_k` untouched), and the prior in-memory record
+    /// is discarded (A8's `Recorder`, wired into `spawn_race`). Directly
+    /// installs a landed track (bypassing the worker) for a fast,
+    /// deterministic setup.
     #[test]
     fn race_again_advances_collision_seed_and_reuses_the_track() {
         let mut session = GameSession::new(test_config());
@@ -532,7 +539,6 @@ pub(crate) mod tests {
             ..Seeds::default()
         });
         let next_k_before = session.next_k;
-        let installed_k_before = session.installed_k;
 
         session.on_nav(Nav::TestLap);
         assert_eq!(session.r, 0);
@@ -562,10 +568,6 @@ pub(crate) mod tests {
             session.next_k, next_k_before,
             "Race-again must not raise a new generation request"
         );
-        assert_eq!(
-            session.installed_k, installed_k_before,
-            "Race-again must not change which attempt the landed track came from"
-        );
         assert!(
             session
                 .recorder
@@ -574,6 +576,120 @@ pub(crate) mod tests {
                 .turns
                 .is_empty(),
             "Race-again must discard the prior in-memory record (AC13)"
+        );
+    }
+
+    /// AC21's `--record` half: [`GameSession::write_record_if_requested`]
+    /// is the exact production race-end path (`app/mod.rs`'s own
+    /// `race_over && !finished_transitioned` check, mirrored here without
+    /// an `egui::Context` — the same headless-session posture this whole
+    /// test module already uses for AC12/AC13/AC18). Self-review Round 1
+    /// finding 3: neither `write_record_if_requested` nor `replay_record`
+    /// was named by any test before this one — gutting
+    /// `write_record_if_requested` to an unconditional `return;` left the
+    /// entire workspace green.
+    ///
+    /// Drives a real race (laps: 0, so any ordinary move finishes it —
+    /// `ac18_config`'s own technique) to a real `RaceOver`, then asserts
+    /// (a) with `--record` set, the exact production race-end call writes
+    /// a real, parseable replay file, and (b) with `--record` unset, the
+    /// SAME call is a no-op.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "does real filesystem I/O (Path::exists, std::fs::write, \
+                  std::fs::read_to_string) -- Miri aborts with 'unsupported \
+                  operation: `statx`/`open` not available when isolation is \
+                  enabled', not a cost concern"
+    )]
+    fn write_record_if_requested_writes_on_race_over_and_is_a_no_op_without_record() {
+        struct ScratchFile(std::path::PathBuf);
+        impl ScratchFile {
+            fn new(name: &str) -> Self {
+                Self(std::env::temp_dir().join(format!(
+                    "gp-game-session-test-{}-{name}.replay",
+                    std::process::id()
+                )))
+            }
+        }
+        impl Drop for ScratchFile {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+
+        /// Drives `session` (already landed + `Nav::TestLap`-started) to a
+        /// real `RaceOver`, mirroring `ac18_config`'s "laps: 0, any
+        /// ordinary Coast finishes" technique.
+        fn drive_to_race_over(session: &mut GameSession) {
+            let mut roster = crate::controller::Roster::new();
+            let seated = session.race().map_or(0, |race| race.cars.len());
+            for _ in 0..seated {
+                roster.push(Box::new(crate::controller::player::PlayerController));
+            }
+            let mut turns = 0u32;
+            loop {
+                let outcome = session.advance_race(
+                    &mut roster,
+                    crate::controller::FrameInput {
+                        shell_action: Some(gp_core::sim::Action::Coast),
+                        key_action: None,
+                    },
+                );
+                if matches!(outcome, Some(crate::race::round::Advance::RaceOver)) {
+                    break;
+                }
+                turns = turns.saturating_add(1);
+                assert!(turns < 50, "race never ended within budget");
+            }
+        }
+
+        // (a) `--record` set -> a real file, parseable, non-empty finals.
+        let scratch = ScratchFile::new("with-record");
+        let mut config = ac18_config();
+        config.record = Some(scratch.0.clone());
+        let mut session = GameSession::new(config);
+        let track = crate::test_fixtures::ring_track();
+        let geometry = gp_render::BakedTrackGeometry::new(&track);
+        session.landed = Some((track, geometry));
+        session.installed_seeds = Some(Seeds::default());
+        session.on_nav(Nav::TestLap);
+        drive_to_race_over(&mut session);
+
+        assert!(
+            !scratch.0.exists(),
+            "sanity: nothing written before write_record_if_requested runs"
+        );
+        session.write_record_if_requested();
+        assert!(
+            scratch.0.exists(),
+            "AC21: --record must write a file at the real race-end path"
+        );
+        let text = std::fs::read_to_string(&scratch.0).expect("just wrote it");
+        let (_, record) =
+            crate::replay::format::parse_record(&text).expect("must be a valid replay record");
+        assert!(
+            !record.finals.is_empty(),
+            "the written record must carry real final states"
+        );
+
+        // (b) `--record` unset -> the same call is a no-op, even after a
+        // real race-over.
+        let scratch_absent = ScratchFile::new("without-record");
+        let mut config_no_record = ac18_config();
+        config_no_record.record = None;
+        let mut session_no_record = GameSession::new(config_no_record);
+        let track2 = crate::test_fixtures::ring_track();
+        let geometry2 = gp_render::BakedTrackGeometry::new(&track2);
+        session_no_record.landed = Some((track2, geometry2));
+        session_no_record.installed_seeds = Some(Seeds::default());
+        session_no_record.on_nav(Nav::TestLap);
+        drive_to_race_over(&mut session_no_record);
+
+        session_no_record.write_record_if_requested();
+        assert!(
+            !scratch_absent.0.exists(),
+            "no --record path must never write a file"
         );
     }
 
@@ -614,12 +730,12 @@ pub(crate) mod tests {
     /// determinism, unlike A8's `replay` tests) so ONE real `East` move
     /// finishes it; seat 1 just Coasts. Returns the driven session/shell
     /// for the caller's own assertions.
-    #[cfg_attr(
-        miri,
-        ignore = "runs the gp-gen generation pipeline on a worker thread — a \
-                  multi-second integer sweep whose interpreted wall-clock is \
-                  prohibitive"
-    )]
+    ///
+    /// Not itself `#[cfg_attr(miri, ignore)]`-gated: `ignore` is a libtest
+    /// attribute and does nothing on a non-`#[test]` helper. Both callers
+    /// (`session.rs`'s `full_sequence_setup_to_results_with_real_artifact_and_standings`
+    /// and `lib.rs`'s `player_only_roster_runs_the_end_to_end_sequence`) carry
+    /// the real gate.
     pub(crate) fn drive_ac18_sequence(
         config: GameConfig,
     ) -> (GameSession, gp_render::AppShell, crate::controller::Roster) {

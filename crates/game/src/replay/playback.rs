@@ -80,10 +80,14 @@ pub fn run_headless_race(
 
     let mut processed = 0u32;
     while processed < max_turns {
+        // Captured BEFORE `advance` — see `GameSession::advance_race`'s own
+        // comment: a round-wrapping `Moved` has already incremented
+        // `round.round()` by the time `advance` returns.
+        let round_before = round.round();
         match round.advance(&mut race, &mut roster, FrameInput::default()) {
             Advance::RaceOver => break,
             Advance::Moved { seat, action, .. } => {
-                recorder.record(round.round(), seat, action);
+                recorder.record(round_before, seat, action);
                 processed = processed.saturating_add(1);
             }
             Advance::Crashed { .. } => {
@@ -410,6 +414,39 @@ mod tests {
         assert_eq!(record.turns.len(), 4);
         assert_eq!(record.finals.len(), 2);
         assert_eq!(outcome.standings.len(), 2);
+    }
+
+    #[cfg_attr(
+        miri,
+        ignore = "runs the gp-gen generation pipeline — a multi-second integer \
+                  sweep whose interpreted wall-clock is prohibitive"
+    )]
+    #[test]
+    fn recorded_turns_pin_the_round_of_every_seat_including_the_last_of_each_round() {
+        // Pins the persisted `round` coordinate for a multi-round race: two
+        // `AlwaysCoast` seats, six turns = three full rounds. Each seat's
+        // `round.round()` must be captured BEFORE `RaceRound::advance` runs
+        // -- the last seat polled in a round also wraps the cursor and
+        // increments `round.round()` INSIDE that same `advance` call, so
+        // recording the round number AFTER `advance` returns would persist
+        // that seat under the NEXT round's number (self-review Round 1
+        // finding 6).
+        let config = cheap_config();
+        let mut roster = Roster::new();
+        roster.push(Box::new(AlwaysCoast));
+        roster.push(Box::new(AlwaysCoast));
+
+        let (_, record) = run_headless_race(&config, roster, 6).expect("cheap config must accept");
+
+        let rounds: Vec<u32> = record.turns.iter().map(|turn| turn.round).collect();
+        assert_eq!(
+            rounds,
+            vec![0, 0, 1, 1, 2, 2],
+            "both seats of each round must share that round's number -- the \
+             LAST seat of a round must never be persisted under round+1"
+        );
+        let seats: Vec<usize> = record.turns.iter().map(|turn| turn.seat).collect();
+        assert_eq!(seats, vec![0, 1, 0, 1, 0, 1]);
     }
 
     #[cfg_attr(

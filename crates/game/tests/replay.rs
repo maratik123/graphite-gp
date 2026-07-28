@@ -251,9 +251,11 @@ fn unrecognised_version_exits_nonzero() {
 #[test]
 #[cfg_attr(
     miri,
-    ignore = "runs the gp-gen generation pipeline via run_headless_race — a \
-              multi-second integer sweep whose interpreted wall-clock is \
-              prohibitive"
+    ignore = "does real filesystem I/O (write_real_record's std::fs::write, \
+              this test's own std::fs::read) -- Miri aborts with \
+              'unsupported operation: `open` not available when isolation \
+              is enabled' before the run_headless_race generation cost is \
+              ever reached"
 )]
 fn written_record_is_utf8_and_the_version_is_greppable() {
     let scratch = ScratchFile::new("ac21b");
