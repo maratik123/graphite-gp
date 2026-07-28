@@ -10,7 +10,7 @@ pub mod session;
 
 use eframe::egui;
 use gp_core::sim::CarState;
-use gp_render::screens::{PhaseStatus, RaceSummary, StandingEntry};
+use gp_render::screens::{RaceSummary, StandingEntry};
 use gp_render::widgets::CarKind;
 use gp_render::{AppShell, CarRender, Nav, ShellSession, TrackView};
 use session::GameSession;
@@ -183,7 +183,7 @@ impl eframe::App for GraphiteGpApp {
             active,
             laps_done,
             total_laps,
-            phases: [PhaseStatus::Ok; 7],
+            phases: self.session.phases(),
             valid: true,
             seed,
             standings: &standings,

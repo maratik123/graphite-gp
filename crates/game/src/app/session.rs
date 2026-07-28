@@ -15,7 +15,7 @@ use crate::replay::{Recorder, ReplayRecord};
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
 use gp_gen::GenParams;
-use gp_render::{BakedTrackGeometry, Nav};
+use gp_render::{BakedTrackGeometry, Nav, PhaseStatus};
 
 /// The game's whole session-level state.
 ///
@@ -127,6 +127,14 @@ impl GameSession {
     #[must_use]
     pub fn installed_generation_seed(&self) -> Option<u64> {
         self.installed_seeds.map(|seeds| seeds.generation)
+    }
+
+    /// The in-flight (or most recently finished) generation request's
+    /// `[PhaseStatus; 7]` aggregate — B3's Lab-screen source (AC9),
+    /// delegating straight to [`Worker::phases`].
+    #[must_use]
+    pub const fn phases(&self) -> [PhaseStatus; 7] {
+        self.worker.phases()
     }
 
     /// This session's effective seeds for generation attempt `k` (spec §
