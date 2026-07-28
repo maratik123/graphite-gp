@@ -278,11 +278,32 @@ Enforces one invariant: **every citation resolves for its reader.** A citation w
 
 > **AXIOM — QUALIFY, never drop.** A repo-scoped probe cannot falsify a cross-repo reference: a bare `gh pr view` resolves against **this** repo and reports *Could not resolve* for a real, MERGED `maratik123/quartzite` PR. That false negative reads as proof of fabrication and has already destroyed accurate provenance once. **Name the namespace, then re-probe.** Drop a citation only after `--repo`-qualified verification shows the referent genuinely does not exist.
 
-**Recipe.** Run the script; it encodes all three probes.
+**Recipe.** Run the script; it encodes all three probes. Then run its regression
+test — the guard carries targeted exclusions, and the test is what keeps them
+**content-addressed** instead of pinned to a line number that drifts.
 
 ```bash
 .claude/skills/ai-audit/scripts/check-citations.sh
+.claude/skills/ai-audit/scripts/test-check-citations.sh   # must stay 4/4
 ```
+
+> **Why the test is part of this checklist, not optional.** Exclusion by
+> `file:line` has already rotted once: the check-(2) exclusion was pinned to
+> `corrections-log.md:47`, an unrelated commit inserted rows above it, and the
+> pin silently re-pointed at a dateless neighbour — turning the guard RED on a
+> clean tree while looking like it still worked. Case 2 of the test shifts the
+> excluded row and fails any fix that merely re-pins the number; case 3 fails
+> any fix that over-corrects into skipping the whole file; case 4 catches a
+> test run that mutates the target file's mode, which `git status` cannot see.
+> **The test covers check (2) only.** Two `file:line` exclusions survive in
+> check (1) and are *not* covered — and they are not safer by nature, just
+> accidentally undisturbed: `spec-writer.md`'s is **inert** (its specimen ref
+> sits below the live high-water mark, so execution `continue`s before
+> reaching it — and its file has in fact been edited since the pin was
+> written, which the pin survived only because the edit was line-count-neutral),
+> while `task/reference.md`'s is the only live one and survives only because
+> nothing has yet been inserted above it. Content-address either the moment it
+> drifts, or preferably before; do not re-pin.
 
 | Probe | Fires on |
 |---|---|

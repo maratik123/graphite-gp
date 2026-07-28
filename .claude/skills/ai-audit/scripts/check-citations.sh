@@ -23,11 +23,17 @@
 #     claim -- e.g. a sample spec filename in a template or table row)
 #   - already-namespace-qualified forms (contain "quartzite")
 # One additional targeted exclusion added when this guard was promoted:
-#   - ai-docs/corrections-log.md:47 is FORBIDDEN to touch (see issue #77's
-#     resolution) -- it is a format-spec example illustrating the
-#     `Superseded by:` field's date-ref syntax, not a citation with a real
-#     referent. Excluded by exact file:line, not by file, so any *other*
-#     date citation later added to corrections-log.md still gets checked.
+#   - corrections-log.md's `Superseded by:` field-spec row is FORBIDDEN to
+#     touch (see issue #77's resolution) -- it is a format-spec example
+#     illustrating that field's date-ref syntax, not a citation with a real
+#     referent. Excluded by matching the ROW'S OWN TEXT within that one file,
+#     so any *other* date citation later added to corrections-log.md still
+#     gets checked.
+#     NOT by line number: this exclusion was originally pinned to
+#     `corrections-log.md:47`, an unrelated commit inserted rows above it, and
+#     the pin silently re-pointed at a dateless neighbour -- un-excluding the
+#     example (guard RED on a clean tree) while appearing to still work.
+#     Locked by case 2 of scripts/test-check-citations.sh.
 #
 # SCOPE -- what this guard does NOT cover, and why. State this openly: a
 # silent exclusion reads as "covered everything" when it did not.
@@ -86,9 +92,20 @@ while IFS=: read -r file line cite; do
   echo "$txt" | grep -qE '^[[:space:]]*[-*]?[[:space:]]*(issue_ref|linked_prs|tracked_in|detail):' && continue
   # (b) PROSE specimens -- two lines quote an illustrative `#N` inside example
   #     text, where no field key exists to anchor to. Excluded by exact
-  #     file:line (same mechanism this script already uses for
-  #     corrections-log.md:47) rather than by a phrase, so a REAL citation
-  #     later added to either file still gets checked:
+  #     file:line rather than by a phrase, so a REAL citation later added to
+  #     either file still gets checked. NOTE: check (2) deliberately does NOT
+  #     use this mechanism -- its line pin drifted and broke (see the header).
+  #     These two are NOT safer by nature; they are unrepaired for two
+  #     different accidental reasons, neither of which is stability:
+  #       - spec-writer.md's pin is INERT. Its specimen ref is below the live
+  #         high-water mark, so the LOCAL_MAX test above `continue`s and
+  #         execution never reaches this `case`. Its file HAS been edited since
+  #         the pin was written; the pin survived only because that edit was
+  #         line-count-neutral -- luck, not stability.
+  #       - task/reference.md's pin is the only live one, and survives only
+  #         because nothing has yet been inserted above it.
+  #     Content-address either one the moment it drifts, or preferably before;
+  #     do NOT re-pin. Same failure mode as the header's:
   #       spec-writer.md:161    -- a `detail`-field shape demo, quoting a
   #                                specimen ref inside example prose
   #       task/reference.md:179 -- an entry_args format demo, showing the
@@ -121,9 +138,21 @@ echo "--- (2) 'learnings.md <date>' citations outside this log's range ---"
 # line, so illustrative example FILENAMES (2026-05-01-paint-style.spec.md) do
 # not fire.
 while IFS=: read -r file line _; do
-  # Targeted exclusion: format-spec example, not a citation (see header).
-  [ "$file:$line" = "ai-docs/corrections-log.md:47" ] && continue
   txt=$(sed -n "${line}p" "$file")
+  # Targeted exclusion: the `Superseded by:` field-spec row illustrates the
+  # same-date disambiguation syntax — `YYYY-MM-DD ("slug")` — so its date is a
+  # format example, not a citation.
+  # KEEP THIS COMMENT FREE OF LITERAL IN-RANGE DATES AND CUE WORDS: this file
+  # is itself scanned by check (2) below, so writing the shape concretely here
+  # would make the guard flag its own source.
+  # Addressed by CONTENT, never by line number: this exclusion was previously
+  # pinned to `corrections-log.md:47`, and an unrelated commit inserting rows
+  # above it moved the row to :49, which both un-excluded the example (RED on a
+  # clean tree) and silently re-pointed the pin at a dateless neighbour.
+  # Locked by case 2 of test-check-citations.sh.
+  # shellcheck disable=SC2016  # literal backticks are the pattern, not an expansion
+  [ "$file" = "ai-docs/corrections-log.md" ] &&
+    printf '%s' "$txt" | grep -q '^> `Superseded by:`' && continue
   echo "$txt" | grep -qiE 'see |entry|validated|recurrence|added ' || continue
   echo "$txt" | grep -qiE 'quartzite' && continue     # already qualified
   echo "$txt" | grep -qE '[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z]' && continue  # example filename
