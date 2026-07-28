@@ -90,9 +90,9 @@ fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_graphite-gp"))
 }
 
-/// A process-unique scratch path under the system temp dir — no `tempfile`
-/// dependency (this workspace's dependency-addition gate is deliberately
-/// conservative); best-effort cleanup on drop.
+/// A process-unique scratch path under the system temp dir, with
+/// best-effort cleanup on drop. A `tempfile` dependency would be overkill
+/// for this file's one helper, so this hand-rolls the path instead.
 struct ScratchFile(std::path::PathBuf);
 
 impl ScratchFile {
