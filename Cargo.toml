@@ -45,6 +45,10 @@ tiny-skia = { version = "0.12", default-features = false, features = ["std", "si
 eframe = { version = "0.35", default-features = false, features = ["accesskit", "wayland", "web_screen_reader", "wgpu", "x11"] }
 winit = { version = "0.30", default-features = true }
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot"] }
+# Property testing (dev-only). `fork`/`timeout` are dropped — they pull
+# rusty-fork + tempfile for out-of-process case isolation this workspace
+# does not use; our properties are pure integer functions.
+proptest = { version = "1", default-features = false, features = ["std", "bit-set"] }
 egui-wgpu = "0.35"
 image = "0.25"
 skrifa = "0.45"
@@ -79,3 +83,19 @@ must_use_candidate = "allow"
 redundant_pub_crate = "allow"
 # Same opt-in `#[must_use]` posture as `must_use_candidate`, for `-> Self` returns.
 return_self_not_must_use = "allow"
+
+# Dev/test build speed. `cargo test` builds under the `test` profile, which
+# inherits from `dev` — the gp-gen generator sweeps are compute-bound, so an
+# unoptimized build dominates their wall-clock.
+#
+# `debug-assertions` and `overflow-checks` keep their `dev` defaults (both
+# `true`), so the integer-safety posture of #48 — debug_assert! coverage and
+# release-overflow panics — is unaffected by the opt-level change.
+[profile.dev]
+opt-level = 1
+
+# Dependencies are rebuilt rarely and never stepped through, so they can carry
+# a higher opt-level than workspace code. The `"*"` glob excludes workspace
+# packages, which stay at the `[profile.dev]` level above.
+[profile.dev.package."*"]
+opt-level = 2
