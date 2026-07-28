@@ -6,6 +6,7 @@
 //! stream per round would replay one shuffle forever).
 
 pub mod round;
+pub mod standings;
 
 use gp_core::geom::Point;
 use gp_core::sim::{CarState, CrashOutcome, LapCounter};
@@ -35,6 +36,10 @@ pub struct CarRecord {
     /// racing. Set once, by round.rs (A4); a finished car keeps taking its
     /// turns to the round's end (spec § Key decisions).
     pub finish_turn: Option<u32>,
+    /// The global turn index of every genuinely new lap boundary this car
+    /// reached, in order (round.rs, A4/A5) — standings.rs (A5) computes
+    /// `fastest_lap` from the consecutive turn deltas.
+    pub lap_turns: Vec<u32>,
 }
 
 impl CarRecord {
@@ -48,6 +53,7 @@ impl CarRecord {
             pending_crash: None,
             trail: vec![state.pos()],
             finish_turn: None,
+            lap_turns: Vec::new(),
         }
     }
 }

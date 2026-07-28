@@ -74,6 +74,9 @@ pub struct RaceRound {
     /// The configured lap count a car must reach (via a valid, legal S/F
     /// crossing) to finish (spec Scope 5).
     total_laps: i32,
+    /// Total `resolve_crash` calls this race (AC19's `crashes` metric,
+    /// design § Standings and summary semantics).
+    crashes: u32,
 }
 
 impl RaceRound {
@@ -86,6 +89,7 @@ impl RaceRound {
             turn: 0,
             finished_at_round: None,
             total_laps,
+            crashes: 0,
         }
     }
 
@@ -99,6 +103,12 @@ impl RaceRound {
     #[must_use]
     pub const fn turn(&self) -> u32 {
         self.turn
+    }
+
+    /// Total `resolve_crash` calls so far this race (AC19).
+    #[must_use]
+    pub const fn crashes(&self) -> u32 {
+        self.crashes
     }
 
     /// Whether the race has ended: the first finisher's round has been
@@ -152,6 +162,7 @@ impl RaceRound {
             car.pending_crash = Some(outcome);
             car.trail.push(outcome.state.pos());
             self.turn = self.turn.saturating_add(1);
+            self.crashes = self.crashes.saturating_add(1);
             let round_complete = self.advance_cursor(race);
             return Advance::Crashed {
                 seat,
@@ -182,6 +193,15 @@ impl RaceRound {
         let to = new_state.pos();
         car.laps.register_move(&race.track.sf, from, to);
         car.trail.push(to);
+
+        // AC19's `fastest_lap`: record the turn index of every genuinely
+        // NEW lap boundary this car reaches (never a reverse-then-forward
+        // re-crossing of a lap it already recorded) — standings.rs (A5)
+        // computes per-lap turn deltas from this history.
+        let laps_now = usize::try_from(car.laps.laps()).unwrap_or(0);
+        if laps_now > car.lap_turns.len() {
+            car.lap_turns.push(self.turn);
+        }
 
         // Win detection (spec Scope 5): evaluated on this step's own
         // crossing, never a post-collision position.
