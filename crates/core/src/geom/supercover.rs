@@ -9,13 +9,20 @@
 //! rather than `O(|dx| · |dy|)`), and `benches/supercover.rs` measured that
 //! asymptote as unreachable in this product: `--v-target` caps at 10 and Ф5b's
 //! deepening reaches `V_ceil = 16`, so a real chord's box is at most ~17×17 ≈ 289
-//! cells, which this scan walks as a tight counted loop LLVM strength-reduces and
-//! vectorizes. Measured on the two shapes production actually calls, the interval
-//! walk was **1.03–1.29× slower** on `legal_move` and **1.08–1.69× slower** on
-//! `respawn_cell`; a follow-up Bresenham variant that removed the per-row division
-//! landed within 10% of it and did not close the gap. Reverting also restores
-//! gp-core's zero-production-panics invariant, which the interval walk's
-//! `i32::try_from(..).expect(..)` bounds had broken.
+//! cells, which this scan walks as a tight counted loop LLVM strength-reduces.
+//!
+//! `[measured]` on the two shapes production actually calls, the scan wins **7 of
+//! 11** velocities on `legal_move`'s full walk and **7 of 11** on `respawn_cell`.
+//! The split is **axial vs general**, not short vs long: the interval walk beats
+//! the scan on most axial chords (it has an axial branch) and on 64+ cell chords
+//! (the asymptote finally bites), while the scan wins on general chords —
+//! **1.06–1.44×** on the full walk — which is where a moving car spends its time.
+//! Summed over the hot group, the interval walk saves ~29 ns across the axial
+//! velocities and costs ~143 ns across the general ones. A follow-up Bresenham
+//! variant that removed the per-row division landed within 10% of it and did not
+//! close the gap. Reverting also restores gp-core's zero-production-panics
+//! invariant, which the interval walk's `i32::try_from(..).expect(..)` bounds had
+//! broken.
 //!
 //! Before optimizing this again, run `benches/supercover.rs` — it still carries the
 //! rejected interval walk as a baseline — and `supercover_equivalence` below, which
@@ -230,13 +237,15 @@ mod tests {
     }
 }
 
-/// Differential tests pinning the optimized [`supercover`] to the pre-#171
-/// bounding-box implementation it replaced.
+/// Property tests over [`supercover`], plus a frozen-oracle ratchet for the next
+/// rewrite.
 ///
-/// The rewrite (PRs [#171]/[#172]) changed the *algorithm* while claiming an
-/// unchanged *result set*. These tests hold the old implementation as a
-/// behavioural oracle and assert that claim directly, rather than re-deriving
-/// expectations by hand as `super::tests` does.
+/// **History.** PRs [#171]/[#172] replaced the bounding-box scan with an interval
+/// solver, claiming an unchanged result set. These tests were written to check that
+/// claim, and did; the rewrite was then reverted on performance grounds, so the
+/// oracle below and the shipped walk are once again the *same* algorithm. What
+/// survives is a ratchet — see `check_same_cells` for which of its four assertions
+/// are live today and which arm only on the next divergence.
 ///
 /// [#171]: https://github.com/maratik123/graphite-gp/pull/171
 /// [#172]: https://github.com/maratik123/graphite-gp/pull/172
@@ -414,9 +423,10 @@ mod supercover_equivalence {
             check_same_cells(a, offset(a, dx, dy))?;
         }
 
-        /// Long, nearly-axial chords — the aspect ratio at which the two
-        /// implementations diverge most structurally, and the one that exercises
-        /// both arms of the `dx.abs() >= dy.abs()` branch pick via `swap_axes`.
+        /// Long, nearly-axial chords — the aspect ratio at which a scan and an
+        /// interval walk diverge most structurally. `swap_axes` covers both
+        /// orientations, which mattered when the shipped walk picked a loop axis and
+        /// will matter again for any replacement that does.
         ///
         /// Affordable despite the long axis precisely because the reference's box
         /// is `|dx| · |dy|`: a shallow chord has a thin box however long it is.
@@ -461,9 +471,9 @@ mod supercover_equivalence {
     /// Required edge case 1 — `ax == bx`, a pure vertical chord.
     ///
     /// Enumerated rather than left to proptest: an exact axis hit is a measure-zero
-    /// target for a uniform sampler, and it is the arm where the optimized walk
-    /// takes `along_delta == dx == 0` and returns the full `inner_min..=inner_max`
-    /// span without dividing at all.
+    /// target for a uniform sampler, and it is the degenerate case every candidate
+    /// implementation special-cases — the scan's bounding box collapses to one
+    /// column, and every interval walk measured so far took a separate branch here.
     #[test]
     fn vertical_chords_match_reference() {
         for x in [-MAP_HALF_EXTENT, -1, 0, 1, MAP_HALF_EXTENT] {

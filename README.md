@@ -125,8 +125,11 @@ analytics overlays and notebook grid (#17–#18), all four screens — Setup /
 Track lab / Race / Results (#19–#22) — and the `AppShell` screen router (#23),
 with the `gp-game` binary wired to drive the shell from hand-built fixture data
 (real generation → sim → AI wiring is block 3b). Every draw layer is covered by
-an offscreen `egui_kittest` wgpu/Vulkan golden (Miri-gated) and `gp-render`
-carries **zero production panics**.
+an offscreen `egui_kittest` wgpu/Vulkan golden (Miri-gated). `gp-render`'s four
+production panic sites — two clamped `u32::try_from` conversions and two
+`Card::show`-invariant `expect`s — are catalogued with their invariants in
+`ai-docs/panic-index.md`; the zero-panic invariant is `gp-core`'s, not the
+whole workspace's.
 
 The `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid

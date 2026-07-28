@@ -11,8 +11,7 @@
 //! [`walls_from_boundary`]) live in a private `graph` submodule, the
 //! distance-transform / medial-axis primitives ([`DistanceTransform`],
 //! [`medial_axis`]) live in a private `distance` submodule, and the
-//! [`supercover`] predicate plus its interval solver live in a private
-//! `supercover` submodule; all three are re-exported here, so every
+//! [`supercover`] predicate lives in a private `supercover` submodule; all three are re-exported here, so every
 //! `crate::geom::*` path stays flat.
 
 mod distance;

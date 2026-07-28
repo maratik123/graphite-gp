@@ -35,35 +35,59 @@
 //! - **`respawn_cell`** (`sim/mod.rs`) — collects the walk, then takes a min over
 //!   projections and a `max_by_key`. Runs on every crash.
 //!
+//! # Not a gate
+//!
+//! Like the Miri job, this is **not a required gate** for ordinary development —
+//! run it when you are changing `supercover` or evaluating a replacement, not on
+//! every task. CI never invokes it; `clippy --all-targets` only compiles it.
+//!
 //! # The result that got #171/#172 reverted
 //!
 //! `--v-target` caps at 10 and Ф5b's deepening reaches `V_ceil = 16`, so a real
 //! chord's bounding box is at most ~17×17 ≈ 289 cells — a tight counted loop LLVM
-//! strength-reduces. The interval walk was **1.03–1.29× slower** on `legal_move`
-//! and **1.08–1.69× slower** on `respawn_cell`, winning only on chords of 64+ cells
-//! that no legal move can produce. A Bresenham variant removing the per-row
-//! division landed within 10% of it and did not close the gap.
+//! strength-reduces. Ratios below are **contender ÷ scan**, so `< 1.00` means the
+//! contender is faster. `[measured]` over the 11 velocities in `MOVE_VELOCITIES`:
+//!
+//! | group | scan wins | interval, axial | interval, general |
+//! |---|---|---|---|
+//! | `legal_move`, full walk | 7/11 | 0.70–1.58× | **1.06–1.44×** |
+//! | `legal_move`, short circuit | 6/11 | 0.63–1.24× | 0.94–3.15× |
+//! | `respawn_cell` | 7/11 | 0.78–1.03× | 0.97–1.28× |
+//! | long chords (not reachable) | 0/3 | — | 0.16–0.37× |
+//!
+//! **The split is axial vs general, not short vs long.** The interval walk beats
+//! the scan on most axial chords because it *has an axial branch*, not because
+//! interval-solving pays — and it wins on 64+ cell chords because the asymptote
+//! finally bites. On general production chords, which is where a moving car
+//! spends its time, the scan wins consistently.
+//!
+//! What settles it is the absolute trade on the hot path (`legal_move`, full
+//! walk): summed over the five axial velocities the interval walk saves ~29 ns,
+//! and over the six general ones it costs ~143 ns. **Caveat worth stating: that
+//! comparison weights the two classes equally.** The real axial:general frequency
+//! mix in a race has not been measured; if it ever turns out to be heavily axial,
+//! this conclusion is the thing to re-derive first.
 //!
 //! # The axial fast path, also measured and also rejected
 //!
-//! A horizontal chord walked `x`-outer enters an N-step outer loop whose inner
-//! range is a single cell — the worst possible `flat_map` shape, and `[measured]`
-//! ~2× off what a direct run costs. Two ways to fix it were tried; both regress
-//! the general chord, so neither shipped:
+//! A horizontal chord walked `x`-outer enters an N-step `flat_map` outer loop
+//! whose inner range is a single cell — the worst shape. Two fixes were tried;
+//! both regress the general chord, so neither shipped:
 //!
 //! | variant | axial | general |
 //! |---|---|---|
-//! | `enum_axial_xy` (below) — `AxialX`/`AxialY`/`Box` enum, branch-free arms | **2.0–2.7× faster** | **0.53–0.94×** |
-//! | loop-order swap, one type, captured `horizontal` flag | 1.0–1.7× faster | 0.56–0.81× |
+//! | `enum_axial_xy` (below) — `AxialX`/`AxialY`/`Box`, branch-free arms | **0.37–1.19×** | **1.17–1.97×** |
+//! | loop-order swap, one type, captured `horizontal` flag | 0.59–1.00× | 1.23–1.79× |
 //!
-//! The cause is the same for both, and it is worth not rediscovering: wrapping
-//! `FlatMap` in an enum forwards only `next()`, which **costs `FlatMap`'s internal
-//! `try_fold` specialisation** — exactly what `legal_move`'s `.all()` and
-//! `respawn_cell`'s `.collect()` drive. `try_fold` cannot be overridden on stable
-//! (its `R: Try` bound is unstable), so an enum union cannot give it back;
-//! `Cover3` below forwards `fold` to show that is not enough. The single-type
-//! variant avoids the enum but pays a per-cell branch in the inner closure, which
-//! costs about as much.
+//! Note `enum_axial_xy`'s axial range includes a **regression** at `v=(0,-10)`
+//! (1.19×): a vertical chord already gives the scan a good loop shape, so the enum
+//! only costs it. The cause is the same for both variants and is worth not
+//! rediscovering: wrapping `FlatMap` in an enum forwards only `next()`, which
+//! **costs `FlatMap`'s internal `try_fold` specialisation** — exactly what
+//! `legal_move`'s `.all()` and `respawn_cell`'s `.collect()` drive. `try_fold`
+//! cannot be overridden on stable (its `R: Try` bound is unstable), so an enum
+//! union cannot give it back; `Cover3` below forwards `fold` to show that is not
+//! enough. The single-type variant avoids the enum but pays a per-cell branch.
 //!
 //! **Do not benchmark through a `Box<dyn Iterator>`.** An early cut unified the two
 //! walk types that way; the per-cell dynamic dispatch suppressed inlining and
@@ -391,9 +415,11 @@ where
     }
 }
 
-/// Panics unless the baseline agrees with the shipped walk over an exhaustive
-/// window. A baseline that has drifted makes every number below meaningless, so
-/// this runs on every `cargo bench` before any timing is taken.
+/// Panics unless **every** timed contender agrees with the shipped walk over an
+/// exhaustive window. A baseline that has drifted makes the numbers below
+/// meaningless, so this runs on every `cargo bench` before any timing is taken —
+/// and it must cover each contender whose ratios this file quotes, not just the
+/// first one.
 fn verify_baseline() {
     const R: i32 = 4;
     for ax in -R..=R {
@@ -401,11 +427,18 @@ fn verify_baseline() {
             for bx in -R..=R {
                 for by in -R..=R {
                     let (a, b) = (Point::new(ax, ay), Point::new(bx, by));
-                    let mut got: Vec<Point> = supercover_interval(a, b).collect();
                     let mut want: Vec<Point> = supercover(a, b).collect();
-                    got.sort_unstable();
                     want.sort_unstable();
-                    assert_eq!(got, want, "interval baseline disagrees for {a:?} -> {b:?}");
+                    for (name, mut got) in [
+                        ("interval", supercover_interval(a, b).collect::<Vec<_>>()),
+                        (
+                            "enum_axial_xy",
+                            supercover_enum_axial_xy(a, b).collect::<Vec<_>>(),
+                        ),
+                    ] {
+                        got.sort_unstable();
+                        assert_eq!(got, want, "{name} baseline disagrees for {a:?} -> {b:?}");
+                    }
                 }
             }
         }

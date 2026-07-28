@@ -34,7 +34,10 @@ cargo fmt --check                                       # check only
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace   # doc gate
 actionlint .github/workflows/<file>.yml                 # required gate for any new/modified workflow file
 cargo run -p gp-game                                    # run the graphite-gp binary
+RUSTFLAGS="-C target-cpu=native" cargo bench -p gp-core --bench supercover   # local-only, NOT a gate
 ```
+
+> **Benchmarks are not a required gate** — same status as the Miri job. CI never runs `cargo bench`; `clippy --all-targets` only compiles the bench so it cannot bit-rot. Run it when you are changing the code it covers or evaluating a replacement, not on every task.
 
 > **AXIOM — `actionlint` MUST pass before `git add` on any modified `.github/workflows/*.yml`.**
 > Required gate, **same status as `cargo build` and `cargo clippy --workspace --all-targets -- -D warnings`.** Never bypass.

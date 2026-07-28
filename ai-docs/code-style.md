@@ -61,7 +61,7 @@ The alias names the domain concept once, shortens every signature and every `Act
 In-tree precedent: PR [#169](https://github.com/maratik123/graphite-gp/pull/169) introduced `gp_core::sim::Actions`; PR [#170](https://github.com/maratik123/graphite-gp/pull/170) finished the sweep across `gp-core`/`gp-ai`/`gp-game`/`gp-render`, including prose and doc comments. `BitFlags` still has no `Sub` — `.remove(Action::North)` on a `mut` binding is the single-flag removal.
 
 ## Integer safety
-`gp-core` targets zero production panics — currently held everywhere except the two `supercover` inner-bound conversions listed in [`panic-index.md`](panic-index.md). Integer arithmetic and conversions MUST be overflow- and signedness-safe by construction.
+`gp-core` targets zero production panics, and currently holds it — [`panic-index.md`](panic-index.md) has no `crates/core/` row. (PR #171's `supercover` interval solver briefly added two `i32::try_from(..).expect(..)` bounds; the revert removed them.) Integer arithmetic and conversions MUST be overflow- and signedness-safe by construction.
 
 - Reach for the explicit-semantics method that matches intent: `checked_*` → `Option`/`None` on out-of-range; `saturating_*` → clamp to bound; `wrapping_*`/`overflowing_*` → explicit modular; `strict_*` → always-panic (even in release) for a true invariant; `abs_diff` → unsigned magnitude of a difference; `carrying_*`/`borrowing_*` → multi-word chains.
 - Prefer `usize::try_from(i32)?` / `u32::try_from(...)` over `as` casts wherever an out-of-domain input could overflow or lose sign — `try_from` folds the negative-value guard into the conversion (no explicit `< 0` check, no `#[allow(clippy::cast_sign_loss)]`).

@@ -196,14 +196,20 @@ The **`racing_line(d: &Corridor, gate: &TimingGate, race_dir: RaceDir) -> Center
 
 The measurement above was acted on. `crates/core/src/geom/supercover.rs` ships the pre-#171 scan; the interval solver, `EitherIter`, `div_floor`/`div_ceil` are gone.
 
-**The revert was re-validated against the *best* version of the idea, not the shipped one.** The owner's `opt` branch replaced the per-row division with a Bresenham `FloorTracker`; grafting it onto the equivalence tests showed it **correct** (158 tests, 2048 proptest cases/strategy, exhaustive 9⁴ window) but only ~1.10× over #172 and still behind the scan. The benchmark's baseline is now that approach plus every review improvement — Bresenham tracker, a **third `Either3` variant** for axial chords instead of an `Option<FloorTracker>` checked per row, total `unwrap_or` narrowings, and **no `DoubleEndedIterator`**. Against that strongest form the scan still wins **16 of 21** production-domain cases.
+**The revert was re-validated against the *best* version of the idea, not the shipped one.** The owner's `opt` branch replaced the per-row division with a Bresenham `FloorTracker`; grafting it onto the equivalence tests showed it **correct** (158 tests, 2048 proptest cases/strategy, exhaustive 9⁴ window) but only ~1.10× over #172 and still behind the scan. The benchmark's baseline is now that approach plus every review improvement — Bresenham tracker, a **third `Either3` variant** for axial chords instead of an `Option<FloorTracker>` checked per row, total `unwrap_or` narrowings, and **no `DoubleEndedIterator`**.
 
-| shape | scan vs best interval walk |
-|---|---|
-| `legal_move`, full walk | scan 1.03–1.44× faster at 6/7; loses only at `v=(1,0)` |
-| `legal_move`, short circuit | scan faster at 4/7 (to 3.15×), slower at 3 |
-| `respawn_cell` | scan 1.12–1.29× faster at 6/7 |
-| long chords (not reachable) | interval walk 2.8–6.3× faster |
+`[measured]` over the **11** velocities in `MOVE_VELOCITIES` (ratios are contender ÷ scan, so `< 1.00` = contender faster):
+
+| group | scan wins | interval, axial | interval, general |
+|---|---|---|---|
+| `legal_move`, full walk | 7/11 | 0.70–1.58× | **1.06–1.44×** |
+| `legal_move`, short circuit | 6/11 | 0.63–1.24× | 0.94–3.15× |
+| `respawn_cell` | 7/11 | 0.78–1.03× | 0.97–1.28× |
+| long chords (not reachable) | 0/3 | — | 0.16–0.37× |
+
+**The split is axial vs general, not short vs long** — an earlier version of this entry said the interval walk won "only on chords of 64+ cells", which self-review falsified by re-running the bench after `MOVE_VELOCITIES` gained five axial entries. It wins on most axial chords because it *has an axial branch*, and on long chords because the asymptote bites. The scan wins the general chords, where a moving car spends its time.
+
+What settles it is the absolute trade on the hot path: summed over the five axial velocities the interval walk saves ~29 ns; over the six general ones it costs ~143 ns. **That weights the two classes equally, and the real axial:general mix in a race is unmeasured** — if it ever turns out heavily axial, this is the conclusion to re-derive first.
 
 **Consequences.**
 
@@ -219,8 +225,10 @@ A horizontal chord walked `x`-outer enters an N-step `flat_map` outer loop whose
 
 | variant | axial chords | general chords |
 |---|---|---|
-| `AxialX`/`AxialY`/`Box` enum, branch-free arms | **2.0–2.7× faster** | **0.53–0.94×** |
-| loop-order swap (one type, captured `horizontal` flag) | 1.0–1.7× faster | 0.56–0.81× |
+| `AxialX`/`AxialY`/`Box` enum, branch-free arms | 0.37–**1.19×** | **1.17–1.97×** |
+| loop-order swap (one type, captured `horizontal` flag) | 0.59–1.00× | 1.23–1.79× |
+
+Ratios are contender ÷ scan, so `< 1.00` = contender faster. Note the enum's axial range **includes a regression** at `v=(0,-10)` (1.19×) — a vertical chord already gives the scan a good loop shape, so there the enum only costs it. An earlier version of this entry quoted "2.0–2.7× faster" for the axial column, a subset that omitted its own counter-example; self-review caught it.
 
 **Root cause, worth not rediscovering:** wrapping `FlatMap` in an enum forwards only `next()`, which **costs `FlatMap`'s internal `try_fold` specialisation** — precisely what `legal_move`'s `.all()` and `respawn_cell`'s `.collect()` drive. `try_fold` **cannot be overridden on stable** (its `R: Try` bound is unstable), so no enum union can give it back; forwarding `fold` (which `Cover3` in the bench does) is not enough. The single-type variant dodges the enum but pays a per-cell branch inside the inner closure and costs about the same.
 
