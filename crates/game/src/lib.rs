@@ -16,3 +16,5 @@ pub mod controller;
 pub mod gen_worker;
 pub mod race;
 pub mod replay;
+#[cfg(test)]
+mod test_fixtures;
