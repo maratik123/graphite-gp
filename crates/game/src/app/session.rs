@@ -354,6 +354,9 @@ pub(crate) mod tests {
             block_size: 6,
             seed_budget: 1,
             repair_budget: 8,
+            record: None,
+            replay: None,
+            replay_mode: crate::config::ReplayMode::Gui,
         }
     }
 
@@ -363,7 +366,7 @@ pub(crate) mod tests {
     #[test]
     fn seeds_for_attempt_matches_the_seed_policy() {
         let config = test_config();
-        let session = GameSession::new(config);
+        let session = GameSession::new(config.clone());
 
         assert_eq!(
             session.seeds_for_attempt(0),
@@ -574,8 +577,9 @@ pub(crate) mod tests {
         use crate::race::round::Advance;
         use gp_core::sim::Action;
 
+        let race_config = config.race;
         let mut session = GameSession::new(config);
-        let mut shell = gp_render::AppShell::new(config.race);
+        let mut shell = gp_render::AppShell::new(race_config);
         assert_eq!(shell.screen(), gp_render::Screen::Setup);
 
         session.on_nav(Nav::Generate);

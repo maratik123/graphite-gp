@@ -88,8 +88,42 @@ const DEFAULT_SEED_BUDGET: u32 = 1;
 /// Default `--repair-budget` — `gp-gen`'s cheap always-on e2e case.
 const DEFAULT_REPAIR_BUDGET: u32 = 8;
 
-/// The validated game configuration assembled from `Cli` (issue #41).
+/// The replay-mode `--replay` selects (issue #43, C3, spec § Replay CLI).
+///
+/// `Headless` drives the record through a spawned process with no window
+/// and prints final standings (`AC21`), `Gui` plays it back on screen at one
+/// turn per fixed interval (`AC21c`). The binary is a GUI app, so `Gui` is
+/// the RESOLVED default when `--replay-mode` is not given at all — that
+/// default is independent of `AC21d`'s cross-field rule, which rejects an
+/// **explicitly given** `--replay-mode` when `--replay` is absent (spec §
+/// Replay CLI: "CI passes `--replay-mode headless` explicitly").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplayMode {
+    /// `--replay-mode headless` — no window; prints final standings and
+    /// exits non-zero on divergence (`AC21`).
+    Headless,
+    /// `--replay-mode gui` — plays back on screen (`AC21c`). The resolved
+    /// default.
+    Gui,
+}
+
+impl ReplayMode {
+    /// Case-insensitively parses `raw` as `"headless"` or `"gui"`, mirroring
+    /// `cli::parse_difficulty`'s label-parse idiom (spec § Replay CLI).
+    /// FORCED `const fn` (`clippy::missing_const_for_fn`, nursery = deny).
+    const fn from_label(raw: &str) -> Option<Self> {
+        if raw.eq_ignore_ascii_case("headless") {
+            Some(Self::Headless)
+        } else if raw.eq_ignore_ascii_case("gui") {
+            Some(Self::Gui)
+        } else {
+            None
+        }
+    }
+}
+
+/// The validated game configuration assembled from `Cli` (issue #41).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GameConfig {
     /// The player-facing race configuration, reused from `gp-render` — the
     /// same type `AppShell::new` and the Setup screen already speak.
@@ -110,12 +144,33 @@ pub struct GameConfig {
     pub seed_budget: u32,
     /// Inner-loop repair budget.
     pub repair_budget: u32,
+    /// `--record <PATH>` — persist the race to this path at race end (spec
+    /// § Replay CLI, `AC21`).
+    pub record: Option<std::path::PathBuf>,
+    /// `--replay <PATH>` — replay a persisted record from this path
+    /// instead of an interactive race (spec § Replay CLI, `AC21`).
+    pub replay: Option<std::path::PathBuf>,
+    /// The resolved replay mode (spec § Replay CLI) — meaningless when
+    /// `replay` is `None`.
+    pub replay_mode: ReplayMode,
 }
 
 impl TryFrom<Cli> for GameConfig {
     type Error = ConfigError;
 
     fn try_from(cli: Cli) -> Result<Self, Self::Error> {
+        // `AC21d`'s two cross-field rejections, checked before anything else
+        // — neither depends on any derived value, only on which raw flags
+        // were actually given (`cli.replay_mode`/`cli.record`/`cli.replay`
+        // are `Option`, so "given" and "defaulted" are distinguishable,
+        // unlike a `default_value_t` flag).
+        if cli.replay_mode.is_some() && cli.replay.is_none() {
+            return Err(ConfigError::ReplayModeWithoutReplay);
+        }
+        if cli.record.is_some() && cli.replay.is_some() {
+            return Err(ConfigError::RecordWithReplay);
+        }
+
         // Seed resolution (normative, per spec): four independent
         // `Option::unwrap_or` picks, one per field — never a panic path.
         let derived = Seeds::from_master(cli.seed);
@@ -143,6 +198,9 @@ impl TryFrom<Cli> for GameConfig {
             block_size: cli.block_size,
             seed_budget: cli.seed_budget,
             repair_budget: cli.repair_budget,
+            record: cli.record,
+            replay: cli.replay,
+            replay_mode: cli.replay_mode.unwrap_or(ReplayMode::Gui),
         };
 
         let floor = config.to_gen_params().min_width();
@@ -166,8 +224,10 @@ impl GameConfig {
     /// This config's pilot temperature — delegates to
     /// [`RaceConfig::temperature`], the single source of truth for the
     /// mapping (AC10). FORCED `const fn` — a pure delegation over `Copy`
-    /// fields (`clippy::missing_const_for_fn`, nursery = deny).
-    pub const fn temperature(self) -> f32 {
+    /// fields (`clippy::missing_const_for_fn`, nursery = deny). Takes
+    /// `&self` (not `self`) since C3's `PathBuf` fields cost `GameConfig`
+    /// its `Copy` derive.
+    pub const fn temperature(&self) -> f32 {
         self.race.temperature()
     }
 
@@ -175,14 +235,15 @@ impl GameConfig {
     /// *total* (non-panicking) conversion — `self.race.laps` is validated
     /// into `[1, 9]`, so the `i32::MAX` sentinel is unreachable in practice,
     /// but the form stays total rather than relying on that invariant.
-    pub fn total_laps(self) -> i32 {
+    pub fn total_laps(&self) -> i32 {
         i32::try_from(self.race.laps).unwrap_or(i32::MAX)
     }
 
     /// Maps this config onto a [`GenParams`], mapping `v_target` onto
     /// `v_ceiling` (AC7). FORCED `const fn` — a pure struct literal over
     /// `Copy` fields (`clippy::missing_const_for_fn`, nursery = deny).
-    pub const fn to_gen_params(self) -> GenParams {
+    /// Takes `&self` — see [`Self::temperature`]'s note.
+    pub const fn to_gen_params(&self) -> GenParams {
         GenParams {
             cars: self.race.cars,
             min_straight: self.min_straight,
@@ -233,13 +294,15 @@ fn parse_err(args: &[&str]) -> ConfigError {
 }
 
 /// Unwraps the `clap::error::ErrorKind` of a `ConfigError::Cli`. Panics on
-/// the cross-field variant — no test in this crate calls `kind` for a case
-/// expected to produce it.
+/// any cross-field variant — no test in this crate calls `kind` for a case
+/// expected to produce one.
 #[cfg(test)]
 fn kind(args: &[&str]) -> clap::error::ErrorKind {
     match parse_err(args) {
         ConfigError::Cli(err) => err.kind(),
-        other @ ConfigError::BlockSizeBelowWidthFloor { .. } => {
+        other @ (ConfigError::BlockSizeBelowWidthFloor { .. }
+        | ConfigError::ReplayModeWithoutReplay
+        | ConfigError::RecordWithReplay) => {
             panic!("unexpected variant: {other:?}")
         }
     }

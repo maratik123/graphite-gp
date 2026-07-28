@@ -45,8 +45,9 @@ mod tests {
     )]
     fn player_only_roster_runs_the_end_to_end_sequence() {
         let config = crate::app::session::tests::ac18_config();
+        let cars = config.race.cars;
         let (session, _shell, roster) = crate::app::session::tests::drive_ac18_sequence(config);
-        assert_eq!(roster.len(), config.race.cars as usize);
+        assert_eq!(roster.len(), cars as usize);
         assert!(session.race_outcome().is_some());
     }
 }

@@ -169,6 +169,13 @@ pub fn parse_record(text: &str) -> Result<(GameConfig, ReplayRecord), ReplayErro
         block_size,
         seed_budget,
         repair_budget,
+        // The persisted format carries no `--record`/`--replay`/
+        // `--replay-mode` directives (those are the CLI's own I/O
+        // controls, not part of what a race needs to be reproduced) —
+        // neutral values; C4's caller sets its own as needed.
+        record: None,
+        replay: None,
+        replay_mode: crate::config::ReplayMode::Gui,
     };
     let record = ReplayRecord {
         generation_seed,
@@ -407,6 +414,9 @@ mod tests {
             block_size: 6,
             seed_budget: 1,
             repair_budget: 8,
+            record: None,
+            replay: None,
+            replay_mode: crate::config::ReplayMode::Gui,
         }
     }
 
