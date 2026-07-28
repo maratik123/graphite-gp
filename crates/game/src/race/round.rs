@@ -856,4 +856,121 @@ mod tests {
         let round = RaceRound::new(5);
         assert_eq!(round.total_laps(), 5);
     }
+
+    /// AC19 (self-review Round 3, finding 1) — `CarRecord::lap_turns` is
+    /// written at exactly one site, `Self::advance`'s `laps_now >
+    /// car.lap_turns.len()` push, and the existing standings.rs test only
+    /// pins `RaceOutcome::from_race`'s consumer math against a
+    /// directly-assigned `lap_turns`, never the recording itself. This
+    /// drives four **real** gate crossings through `advance` (never a
+    /// direct `LapCounter::register_move`/field assignment) and asserts the
+    /// exact hand-computed turn indices, proving both that the writer fires
+    /// at the right turn and that a non-crossing turn in between does not.
+    ///
+    /// A single seated car means the round wraps (and `self.turn`
+    /// increments) on every call, so call `k` (0-based) is turn `k`. Each
+    /// "crossing" call resets the car to the same rest cell the AC5 test
+    /// above already established as a real, legal, gate-crossing `East`
+    /// step (`x = 5`, the gate's `behind` row); resetting position directly
+    /// before each call is the same technique
+    /// `collision_relocation_never_registers_a_crossing` and the AC5/AC6
+    /// tests above already use.
+    ///
+    /// Hand-computed expectation, from `LapCounter`'s own doc (`raw()`
+    /// starts at `-1`; `laps()` is `raw().max(0)`):
+    /// - turn 0: the race's first-ever crossing takes `raw()` from `-1` to
+    ///   `0`, so `laps()` is `0` — "the race start, not a lap" — and
+    ///   `lap_turns` (len `0`) is NOT pushed (`0 > 0` is false).
+    /// - turn 1: a second real crossing takes `raw()` to `1`, `laps()` is
+    ///   `1`; `1 > lap_turns.len() (0)` is true, so turn `1` IS pushed.
+    /// - turn 2: a Coast at rest (`from == to`, no gate segment swept) — no
+    ///   crossing, nothing pushed. Proves the vector does not grow on an
+    ///   ordinary non-crossing turn between two real ones.
+    /// - turn 3: a third real crossing takes `raw()` to `2`, `laps()` is
+    ///   `2`; `2 > lap_turns.len() (1)` is true, so turn `3` IS pushed.
+    ///
+    /// So `lap_turns == [1, 3]` is the only value consistent with the
+    /// production code read literally — `self.turn` is pushed **before**
+    /// its `saturating_add(1)` later in the same call, exactly mirroring
+    /// `finish_turn`'s own "this value at the moment it finished"
+    /// convention (module doc on `RaceRound::turn`) a few lines above, so
+    /// this is a deliberate 0-based "index of the turn that produced this
+    /// crossing" convention, not an off-by-one bug: both fields read
+    /// `self.turn` pre-increment for the same reason.
+    #[test]
+    fn lap_turns_records_only_real_crossings_at_the_correct_turn_index() {
+        let track = ring_track();
+        let geometry = BakedTrackGeometry::new(&track);
+        let mut race = RaceState::new(track, geometry, 1, 0);
+        let mut round = RaceRound::new(5);
+        let gate_rest = CarState {
+            x: 5,
+            y: 1,
+            vx: 0,
+            vy: 0,
+        };
+
+        // Turn 0 — first-ever crossing: race start, not a lap. Not pushed.
+        step_seat0(&mut round, &mut race, gate_rest, Action::East);
+        assert_eq!(race.cars[0].laps.laps(), 0, "first crossing: race start");
+        assert!(
+            race.cars[0].lap_turns.is_empty(),
+            "race-start crossing must not be recorded as a lap"
+        );
+
+        // Turn 1 — second real crossing completes lap 1: pushed at turn 1.
+        step_seat0(&mut round, &mut race, gate_rest, Action::East);
+        assert_eq!(race.cars[0].laps.laps(), 1);
+        assert_eq!(race.cars[0].lap_turns, vec![1]);
+
+        // Turn 2 — a filler Coast at rest: no gate segment is swept, so
+        // nothing is pushed.
+        step_seat0(&mut round, &mut race, gate_rest, Action::Coast);
+        assert_eq!(
+            race.cars[0].laps.laps(),
+            1,
+            "a Coast at rest must not cross the gate"
+        );
+        assert_eq!(
+            race.cars[0].lap_turns,
+            vec![1],
+            "a non-crossing turn must not grow lap_turns"
+        );
+
+        // Turn 3 — third real crossing completes lap 2: pushed at turn 3,
+        // not turn 2 (the intervening Coast) and not turn 4 (post-increment).
+        step_seat0(&mut round, &mut race, gate_rest, Action::East);
+        assert_eq!(race.cars[0].laps.laps(), 2);
+        assert_eq!(
+            race.cars[0].lap_turns,
+            vec![1, 3],
+            "lap_turns must record exactly the turn index of each real, \
+             non-race-start crossing"
+        );
+        assert_eq!(round.turn(), 4, "sanity: four calls, four turns processed");
+    }
+
+    /// Resets `race`'s sole seat to `state`, drives one `advance` call with
+    /// a one-seat roster that always answers `action`, and asserts it
+    /// applied cleanly (`Advance::Moved { seat: 0, action, .. }`) — the
+    /// repeated per-turn step `lap_turns_records_only_real_crossings_at_the_correct_turn_index`
+    /// uses for each of its four calls, factored out to stay under
+    /// `clippy::too_many_lines`.
+    fn step_seat0(round: &mut RaceRound, race: &mut RaceState, state: CarState, action: Action) {
+        race.cars[0].state = state;
+        let mut roster = Roster::new();
+        roster.push(Box::new(ScriptedOnce(action)));
+        let outcome = round.advance(race, &mut roster, FrameInput::default());
+        assert!(
+            matches!(
+                outcome,
+                Advance::Moved {
+                    seat: 0,
+                    action: a,
+                    ..
+                } if a == action
+            ),
+            "unexpected outcome: {outcome:?}"
+        );
+    }
 }
