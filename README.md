@@ -137,8 +137,11 @@ integer `supercover` predicate (full §3 C4 test table) plus the corridor-graph
 helpers — 4-conn flood-fill / connected-component counting,
 `bounded_complement_components` (the §2 Ф4 infield-hole test), in-`D` geodesic
 BFS, and `walls_from_boundary` (dual edges). The corridor's box/index math is factored into unsigned `Size`/`Rect`
-value types, so `Corridor` dimensions are unsigned and **gp-core carries zero
-production panics** (`Rect::index` is total via `checked_sub` + `try_from`). All
+value types, so `Corridor` dimensions are unsigned and `Rect::index` is total
+via `checked_sub` + `try_from`. gp-core carried **zero production panics** until
+the `supercover` fast-path rewrite (PR #171) introduced two `i32::try_from(..)
+.expect(..)` inner-bound conversions — the crate's only panic-class calls, both
+catalogued with their invariants in `ai-docs/panic-index.md`. All
 integer arithmetic is **overflow- and signedness-safe**, machine-enforced by a
 workspace `clippy::arithmetic_side_effects = "deny"` lint (issue #48). The `sim`
 `step` (accelerate-then-advance state advance) is implemented alongside the
@@ -150,7 +153,7 @@ cell in `D`, normal→0 / tangential→`⌊t/2⌋`, one forced-`Coast` scrub tic
 `L∈D`-guarded whole-vector-halving fail-safe that never yields a penalty-free
 `v=0`) — returns a `CrashOutcome` with `action_mask` / `consume_scrub` (issue #9).
 `sim::resolve_collisions` — **same-final-cell** collision resolution (issues #10 +
-#49): a caller-owned `rand_xoshiro` RNG handle (`&mut Xoshiro256PlusPlus`,
+#49): a caller-owned, generically-typed RNG handle (`&mut impl Rng`, PR #167 —
 cross-arch-reproducible) picks the winner and displacement order for cars sharing
 a final cell; losers teleport to the nearest free cell via geodesic BFS, velocity
 retained. Per product-owner amendments (2026-07-16) the predicate is
@@ -161,7 +164,8 @@ distinct cells are allowed), and the RNG is a shared per-domain stream handle
 both `gp-core` and `gp-gen`, with a seeded `GenParams::generation_rng()`; the
 per-source engine split (issue #139) keeps `rand_chacha` in `gp-core` for
 AI-learning and adds `rand_xoshiro` for the three Xoshiro sources (`gp-gen` now
-carries only `rand_xoshiro`). The core still carries **zero production panics**. The generation pipeline and
+carries only `rand_xoshiro`); the concrete engine is named only where a stream is
+created, never in a callee signature. The generation pipeline and
 its passability oracle are now landed (blocks 1's Ф1–Ф7 + `generate()`, #34);
 the remaining `todo!()` algorithms are block 4's AI (feature extraction,
 policy). See the `TODO(<block>)` markers.
