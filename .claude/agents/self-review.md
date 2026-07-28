@@ -217,3 +217,19 @@ Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-23 —
 a phase-4 width-check guard test asserted emptiness on a fixture that never met
 its pre-clause condition; deleting the soundness clause left all tests green,
 exposing zero coverage.
+
+### 3. Severity follows the defect's position in the artifact's purpose, not its blast radius
+
+*Default to* rating a hole in a guard's **primary case** as blocking, however
+small the diff and however safely it fails closed — a catch-net that misses the
+thing it exists to catch is not partial protection, it is the *appearance* of
+protection, and everyone downstream trusts a shipped guard immediately. *Prefer*
+fixing such a defect before the artifact ships over filing it as a follow-up.
+Extends § *Patterns* 1 with the severity-calibration half: Patterns 1 says *when*
+you may override a wave-through, this says *how to recognise* one worth
+overriding.
+
+Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-25 —
+a `minor`-rated `[^|]*` fragment in a newly-added piped-gate hook let a
+`tee`-routed gate escape; overriding to fix-before-push was confirmed by two
+independent corpus runs.

@@ -55,6 +55,10 @@ Reflection-sourced `learnings` entries **feed** the existing `/improve` run thre
 
 The `AskUserQuestion` consent prompt is the **only** path to a project-side write in this skill. No `learnings.md` append and no `gh issue create` may originate without an `Apply` answer for that specific finding. `none` and `Downgrade`/`Drop` answers write nothing.
 
+## No `self-review` on this skill's output
+
+Do **NOT** spawn `self-review` over a `/reflect` run — `AGENTS.md § Workflow`'s self-review AXIOM carries an explicit `/reflect` carve-out. The reason is **structural**, not a cost judgement: this skill's product is `learnings.md` entries, and every downstream consumer of that surface is already contractually obliged to re-verify the claims in them. Verify each entry's factual claims **inline as you write it** — that is where the obligation actually lives.
+
 See also: `/improve` (`.claude/skills/improve/SKILL.md`) — the consumer of the `learnings.md` queue that reflection feeds; same batched-consent pattern, different mutation scope.
 
 Context from user (if any): $ARGUMENTS

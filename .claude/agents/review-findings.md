@@ -168,3 +168,11 @@ The five new fields (`current_step`, `last_passed_gate`, `parent_skill`, `entry_
 - Maximum 25 findings. If more exist, list the 25 most severe.
 - Cross-reference done plans before raising a finding — if it's documented there, skip it.
 - Severity: `blocker` · `major` · `minor` · `nit`
+
+## Patterns
+
+### 1. Severity follows the defect's position in the artifact's purpose, not its blast radius
+
+*Default to* rating a hole in a guard's **primary case** as blocking, however small the diff and however safely it fails closed — a catch-net that misses the thing it exists to catch is not partial protection, it is the *appearance* of protection, and everyone downstream trusts a shipped guard immediately. *Prefer* fixing such a defect before the artifact ships over filing it as a follow-up.
+
+Validated by [`ai-docs/learnings.md`](../../ai-docs/learnings.md) 2026-07-25 — a `minor`-rated `[^|]*` fragment in a newly-added piped-gate hook let a `tee`-routed gate escape; overriding to fix-before-push was confirmed by two independent corpus runs.

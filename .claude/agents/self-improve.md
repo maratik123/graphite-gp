@@ -227,7 +227,10 @@ Type: PreToolUse / PostToolUse
 Matcher: which tool
 Command: what to execute
 Why hook and not rule: [explanation]
-Verification: [all three MUSTs discharged — see below]
+Verification:
+  MUST 1 (lint)    — [the `shellcheck -s bash` invocation and its exit status]
+  MUST 2 (live)    — [each command run verbatim + observed block/allow, INCLUDING innocent commands that merely contain the matched substring]
+  MUST 3 (field)   — [the logged line from the temporary non-blocking hook, pasted, + the commit/edit that reverted it]
 ```
 
 **A proposed hook is not verified until all three MUSTs in [`ai-docs/hook-verification.md`](../../ai-docs/hook-verification.md) hold** — a green self-authored suite is evidence about your *cases*, never your *matcher*:
@@ -235,6 +238,8 @@ Verification: [all three MUSTs discharged — see below]
 1. **Lint the body** — `jq`-extract, `shellcheck -s bash`. Nothing else lints a `settings.json`-inlined body.
 2. **Exercise it live** — run the real commands you expect to pass, including innocent ones that merely CONTAIN the matched substring.
 3. **Prove the keyed input field populates, passively** — log it from a temporary non-blocking hook on a benign action, then revert. **NEVER** probe by telling a compliant actor to issue the banned action.
+
+**Paste the artifact, never the adjective.** Each slot above takes command text and observed output; the words *"discharged"*, *"verified"*, *"confirmed"* are not evidence. **Archival evidence does not discharge MUST 3** — prior consumers of a field, a documented past false positive, and a capability consult are all CAN claims standing in for a DOES claim about *this* caller. If you believe archival evidence genuinely suffices, **amend the MUST** and say so; do not record a probe-shaped claim for a probe you did not run. A MUST you authored binds you first and hardest: the commit introducing a verification requirement is the worst possible place to take an exemption from it, because the exemption ships as precedent alongside the rule. A reviewer endorsing the substitution does not discharge it either (AGENTS.md § *Patterns* 1 — relief invites acceptance).
 
 ### Step 5: Apply after confirmation
 
@@ -284,7 +289,7 @@ After applying changes — answer:
 
 **Propagation-rule asymmetry:** the Learning-Log sync-group sister file `.claude/agents/learnings-escalation-audit.md` has no Step 6 eval-phase equivalent (its workflow is a passive auditor; its `Step 6 — Report` is structured output, not a primitive-dispatch step), so this contract requires no mirrored edit there.
 
-**Reproducer-prompt template + worked example:** [`ai-docs/templates/improve-eval-reproducer.md`](../../ai-docs/templates/improve-eval-reproducer.md). Emit one block **verbatim** per Step-1 pattern (the parent thread copies each into a fresh `Agent` dispatch). Branch the `Scenario:` / `PASS criterion:` / `FAIL criterion:` lines on the audited entry's `Kind:` (correction vs validation) — emit **only** the matching variant; the pause-and-surface protocol, the parent-thread dispatch, and the `Eval: PASS ✅` / `Eval: FAIL ❌` emission are identical across both passes.
+**Reproducer-prompt template + worked example:** [`ai-docs/templates/improve-eval-reproducer.md`](../../ai-docs/templates/improve-eval-reproducer.md). Emit **two** blocks per Step-1 pattern — a **SUBJECT** block (the only thing the parent copies into a fresh `Agent` dispatch) and a **GRADER** block (`Expected fixed output` / `PASS criterion` / `FAIL criterion`, which stays in the parent thread and is **never dispatched**). **When authoring any generate-then-dispatch template, ask: what does the receiving agent see, and does it include the answer?** An eval that shows the agent its own expected answer measures nothing — the clean-context requirement above is defeated by leaking the grader just as surely as by a same-context close-read. Branch the `Scenario:` / `PASS criterion:` / `FAIL criterion:` lines on the audited entry's `Kind:` (correction vs validation) — emit **only** the matching variant; the pause-and-surface protocol, the parent-thread dispatch, and the `Eval: PASS ✅` / `Eval: FAIL ❌` emission are identical across both passes.
 
 **PASS criterion (parent-thread emits, NOT the subagent):** the problematic pattern is gone in every reproducer the parent dispatched.
 **FAIL criterion (parent-thread emits, NOT the subagent):** same error in ≥1 reproducer → rule not strong enough → loop back to Step 3, strengthen it, re-run Step 6.

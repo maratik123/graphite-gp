@@ -163,3 +163,5 @@ EOF
 | Step 4 | all six checks pass (build, test, clippy, fmt, doc, doc convention)? |
 | Step 5 | self-review APPROVE before commit? |
 | Commit | `major`/`blocker` objections user-approved? progress file deleted? |
+
+**Severity calibration.** When rating a finding, apply `.claude/agents/self-review.md` § *Patterns* 3 (mirrored in `.claude/agents/review-findings.md` § *Patterns* 1): a hole in a guard's **primary case** is blocking regardless of diff size or fail-closed behaviour — severity follows the defect's position in the artifact's purpose, not its blast radius.
