@@ -388,8 +388,8 @@ pub struct CrashOutcome {
 
 impl CrashOutcome {
     /// The action mask available from this outcome: the singleton `{Coast}`
-    /// while [`CrashOutcome::scrub`] holds (`[N5]`'s "один ход без права
-    /// реакселерации"), otherwise the ordinary [`legal_mask`].
+    /// while [`CrashOutcome::scrub`] holds — `[N5]`'s "one move with no right to
+    /// re-accelerate" — otherwise the ordinary [`legal_mask`].
     pub fn action_mask(self, d: &Corridor) -> Actions {
         if self.scrub {
             Actions::from(Action::Coast)

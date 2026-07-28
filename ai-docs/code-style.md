@@ -22,15 +22,15 @@ Prefer idiomatic Rust over literal ports. Comparison/combinator helpers (`.min`/
 ## Construct from fixed inputs directly — don't route through iterator plumbing
 When the input is a **fixed, known set** — an array literal, a known-length tuple, or a closed enum's variants — build the target with a direct `From` / constructor, not an iterator chain that immediately re-collects. Same result, clearer intent, no throwaway adaptor.
 
-| Instead of | Write                                                                      |
-|---|----------------------------------------------------------------------------|
-| `HashSet::from_iter([a, b, c])` | `HashSet::from([a, b, c])`                                                 |
-| `[a, b, c].into_iter().collect()` | `HashSet::from([a, b, c])`                                                 |
-| `std::iter::once(x).collect()` | `HashSet::from([x])`                                                       |
-| `[a, b, c].to_vec()` | `vec![a, b, c]`                                                            |
-| `arr.into_iter().map(f).collect()` | `HashSet::from(arr.map(f))` — mind the `[T; N]::map` caveat below          |
+| Instead of | Write |
+|---|---|
+| `HashSet::from_iter([a, b, c])` | `HashSet::from([a, b, c])` |
+| `[a, b, c].into_iter().collect()` | `HashSet::from([a, b, c])` |
+| `std::iter::once(x).collect()` | `HashSet::from([x])` |
+| `[a, b, c].to_vec()` | `vec![a, b, c]` |
+| `arr.into_iter().map(f).collect()` | `HashSet::from(arr.map(f))` — mind the `[T; N]::map` caveat below |
 | `once(a).chain(once(b))` | `<[T; 2]>::from(pair).into_iter()` — a 2-tuple `From`-converts to `[T; 2]` |
-| hand-listing every variant `[V::A, V::B, V::C].into_iter()` | derive `strum::VariantArray`, iterate `V::VARIANTS`                        |
+| hand-listing every variant `[V::A, V::B, V::C].into_iter()` | derive `strum::VariantArray`, iterate `V::VARIANTS` |
 
 **When NOT to.** The target must be a fixed input. Keep `.collect()` / `from_iter` when the source is a genuine iterator of unknown length, a filtered/lazy stream, or a generic context where the concrete array type isn't known. The `vec![…]` rule targets only an **array literal** `.to_vec()` (`[a, b, c].to_vec()`) — calling `.to_vec()` to clone an existing slice or `Vec` into an owned one (`slice.to_vec()`, `layer.to_vec()`) is the correct, idiomatic use and is unaffected.
 
@@ -38,10 +38,30 @@ When the input is a **fixed, known set** — an array literal, a known-length tu
 
 **`strum::VariantArray` for closed variant sets.** Deriving `VariantArray` and iterating `V::VARIANTS` is the idiom for walking every variant of a closed enum — it also removes a maintenance hazard: a newly-added variant is picked up automatically instead of being silently dropped from a hand-maintained list. `strum` (0.28, `derive` feature) is already a workspace dependency.
 
-In-tree precedent: PR [#148](https://github.com/maratik123/graphite-gp/pull/148) (`geom/graph.rs`, `gen/phase5b.rs`, `render/icons.rs`, `render/track/{regions,walls}.rs`, `render/widgets/{card,gallery}.rs`).
+In-tree precedent: PR [#148](https://github.com/maratik123/graphite-gp/pull/148) adopted `EnumIter` (`geom/graph.rs`, `gen/phase5b.rs`, `render/icons.rs`, `render/track/{regions,walls}.rs`, `render/widgets/{card,gallery}.rs`); PR [#168](https://github.com/maratik123/graphite-gp/pull/168) then migrated every one of those sites — plus `core/sim`, `core/track`, `gen/phase{1,2,3,5,5b,5_runout,6_arms}` — from `EnumIter`/`V::iter()` to `VariantArray`/`V::VARIANTS`. **`VARIANTS` is a `&'static [V]` slice, so it composes with slice APIs an iterator cannot**: `RaceDir::VARIANTS.choose(rng)` (`gen/phase1.rs:255`, `rand::seq::IndexedRandom`) replaced an `IteratorRandom::choose` over `RaceDir::iter()` that depended on strum's generated `size_hint`/`nth` being correct. Do not reintroduce `EnumIter` — there is no `EnumIter` derive left in-tree.
+
+## Generic over the RNG, not over one engine
+A function that draws randomness takes **`rng: &mut impl Rng`** (or a `R: Rng` bound), never a concrete engine type. The per-domain engine choice (`Xoshiro256PlusPlus` for generation / collision / AI-inference, `ChaCha8Rng` for AI-learning — issue #139) belongs to `gp_core::rng::Seeds` at the call site; a callee that names the engine hard-codes that choice into its signature and forces a mechanical retype of every consumer when a domain's engine changes.
+
+- **Applies to test helpers too** — `fn draws(mut rng: impl Rng)` (`gen/src/lib.rs`) over `fn draws(mut rng: Xoshiro256PlusPlus)`, so a helper is reusable across engines.
+- **The concrete type stays where the stream is *created*** — `Seeds::generation_rng() -> Xoshiro256PlusPlus`, `#[cfg(test)]` fixtures that `seed_from_u64`. Those are engine decisions, not engine plumbing.
+- **Import the concrete engine under `#[cfg(test)]` only** when production code no longer names it, or the unused-import lint fires.
+
+In-tree precedent: PR [#167](https://github.com/maratik123/graphite-gp/pull/167) — `resolve_collisions`, `phase1_coarse_ring`(`_attempts`), `widen`, `choose_dir`, `grow_blocks`, `build_p` all moved from `&mut Xoshiro256PlusPlus` to `&mut impl Rng`.
+
+## Re-export a generic instantiation as a type alias
+When a public API returns a *specific instantiation* of a third-party generic (Rust API guideline C-REEXPORT — the consumer must not need a direct dependency on that crate), publish a **`pub type` alias**, not a `pub use` of the bare generic.
+
+| Instead of | Write |
+|---|---|
+| `pub use enumflags2::BitFlags;` + `-> BitFlags<Action>` at every site | `pub type Actions = BitFlags<Action>;` + `-> Actions` |
+
+The alias names the domain concept once, shortens every signature and every `Actions::all()` / `Actions::empty()` / `Actions::from(..)` construction site, and keeps the third-party generic itself out of the crate's public surface. Declare it **next to the enum it wraps**, not beside the re-export it replaces.
+
+In-tree precedent: PR [#169](https://github.com/maratik123/graphite-gp/pull/169) introduced `gp_core::sim::Actions`; PR [#170](https://github.com/maratik123/graphite-gp/pull/170) finished the sweep across `gp-core`/`gp-ai`/`gp-game`/`gp-render`, including prose and doc comments. `BitFlags` still has no `Sub` — `.remove(Action::North)` on a `mut` binding is the single-flag removal.
 
 ## Integer safety
-`gp-core` targets zero production panics; integer arithmetic and conversions MUST be overflow- and signedness-safe by construction.
+`gp-core` targets zero production panics, and currently holds it — [`panic-index.md`](panic-index.md) has no `crates/core/` row. (PR #171's `supercover` interval solver briefly added two `i32::try_from(..).expect(..)` bounds; the revert removed them.) Integer arithmetic and conversions MUST be overflow- and signedness-safe by construction.
 
 - Reach for the explicit-semantics method that matches intent: `checked_*` → `Option`/`None` on out-of-range; `saturating_*` → clamp to bound; `wrapping_*`/`overflowing_*` → explicit modular; `strict_*` → always-panic (even in release) for a true invariant; `abs_diff` → unsigned magnitude of a difference; `carrying_*`/`borrowing_*` → multi-word chains.
 - Prefer `usize::try_from(i32)?` / `u32::try_from(...)` over `as` casts wherever an out-of-domain input could overflow or lose sign — `try_from` folds the negative-value guard into the conversion (no explicit `< 0` check, no `#[allow(clippy::cast_sign_loss)]`).
@@ -87,7 +107,7 @@ For order that reaches output, pick by the order semantics you need (both keep m
 - `std::collections::BTreeMap` / `BTreeSet` — sorted-key iteration, zero-dependency, stable across toolchains. Needs `Ord` on the key; `gp-core`'s integer `Point` derives `Eq + Hash` but **not** `Ord` yet, so this costs a small, deliberate derive addition.
 - `indexmap::IndexMap` / `IndexSet` — insertion-order iteration, independent of any hasher. Needs only `Eq + Hash` (`Point` already has them) but adds the `indexmap` dependency.
 
-**When the key or element is itself an enum** (a closed variant set), reach past the arbitrary-key options above for an enum-specialized container: `enum_map::EnumMap<K, V>` for a map, `enumflags2::BitFlags<K>` for a set. Both are array-/bit-backed, **total** (every variant is present / representable), allocation- and hasher-free, and deterministic *by construction* — iteration follows the enum's **declaration order**, with no `Ord`/`Hash` obligation and no extra footgun to remember. Prefer them over `HashMap<Enum, _>` / `HashSet<Enum>` and even over `IndexMap` / `BTreeMap` / `BTreeSet` whenever the domain is a closed enum; `EnumMap` is also the idiomatic replacement for a hand-written `[V; N]` indexed by an enum's discriminant surrogate (`variant as usize`), and its `enum_map! { Variant => … }` constructor makes an omitted variant a **compile error** (exhaustiveness), which a positional array cannot. `EnumMap` needs `K: enum_map::Enum` (a derive); `BitFlags` needs `#[bitflags] #[repr(uN)]` on the enum (see [Enum repr](#enum-repr)). In-tree precedents: `gp-render`'s `IconSet` (`EnumMap<Icon, TextureHandle>`) and `gp-core`'s `legal_mask` (`BitFlags<Action>`).
+**When the key or element is itself an enum** (a closed variant set), reach past the arbitrary-key options above for an enum-specialized container: `enum_map::EnumMap<K, V>` for a map, `enumflags2::BitFlags<K>` for a set. Both are array-/bit-backed, **total** (every variant is present / representable), allocation- and hasher-free, and deterministic *by construction* — iteration follows the enum's **declaration order**, with no `Ord`/`Hash` obligation and no extra footgun to remember. Prefer them over `HashMap<Enum, _>` / `HashSet<Enum>` and even over `IndexMap` / `BTreeMap` / `BTreeSet` whenever the domain is a closed enum; `EnumMap` is also the idiomatic replacement for a hand-written `[V; N]` indexed by an enum's discriminant surrogate (`variant as usize`), and its `enum_map! { Variant => … }` constructor makes an omitted variant a **compile error** (exhaustiveness), which a positional array cannot. `EnumMap` needs `K: enum_map::Enum` (a derive); `BitFlags` needs `#[bitflags] #[repr(uN)]` on the enum (see [Enum repr](#enum-repr)). In-tree precedents: `gp-render`'s `IconSet` (`EnumMap<Icon, TextureHandle>`) and `gp-core`'s `legal_mask` (`gp_core::sim::Actions`, the alias for `BitFlags<Action>` — see [Re-export a generic instantiation as a type alias](#re-export-a-generic-instantiation-as-a-type-alias)).
 
 **A fixed / seeded `BuildHasher` (`HashMap::with_hasher`) is NOT an escape hatch.** It pins the hash *values*, not the *slot layout* that determines iteration order, so a `HashMap`/`HashSet` iterated into output still diverges after a `hashbrown` / toolchain bump. Seeding removes only the per-process `RandomState`; same-binary determinism ≠ cross-build reproducibility. A fixed-hasher `HashMap`/`HashSet` used purely for **membership** (`contains` / `insert`, never iterated into output) is the sole production-safe use — but `IndexSet` / `BTreeSet` already give O(1) membership without the footgun, so prefer them.
 

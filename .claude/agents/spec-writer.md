@@ -132,7 +132,7 @@ printf '%s\n' "<draft questions> <draft spec body>" | grep -iE 'backward.compat|
 ```
 
 | Forbidden substring (case-insensitive) | Documented answer to apply silently |
-|----------------------------------------|--------------------------------------|
+|---|---|
 | `backward compat`, `back-compat`, `backcompat`, `compat shim`, `compat layer` | AGENTS.md § *API Stability*: game app, never published to crates.io — free to break, no shims |
 | `deprecat` (matches *deprecate*, *deprecated*, *deprecation*) | AGENTS.md § *API Stability*: no `#[deprecated]` wrappers |
 | `keep old`, `preserve existing`, `existing API stay`, `keep the old name` | AGENTS.md § *API Stability*: rename freely |

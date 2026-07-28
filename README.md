@@ -125,8 +125,11 @@ analytics overlays and notebook grid (#17–#18), all four screens — Setup /
 Track lab / Race / Results (#19–#22) — and the `AppShell` screen router (#23),
 with the `gp-game` binary wired to drive the shell from hand-built fixture data
 (real generation → sim → AI wiring is block 3b). Every draw layer is covered by
-an offscreen `egui_kittest` wgpu/Vulkan golden (Miri-gated) and `gp-render`
-carries **zero production panics**.
+an offscreen `egui_kittest` wgpu/Vulkan golden (Miri-gated). `gp-render`'s four
+production panic sites — two clamped `u32::try_from` conversions and two
+`Card::show`-invariant `expect`s — are catalogued with their invariants in
+`ai-docs/panic-index.md`; the zero-panic invariant is `gp-core`'s, not the
+whole workspace's.
 
 The `TrackArtifact` contract is **finalized** (`SField`
 distance/gradient/tangent accessors, `StartGrid`, the `TimingGate` half-grid
@@ -150,7 +153,7 @@ cell in `D`, normal→0 / tangential→`⌊t/2⌋`, one forced-`Coast` scrub tic
 `L∈D`-guarded whole-vector-halving fail-safe that never yields a penalty-free
 `v=0`) — returns a `CrashOutcome` with `action_mask` / `consume_scrub` (issue #9).
 `sim::resolve_collisions` — **same-final-cell** collision resolution (issues #10 +
-#49): a caller-owned `rand_xoshiro` RNG handle (`&mut Xoshiro256PlusPlus`,
+#49): a caller-owned, generically-typed RNG handle (`&mut impl Rng`, PR #167 —
 cross-arch-reproducible) picks the winner and displacement order for cars sharing
 a final cell; losers teleport to the nearest free cell via geodesic BFS, velocity
 retained. Per product-owner amendments (2026-07-16) the predicate is
@@ -161,7 +164,8 @@ distinct cells are allowed), and the RNG is a shared per-domain stream handle
 both `gp-core` and `gp-gen`, with a seeded `GenParams::generation_rng()`; the
 per-source engine split (issue #139) keeps `rand_chacha` in `gp-core` for
 AI-learning and adds `rand_xoshiro` for the three Xoshiro sources (`gp-gen` now
-carries only `rand_xoshiro`). The core still carries **zero production panics**. The generation pipeline and
+carries only `rand_xoshiro`); the concrete engine is named only where a stream is
+created, never in a callee signature. The generation pipeline and
 its passability oracle are now landed (blocks 1's Ф1–Ф7 + `generate()`, #34);
 the remaining `todo!()` algorithms are block 4's AI (feature extraction,
 policy). See the `TODO(<block>)` markers.

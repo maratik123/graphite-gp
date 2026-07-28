@@ -219,8 +219,8 @@ fn is_anchored_endpoint(s: &BTreeSet<Point>, dt: &DistanceTransform, p: Point) -
 }
 
 /// The distance-ordered, connectivity-preserving thinning skeleton of `dt`
-/// (design doc §D2, "гребень distance-transform … ветвящийся геометрический
-/// объект").
+/// (design doc §D2 — "the distance-transform ridge … a branching geometric
+/// object").
 ///
 /// `D` is recovered from `dt` alone (`p ∈ D ⟺ dt.at(p) > 0`). Foreground is
 /// **4-connected**, background **8-connected** — the complementary `(4, 8)`

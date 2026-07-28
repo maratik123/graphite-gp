@@ -110,8 +110,17 @@ and valid range are load-bearing and not obvious from the type.
   in the same edit.
 - Cross-crate links use the workspace crate name (`` [`gp_core::Corridor`] ``)
   and must target a **direct** dependency; a link into a transitive dep
-  fails resolution under the doc gate. Inside the same crate, prefer the
-  shortest unambiguous form.
+  fails resolution under the doc gate.
+- **Link the shortest path that resolves from the linking item's own scope.**
+  Rustdoc resolves an intra-doc link against the module's `use` imports, so
+  an item already imported is linkable by its **bare name** — a fully-qualified
+  path there is redundant and rots when the item moves. If `Action` is in scope,
+  write `` [`Action`] ``, not `` [`gp_core::sim::Action`] ``; likewise
+  `` [`Corridor`] ``, `` [`TrackArtifact`] ``, `` [`Issue::Narrow`](Issue::Narrow) ``,
+  `` [`TOP_BAR_H`] ``, `` [`render_startup_echo`] ``. Reserve the qualified form
+  for items **not** imported into the linking scope. In-tree precedent: PR
+  [#166](https://github.com/maratik123/graphite-gp/pull/166) shortened these
+  across `gp-game`, `gp-gen`, and `gp-render`.
 
 ## DOC-6 — Lints that mechanically enforce
 
