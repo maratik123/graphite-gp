@@ -1,85 +1,117 @@
-//! The `eframe::App` glue (issue #43, A2/A9).
+//! The real `eframe::App` glue (issue #43, A9).
 //!
-//! Holds [`GraphiteGpApp`], today still the **hand-built fixture** wiring
-//! relocated verbatim from `src/main.rs` (A2, no behaviour change) — it
-//! draws a fixture `TrackArtifact`/cars/standings and never calls
-//! `gp_gen::generate`, steps physics, or polls a controller. A9 replaces
-//! this with the real `session::GameSession`-backed app and deletes the
-//! fixture constructors (AC24).
+//! Replaces the hand-built fixture wiring (A2) with
+//! [`session::GameSession`]-backed data. Every fixture constructor A2
+//! relocated here is deleted (AC24, verified by this module's own
+//! structural scan test): rendered data comes from generation and the live
+//! race, never a hand-built stand-in.
 
 pub mod session;
 
 use eframe::egui;
-use gp_core::geom::{Corridor, Orient, Point, Side, walls_from_boundary};
 use gp_core::sim::CarState;
-use gp_core::track::{
-    Centerline, RaceDir, SField, StartFinish, StartGrid, TimingGate, TrackArtifact, TrackMetrics,
-};
 use gp_render::screens::{PhaseStatus, RaceSummary, StandingEntry};
 use gp_render::widgets::CarKind;
-use gp_render::{AppShell, BakedTrackGeometry, CarRender, ShellSession, TrackView};
+use gp_render::{AppShell, CarRender, Nav, ShellSession, TrackView};
+use session::GameSession;
 
-/// The fixture header `seed <N>` `LabScreen` displays.
-const FIXTURE_SEED: i32 = 7;
+use crate::controller::player::PlayerController;
+use crate::controller::{FrameInput, Roster, keys};
 
-/// The fixture cars' names/colors follow `gp_render::screens::race::CAR_NAMES`
-/// order; only the first 4 are used, regardless of `--cars`, until #43 wires
-/// real generation.
-const FIXTURE_CAR_COUNT: usize = 4;
-
-/// The app shell, driven by a hand-built fixture session (spec § Key
-/// decisions — `gp-game` wiring).
+/// The real app shell, driven by a live [`GameSession`] (AC18, AC23, AC24)
+/// — a player-only roster (`m` [`PlayerController`] seats, hot-seat on one
+/// screen, AC23) end-to-end from generation to Results.
 pub struct GraphiteGpApp {
     /// The router owning `Screen`/`RaceConfig`/`Overlays`/`has_generated`.
     shell: AppShell,
-    /// The hand-built fixture track (a wide chunky rounded-rect loop),
-    /// shared by the Lab canvas and the Race canvas.
-    track: TrackArtifact,
-    /// The baked geometry for `track` (design
-    /// `2026-07-22-cache-track-geometry`), built once in [`Self::new`]. The
-    /// fixture `track` never swaps at runtime, so a build-once suffices —
-    /// a future real `track` swap (block 1's generator) would need to
-    /// rebuild this alongside it.
-    geometry: BakedTrackGeometry,
-    /// Each fixture car's current state, in `CAR_NAMES` order.
-    car_states: Vec<CarState>,
-    /// Each fixture car's trail (prior cells), parallel to `car_states`.
-    trails: Vec<Vec<Point>>,
-    /// The fixture Ф1–Ф7 generation-phase statuses `LabScreen` displays.
-    phases: [PhaseStatus; 7],
-    /// The fixture rank-ordered standings `ResultsScreen` displays.
-    standings: Vec<StandingEntry>,
-    /// The fixture race summary `ResultsScreen` displays.
-    summary: RaceSummary,
-    /// The validated lap count, computed once from `config` in [`Self::new`].
-    total_laps: i32,
+    /// The session owning generation/race/replay state.
+    session: GameSession,
+    /// The current race's roster — `m` `PlayerController` seats, rebuilt
+    /// whenever a fresh race starts (`Nav::TestLap`/`Nav::Again`).
+    roster: Roster,
+    /// Whether `Screen::Results` has already been reached for the current
+    /// race, so the automatic race-end → `Nav::Finish` transition
+    /// (design § *The loop is a per-frame state machine*) fires exactly
+    /// once, not every frame after the race ends.
+    finished_transitioned: bool,
 }
 
 impl GraphiteGpApp {
-    /// Builds the app shell over the hand-built fixture session data, seeded
-    /// by the CLI-derived `config` (issue #41).
+    /// Builds the app shell over a fresh, empty [`GameSession`], seeded by
+    /// the CLI-derived `config` (issue #41).
     #[must_use]
     pub fn new(config: crate::config::GameConfig) -> Self {
-        let track = fixture_track();
-        let geometry = BakedTrackGeometry::new(&track);
-        let (car_states, trails) = fixture_cars();
-        let standings = fixture_standings();
-
         Self {
             shell: AppShell::new(config.race),
-            track,
-            geometry,
-            car_states,
-            trails,
-            phases: [PhaseStatus::Ok; 7],
-            standings,
-            summary: RaceSummary {
-                fastest_lap: 38.4,
-                tempo: 0.87,
-                crashes: 0,
-            },
-            total_laps: config.total_laps(),
+            session: GameSession::new(config),
+            roster: Roster::new(),
+            finished_transitioned: false,
         }
+    }
+
+    /// Rebuilds `self.roster` to exactly the current race's seated car
+    /// count, all `PlayerController` seats (AC23 — no `gp-ai` edge).
+    fn rebuild_roster(&mut self) {
+        let seated = self.session.race().map_or(0, |race| race.cars.len());
+        self.roster = Roster::new();
+        for _ in 0..seated {
+            self.roster.push(Box::new(PlayerController));
+        }
+    }
+
+    /// This frame's [`FrameInput`] — `shell_action` forwarded from
+    /// `ShellResponse::action` (only non-`None` on `Screen::Race`), and
+    /// `key_action` read via [`keys::keyboard_action`]. Passes
+    /// `Actions::all()` (no masking here): [`PlayerController::decide`]
+    /// masks against the REAL legal mask `RaceRound::advance` supplies —
+    /// masking twice would be redundant, not incorrect.
+    fn frame_input(ui: &egui::Ui, shell_action: Option<gp_core::sim::Action>) -> FrameInput {
+        let key_action = ui.input(|input| {
+            keys::keyboard_action(gp_core::sim::Actions::all(), |key| input.key_pressed(key))
+        });
+        FrameInput {
+            shell_action,
+            key_action,
+        }
+    }
+
+    /// Assembles this frame's `ShellSession` render inputs from the
+    /// current race (if any) — cars, the active seat, laps done, and the
+    /// rank-ordered standings/summary (converted from [`RaceOutcome`]'s
+    /// native `u32` turn counts to today's `f32` shape; D3 deletes these
+    /// casts once `results.rs` itself moves to turn-count labels).
+    #[allow(
+        clippy::cast_precision_loss,
+        reason = "turn counts are realistically tiny relative to f32's 24-bit \
+                  exact-integer range; a temporary A9 boundary cast, deleted by D3"
+    )]
+    fn results_view(&self) -> (Vec<StandingEntry>, RaceSummary) {
+        let Some(outcome) = self.session.race_outcome() else {
+            return (
+                Vec::new(),
+                RaceSummary {
+                    fastest_lap: 0.0,
+                    tempo: 0.0,
+                    crashes: 0,
+                },
+            );
+        };
+        let standings = outcome
+            .standings
+            .iter()
+            .map(|entry| StandingEntry {
+                car_index: entry.car_index,
+                kind: CarKind::You,
+                rank: entry.rank,
+                finish_time: entry.finish_turn.map_or(0.0, |turn| turn as f32),
+            })
+            .collect();
+        let summary = RaceSummary {
+            fastest_lap: outcome.fastest_lap as f32,
+            tempo: outcome.tempo,
+            crashes: outcome.crashes,
+        };
+        (standings, summary)
     }
 }
 
@@ -87,169 +119,179 @@ impl eframe::App for GraphiteGpApp {
     // Not `update` — `eframe` 0.35's `App` trait has no such method; `ui` is
     // the required call, `logic` is the optional pre-paint hook (unused here).
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let cars: Vec<CarRender<'_>> = self
-            .car_states
+        self.session.poll_generation();
+        if self.session.landed().is_none() {
+            // Scope 6 — the UI keeps painting and requests repaints while a
+            // generation job is in flight.
+            ui.ctx().request_repaint();
+        }
+
+        let track_view = self
+            .session
+            .landed()
+            .map_or(TrackView::Pending, |(track, geometry)| TrackView::Ready {
+                track,
+                geometry,
+            });
+
+        let cars: Vec<CarState> = self
+            .session
+            .race()
+            .map(|race| race.cars.iter().map(|car| car.state).collect())
+            .unwrap_or_default();
+        let trails: Vec<&[gp_core::geom::Point]> = self
+            .session
+            .race()
+            .map(|race| race.cars.iter().map(|car| car.trail.as_slice()).collect())
+            .unwrap_or_default();
+        let car_renders: Vec<CarRender<'_>> = cars
             .iter()
-            .zip(&self.trails)
+            .zip(&trails)
             .enumerate()
-            .map(|(index, (state, trail))| CarRender::new(*state, index, trail, index == 0, 0.0))
+            .map(|(index, (&state, trail))| CarRender::new(state, index, trail, true, 0.0))
             .collect();
 
-        let session = ShellSession {
-            track: TrackView::Ready {
-                track: &self.track,
-                geometry: &self.geometry,
-            },
-            setup_error: None,
-            cars: &cars,
+        let active = self
+            .session
+            .round()
+            .map_or(0, crate::race::round::RaceRound::cursor);
+        let laps_done = self
+            .session
+            .race()
+            .and_then(|race| race.cars.get(active))
+            .map_or(0, |car| car.laps.laps());
+        let total_laps = i32::try_from(self.session.config().race.laps).unwrap_or(i32::MAX);
+
+        let (standings, summary) = self.results_view();
+
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_possible_wrap,
+            reason = "display-only Lab header seed, pre-D1 (still i32); D1 \
+                      widens ShellSession::seed to u64 and removes this cast"
+        )]
+        let seed = self
+            .session
+            .installed_generation_seed()
+            .map_or(0, |seed| seed as i32);
+
+        let session_view = ShellSession {
+            track: track_view,
+            setup_error: self.session.setup_error(),
+            cars: &car_renders,
             reduced_motion: false,
-            active: 0,
-            laps_done: 0,
-            total_laps: self.total_laps,
-            phases: self.phases,
+            active,
+            laps_done,
+            total_laps,
+            phases: [PhaseStatus::Ok; 7],
             valid: true,
-            seed: FIXTURE_SEED,
-            standings: &self.standings,
-            summary: self.summary,
+            seed,
+            standings: &standings,
+            summary,
         };
-        let _ = self.shell.show(ui, session);
-    }
-}
 
-/// A hand-built `TrackArtifact` — a wide chunky rounded-rect loop (the
-/// outer block `x∈[2,13] × y∈[2,13]` minus a centered `x∈[6,9] × y∈[6,9]`
-/// hole, ~4-cell-wide arms) with hand-populated `speed_heatmap`/
-/// `fastest_lap` metrics — mirrors `gp-render`'s own
-/// `track::test_support::scene_track`/`scene_metrics` test fixtures (design
-/// § *The binary hand-builds the fixture track*), proven to render under
-/// all overlay combinations without panicking.
-///
-/// Replicated inline rather than shared: `gp-game` is production code and
-/// cannot reference `gp-render`'s `#[cfg(test)]`-only `test_support`
-/// fixtures. Reviewer follow-up (PR #118 round 2) — the previous 3×3-ring
-/// corridor was too thin for the S/F chord to cross the straightaway (the
-/// same pre-#100 defect the `gp-render` app-shell goldens had).
-fn fixture_track() -> TrackArtifact {
-    let mut corridor = Corridor::new(Point::new(0, 0), 16, 16);
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if !in_hole {
-                corridor.set(Point::new(x, y), true);
+        let response = self.shell.show(ui, session_view);
+        let frame_input = Self::frame_input(ui, response.action);
+
+        if let Some(nav) = response.nav {
+            self.session.on_nav(nav);
+            if matches!(nav, Nav::TestLap | Nav::Again) {
+                self.rebuild_roster();
+                self.finished_transitioned = false;
             }
         }
-    }
-    let walls = walls_from_boundary(&corridor);
 
-    let mut speed_heatmap = Vec::new();
-    for x in 2..=13 {
-        for y in 2..=13 {
-            let in_hole = (6..=9).contains(&x) && (6..=9).contains(&y);
-            if in_hole {
-                continue;
-            }
-            let point = Point::new(x, y);
-            if corridor.contains(point) {
-                // A simple, deterministic per-cell gradient — no physical
-                // meaning, only spatial spread across the ramp's full range.
-                let speed = x.saturating_add(y);
-                speed_heatmap.push((point, speed));
-            }
+        let _ = self.session.advance_race(&mut self.roster, frame_input);
+
+        let race_over = self
+            .session
+            .round()
+            .is_some_and(crate::race::round::RaceRound::is_race_over);
+        if race_over && !self.finished_transitioned {
+            self.shell.apply(Nav::Finish);
+            self.finished_transitioned = true;
         }
     }
-    let fastest_lap = vec![
-        Point::new(3, 3),
-        Point::new(12, 3),
-        Point::new(12, 12),
-        Point::new(3, 12),
-    ];
+}
 
-    TrackArtifact {
-        walls,
-        sf: StartFinish {
-            chord: vec![
-                Point::new(7, 2),
-                Point::new(7, 3),
-                Point::new(7, 4),
-                Point::new(7, 5),
-            ],
-            orient: Orient::Vertical,
-            gate: TimingGate {
-                behind: vec![],
-                forward: Side::East,
-            },
-        },
-        corridor,
-        race_dir: RaceDir::Cw,
-        s_field: SField::default(),
-        start_grid: StartGrid::default(),
-        centerline: Centerline::default(),
-        metrics: TrackMetrics {
-            vmax_attain: Some(6),
-            tempo: Some(0.87),
-            fastest_lap,
-            speed_heatmap,
-        },
-        width_min: 3,
+#[cfg(test)]
+mod tests {
+    /// AC24 — a structural scan: none of the deleted fixture identifiers
+    /// appear in `main.rs` or `app/mod.rs` production source (mirrors
+    /// `controller::tests::controller_module_calls_no_physics`'s
+    /// `include_str!` idiom).
+    #[test]
+    fn no_fixture_identifiers_remain_in_main_or_app_mod() {
+        // Strips the `#[cfg(test)]` region and every doc/comment/`use`
+        // line, mirroring `controller::tests::controller_module_calls_no_physics`'s
+        // `code_lines` idiom — this test's OWN source names every forbidden
+        // identifier (in this array literal and its doc comment), which
+        // would otherwise trip on itself.
+        fn code_lines(src: &str) -> String {
+            let mut out = String::new();
+            for line in src.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if trimmed.starts_with("///")
+                    || trimmed.starts_with("//!")
+                    || trimmed.starts_with("//")
+                {
+                    continue;
+                }
+                if trimmed.starts_with("use ") {
+                    continue;
+                }
+                out.push_str(line);
+                out.push('\n');
+            }
+            out
+        }
+
+        let haystack = code_lines(include_str!("../main.rs")) + &code_lines(include_str!("mod.rs"));
+
+        for forbidden in [
+            "fixture_track",
+            "fixture_cars",
+            "fixture_standings",
+            "FIXTURE_SEED",
+            "FIXTURE_CAR_COUNT",
+        ] {
+            assert!(
+                !haystack.contains(forbidden),
+                "main.rs/app/mod.rs production code still contains {forbidden} — AC24 requires it deleted"
+            );
+        }
     }
-}
 
-/// [`FIXTURE_CAR_COUNT`] fixture cars, each with a distinct at-rest state
-/// and a short trail (mirrors `gp-render`'s own gallery fixtures — the
-/// physics/AI-faked posture the spec endorses for this binary's wiring).
-///
-/// Repositioned (PR #118 round 2, alongside [`fixture_track`]'s widening)
-/// onto the new wide track's top straightaway — drivable cells with `x` in
-/// `2..=13` and `y` in `2..=5` sit outside the corridor's centered hole
-/// (`x∈[6,9] × y∈[6,9]`) regardless of `x`, so every cell below is inside
-/// `8..=12 × 2..=5`, near the S/F chord at `x = 7`.
-fn fixture_cars() -> (Vec<CarState>, Vec<Vec<Point>>) {
-    // One resting cell per car, in `CAR_NAMES` order — literal, not
-    // index-computed (mirrors `results_gallery.rs::fixture_standings`'s
-    // literal-fixture idiom; avoids `clippy::arithmetic_side_effects` on
-    // index math for a fixed, tiny fixture).
-    const FIXTURE_CELLS: [(i32, i32); FIXTURE_CAR_COUNT] = [(10, 3), (8, 2), (12, 4), (9, 5)];
+    /// AC24 — `--cars` is honoured up to grid capacity (closing #41's known
+    /// inconsistency): a short 3-position grid seats `min(cars,
+    /// positions.len())`; a full 6-position-worth request against a
+    /// 4-position grid ([`crate::test_fixtures::ring_track`]'s own default)
+    /// seats exactly the grid's capacity, never the raw `--cars` value.
+    #[test]
+    fn cars_is_honoured_up_to_grid_capacity() {
+        use crate::race::RaceState;
+        use crate::test_fixtures::{ring_track, short_grid_track};
+        use gp_render::BakedTrackGeometry;
 
-    let states: Vec<CarState> = FIXTURE_CELLS
-        .iter()
-        .map(|&(x, y)| CarState { x, y, vx: 0, vy: 0 })
-        .collect();
-    let trails: Vec<Vec<Point>> = states
-        .iter()
-        .map(|state| vec![Point::new(state.x, state.y)])
-        .collect();
-    (states, trails)
-}
+        let short = short_grid_track();
+        let geometry = BakedTrackGeometry::new(&short);
+        let race = RaceState::new(short, geometry, 6, 0);
+        assert_eq!(
+            race.seated(),
+            3,
+            "3-position grid must seat exactly 3, not 6"
+        );
 
-/// [`FIXTURE_CAR_COUNT`] fixture standings, ranked in car-index order (the
-/// player's car, index 0, finishes first) — literal, mirrors
-/// `results_gallery.rs::fixture_standings`'s idiom exactly.
-fn fixture_standings() -> Vec<StandingEntry> {
-    const FIXTURE_STANDINGS: [StandingEntry; FIXTURE_CAR_COUNT] = [
-        StandingEntry {
-            car_index: 0,
-            kind: CarKind::You,
-            rank: 1,
-            finish_time: 38.0,
-        },
-        StandingEntry {
-            car_index: 1,
-            kind: CarKind::Ai,
-            rank: 2,
-            finish_time: 39.6,
-        },
-        StandingEntry {
-            car_index: 2,
-            kind: CarKind::Ai,
-            rank: 3,
-            finish_time: 41.2,
-        },
-        StandingEntry {
-            car_index: 3,
-            kind: CarKind::Ai,
-            rank: 4,
-            finish_time: 42.8,
-        },
-    ];
-    FIXTURE_STANDINGS.to_vec()
+        let full = ring_track();
+        let geometry = BakedTrackGeometry::new(&full);
+        let race = RaceState::new(full, geometry, 6, 0);
+        assert_eq!(
+            race.seated(),
+            4,
+            "4-position grid must seat exactly 4, not 6"
+        );
+    }
 }

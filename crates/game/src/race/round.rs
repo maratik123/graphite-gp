@@ -111,6 +111,13 @@ impl RaceRound {
         self.crashes
     }
 
+    /// The seat about to be polled next (A9's "active" seat for the
+    /// `ShellSession`/HUD — hot-seat play, one shared screen).
+    #[must_use]
+    pub const fn cursor(&self) -> usize {
+        self.cursor
+    }
+
     /// Whether the race has ended: the first finisher's round has been
     /// played out and wrapped (spec § Key decisions).
     #[must_use]

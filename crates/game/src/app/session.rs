@@ -121,6 +121,14 @@ impl GameSession {
         self.round.as_ref()
     }
 
+    /// The currently-landed track's resolved generation seed, if any (A9's
+    /// Lab header `seed <N>` source — pre-D1, still `i32`-truncated at the
+    /// display boundary).
+    #[must_use]
+    pub fn installed_generation_seed(&self) -> Option<u64> {
+        self.installed_seeds.map(|seeds| seeds.generation)
+    }
+
     /// This session's effective seeds for generation attempt `k` (spec §
     /// Seed policy 1 / design § *Seed policy — how the CLI per-source
     /// overrides compose with `M_k`*): `k = 0` uses `config.seeds`
@@ -298,7 +306,7 @@ fn render_generation_failure(failure: &GenerationFailure) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::GameSession;
     use crate::config::GameConfig;
     use gp_core::rng::Seeds;
@@ -491,6 +499,149 @@ mod tests {
                 .turns
                 .is_empty(),
             "Race-again must discard the prior in-memory record (AC13)"
+        );
+    }
+
+    /// A cheap, fast-finishing config for the AC18/AC23 end-to-end drive:
+    /// `cars: 2`, `laps: 1` so the race ends after each seat's first turn.
+    /// `laps: 0` is deliberate, not a domain violation this test skipped
+    /// checking: `GameConfig` is constructed directly here (no `Cli`
+    /// round-trip, so `LAPS_MIN`'s CLI-level floor never applies), and it
+    /// makes the win-detection check (`laps() >= total_laps`) trivially
+    /// true after ANY car's very first ordinary move — including a plain
+    /// `Coast`, always legal at rest. This is what lets the race reach a
+    /// genuine `RaceOver` on a REAL generated track of UNKNOWN shape
+    /// without needing to hand-navigate it (unlike `race::round`'s/`A8`'s
+    /// tests, which control a hand-built fixture track and can rely on its
+    /// known geometry).
+    pub(crate) fn ac18_config() -> GameConfig {
+        GameConfig {
+            race: RaceConfig {
+                cars: 2,
+                laps: 0,
+                v_target: 5,
+                difficulty: Difficulty::Pro,
+            },
+            ..test_config()
+        }
+    }
+
+    /// AC18/AC23's shared end-to-end drive: `Setup -> Generate -> Lab ->
+    /// TestLap -> Race -> (loop to race end) -> Results`, over a REAL
+    /// roster of `config.race.cars` real `PlayerController` seats (not
+    /// stubs — AC23's "a roster of `m` `PlayerController` seats runs the
+    /// AC18 sequence end-to-end" needs the production controller, not a
+    /// test double). `pub(crate)` so `crate`'s `lib.rs` test module (AC23)
+    /// can reuse it without duplicating the drive.
+    ///
+    /// Fast-forwards seat 0's `LapCounter` directly (test-only field
+    /// access — this test is about session/shell WIRING, not replay
+    /// determinism, unlike A8's `replay` tests) so ONE real `East` move
+    /// finishes it; seat 1 just Coasts. Returns the driven session/shell
+    /// for the caller's own assertions.
+    #[cfg_attr(
+        miri,
+        ignore = "runs the gp-gen generation pipeline on a worker thread — a \
+                  multi-second integer sweep whose interpreted wall-clock is \
+                  prohibitive"
+    )]
+    pub(crate) fn drive_ac18_sequence(
+        config: GameConfig,
+    ) -> (GameSession, gp_render::AppShell, crate::controller::Roster) {
+        use crate::controller::player::PlayerController;
+        use crate::controller::{FrameInput, Roster};
+        use crate::race::round::Advance;
+        use gp_core::sim::Action;
+
+        let mut session = GameSession::new(config);
+        let mut shell = gp_render::AppShell::new(config.race);
+        assert_eq!(shell.screen(), gp_render::Screen::Setup);
+
+        session.on_nav(Nav::Generate);
+        shell.apply(Nav::Generate);
+        assert_eq!(shell.screen(), gp_render::Screen::Lab);
+
+        let deadline = std::time::Instant::now()
+            .checked_add(std::time::Duration::from_secs(30))
+            .expect("30s from now does not overflow Instant");
+        loop {
+            session.poll_generation();
+            if session.landed().is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "generation never landed within budget; setup_error={:?}",
+                session.setup_error()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(session.landed().is_some(), "Lab must see a real artifact");
+
+        session.on_nav(Nav::TestLap);
+        shell.apply(Nav::TestLap);
+        assert_eq!(shell.screen(), gp_render::Screen::Race);
+        assert!(session.race().is_some(), "Race must see a real artifact");
+
+        let seated = session.race().map_or(0, |race| race.cars.len());
+        let mut roster = Roster::new();
+        for _ in 0..seated {
+            roster.push(Box::new(PlayerController));
+        }
+
+        // `laps: 0` (see `ac18_config`'s doc) makes ANY ordinary move a
+        // finish -- both seats just Coast (always legal at rest), which
+        // works regardless of the real generated track's actual shape.
+        let mut turns = 0u32;
+        loop {
+            let outcome = session.advance_race(
+                &mut roster,
+                FrameInput {
+                    shell_action: Some(Action::Coast),
+                    key_action: None,
+                },
+            );
+            if matches!(outcome, Some(Advance::RaceOver)) {
+                break;
+            }
+            turns = turns.saturating_add(1);
+            assert!(turns < 50, "AC18 race never ended within budget");
+        }
+        shell.apply(Nav::Finish);
+        assert_eq!(shell.screen(), gp_render::Screen::Results);
+
+        (session, shell, roster)
+    }
+
+    /// AC18 — the full headless sequence, asserting the raised request's
+    /// params came from the live `RaceConfig` + CLI budgets, Lab/Race see
+    /// a real artifact, and Results carries real standings.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "runs the gp-gen generation pipeline on a worker thread — a \
+                  multi-second integer sweep whose interpreted wall-clock is \
+                  prohibitive"
+    )]
+    fn full_sequence_setup_to_results_with_real_artifact_and_standings() {
+        let config = ac18_config();
+        let (session, _shell, roster) = drive_ac18_sequence(config);
+
+        assert_eq!(
+            roster.len(),
+            2,
+            "GenParams.cars must match the live RaceConfig"
+        );
+        let outcome = session
+            .race_outcome()
+            .expect("Results must carry real standings");
+        assert_eq!(outcome.standings.len(), 2);
+        assert!(
+            outcome
+                .standings
+                .iter()
+                .any(|entry| entry.finish_turn.is_some()),
+            "at least one car must have a real finish"
         );
     }
 }
