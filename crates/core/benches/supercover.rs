@@ -44,6 +44,27 @@
 //! that no legal move can produce. A Bresenham variant removing the per-row
 //! division landed within 10% of it and did not close the gap.
 //!
+//! # The axial fast path, also measured and also rejected
+//!
+//! A horizontal chord walked `x`-outer enters an N-step outer loop whose inner
+//! range is a single cell — the worst possible `flat_map` shape, and `[measured]`
+//! ~2× off what a direct run costs. Two ways to fix it were tried; both regress
+//! the general chord, so neither shipped:
+//!
+//! | variant | axial | general |
+//! |---|---|---|
+//! | `enum_axial_xy` (below) — `AxialX`/`AxialY`/`Box` enum, branch-free arms | **2.0–2.7× faster** | **0.53–0.94×** |
+//! | loop-order swap, one type, captured `horizontal` flag | 1.0–1.7× faster | 0.56–0.81× |
+//!
+//! The cause is the same for both, and it is worth not rediscovering: wrapping
+//! `FlatMap` in an enum forwards only `next()`, which **costs `FlatMap`'s internal
+//! `try_fold` specialisation** — exactly what `legal_move`'s `.all()` and
+//! `respawn_cell`'s `.collect()` drive. `try_fold` cannot be overridden on stable
+//! (its `R: Try` bound is unstable), so an enum union cannot give it back;
+//! `Cover3` below forwards `fold` to show that is not enough. The single-type
+//! variant avoids the enum but pays a per-cell branch in the inner closure, which
+//! costs about as much.
+//!
 //! **Do not benchmark through a `Box<dyn Iterator>`.** An early cut unified the two
 //! walk types that way; the per-cell dynamic dispatch suppressed inlining and
 //! *inverted* the verdict, showing the interval walk 1.2–1.8× faster on the same
@@ -75,6 +96,88 @@ use std::hint::black_box;
 //     traversal would silently desync; `impl Iterator` hides the impl today, which
 //     makes it a trap rather than a bug. Removed instead of documented.
 // ---------------------------------------------------------------------------
+
+/// The enum fast path with `Axial` split into `AxialX`/`AxialY`.
+///
+/// Answers a specific design question: does giving each orientation its own
+/// variant — so the per-element `if horizontal` before `Point::new` disappears —
+/// pay for the enum? Both axial arms become branch-free `Map<RangeInclusive<_>>`.
+/// Measured against `scan_plain` and the shipped loop-order swap below.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "same bounded-chord precondition as the shipped supercover"
+)]
+fn supercover_enum_axial_xy(a: Point, b: Point) -> impl Iterator<Item = Point> {
+    let dx = i64::from(b.x) - i64::from(a.x);
+    let dy = i64::from(b.y) - i64::from(a.y);
+
+    if dy == 0 {
+        let fixed = a.y;
+        return Cover3::AxialX((a.x.min(b.x)..=a.x.max(b.x)).map(move |i| Point::new(i, fixed)));
+    }
+    if dx == 0 {
+        let fixed = a.x;
+        return Cover3::AxialY((a.y.min(b.y)..=a.y.max(b.y)).map(move |i| Point::new(fixed, i)));
+    }
+
+    let bound = dx.abs() + dy.abs();
+    Cover3::Box((a.x.min(b.x)..=a.x.max(b.x)).flat_map(move |cx| {
+        (a.y.min(b.y)..=a.y.max(b.y)).filter_map(move |cy| {
+            let cr = dx * (i64::from(cy) - i64::from(a.y)) - dy * (i64::from(cx) - i64::from(a.x));
+            (2 * cr.abs() <= bound).then(|| Point::new(cx, cy))
+        })
+    }))
+}
+
+/// Three-variant union for [`supercover_enum_axial_xy`].
+///
+/// Forwards `fold` as well as `next`, so the comparison is not unfairly rigged by
+/// the *absence* of delegation. `try_fold` — which `.all()` actually drives —
+/// cannot be overridden on stable, and that is the point the measurement makes.
+enum Cover3<A, B, C> {
+    /// Horizontal chord.
+    AxialX(A),
+    /// Vertical chord.
+    AxialY(B),
+    /// General chord.
+    Box(C),
+}
+
+impl<A, B, C, T> Iterator for Cover3<A, B, C>
+where
+    A: Iterator<Item = T>,
+    B: Iterator<Item = T>,
+    C: Iterator<Item = T>,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        match self {
+            Self::AxialX(i) => i.next(),
+            Self::AxialY(i) => i.next(),
+            Self::Box(i) => i.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::AxialX(i) => i.size_hint(),
+            Self::AxialY(i) => i.size_hint(),
+            Self::Box(i) => i.size_hint(),
+        }
+    }
+
+    fn fold<Acc, F>(self, init: Acc, f: F) -> Acc
+    where
+        F: FnMut(Acc, T) -> Acc,
+    {
+        match self {
+            Self::AxialX(i) => i.fold(init, f),
+            Self::AxialY(i) => i.fold(init, f),
+            Self::Box(i) => i.fold(init, f),
+        }
+    }
+}
 
 /// The interval walk: one interval solve per outer row, no per-row division.
 #[allow(
@@ -327,8 +430,21 @@ const ANCHOR: Point = Point::new(101, 97);
 /// and Ф5b's iterative deepening doubles `V_ceil` through `1, 2, 4, 8, 16`. The
 /// spread covers axial, shallow, steep, and exact-diagonal chords, since the
 /// implementation picks its loop axis from `|dx| >= |dy|`.
-const MOVE_VELOCITIES: [(i32, i32); 7] =
-    [(1, 0), (3, 2), (5, -4), (7, 3), (10, 10), (16, 1), (16, 16)];
+const MOVE_VELOCITIES: [(i32, i32); 11] = [
+    // Axial — what the fast path targets.
+    (1, 0),
+    (0, 1),
+    (7, 0),
+    (0, -10),
+    (16, 0),
+    // General — where the extra dispatch must not cost anything.
+    (3, 2),
+    (5, -4),
+    (7, 3),
+    (10, 10),
+    (16, 1),
+    (16, 16),
+];
 
 /// Chord lengths outside the production domain, for the asymptotic comparison.
 const LONG_CHORDS: [(i32, i32); 3] = [(64, 64), (128, 96), (200, 200)];
@@ -392,6 +508,9 @@ fn bench_legal_move_full(c: &mut Criterion) {
         g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover(ANCHOR, black_box(b))));
         });
+        g.bench_with_input(BenchmarkId::new("enum_axial_xy", &id), &b, |bench, &b| {
+            bench.iter(|| legal_move_shape(&d, supercover_enum_axial_xy(ANCHOR, black_box(b))));
+        });
         g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover_interval(ANCHOR, black_box(b))));
         });
@@ -419,6 +538,9 @@ fn bench_legal_move_blocked(c: &mut Criterion) {
         g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover(ANCHOR, black_box(b))));
         });
+        g.bench_with_input(BenchmarkId::new("enum_axial_xy", &id), &b, |bench, &b| {
+            bench.iter(|| legal_move_shape(&d, supercover_enum_axial_xy(ANCHOR, black_box(b))));
+        });
         g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover_interval(ANCHOR, black_box(b))));
         });
@@ -436,6 +558,16 @@ fn bench_respawn_cell(c: &mut Criterion) {
         let id = format!("v=({dx},{dy})");
         g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| respawn_shape(&d, ANCHOR, b, supercover(ANCHOR, black_box(b)).collect()));
+        });
+        g.bench_with_input(BenchmarkId::new("enum_axial_xy", &id), &b, |bench, &b| {
+            bench.iter(|| {
+                respawn_shape(
+                    &d,
+                    ANCHOR,
+                    b,
+                    supercover_enum_axial_xy(ANCHOR, black_box(b)).collect(),
+                )
+            });
         });
         g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
             bench.iter(|| {
@@ -462,6 +594,9 @@ fn bench_long_chords(c: &mut Criterion) {
         let id = format!("d=({dx},{dy})");
         g.bench_with_input(BenchmarkId::new("shipped_scan", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover(ANCHOR, black_box(b))));
+        });
+        g.bench_with_input(BenchmarkId::new("enum_axial_xy", &id), &b, |bench, &b| {
+            bench.iter(|| legal_move_shape(&d, supercover_enum_axial_xy(ANCHOR, black_box(b))));
         });
         g.bench_with_input(BenchmarkId::new("interval_walk", &id), &b, |bench, &b| {
             bench.iter(|| legal_move_shape(&d, supercover_interval(ANCHOR, black_box(b))));

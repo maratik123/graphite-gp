@@ -212,3 +212,18 @@ The measurement above was acted on. `crates/core/src/geom/supercover.rs` ships t
 - **The bench stays as the acceptance test for the next attempt** — it carries the best-known interval walk as a baseline and self-checks it against the shipped walk over an exhaustive window before timing anything, so a drifted baseline fails loudly instead of producing meaningless numbers.
 - **Open, cheap, not taken:** the interval walk's axial fast path beats the scan at `v=(1,0)` (0.61–0.74×) because it skips the per-cell predicate entirely on a chord where it is constant. The same `dx == 0 || dy == 0` early return could be added to the scan.
 - **`.idea/codeStyles/` now pins `FORMAT_TABLES = false`** (taken from the `opt` branch) — the project-level fix for the RustRover markdown-table padding that inflated `INDEX.md` by 160 KB in PR #169.
+
+### Axial fast path for `supercover` — measured and rejected
+
+A horizontal chord walked `x`-outer enters an N-step `flat_map` outer loop whose inner range is a single cell — the worst shape, and `[measured]` ~2× off a direct run. Two fixes were implemented and benched against the plain scan. **Both regress the general chord, so neither shipped.**
+
+| variant | axial chords | general chords |
+|---|---|---|
+| `AxialX`/`AxialY`/`Box` enum, branch-free arms | **2.0–2.7× faster** | **0.53–0.94×** |
+| loop-order swap (one type, captured `horizontal` flag) | 1.0–1.7× faster | 0.56–0.81× |
+
+**Root cause, worth not rediscovering:** wrapping `FlatMap` in an enum forwards only `next()`, which **costs `FlatMap`'s internal `try_fold` specialisation** — precisely what `legal_move`'s `.all()` and `respawn_cell`'s `.collect()` drive. `try_fold` **cannot be overridden on stable** (its `R: Try` bound is unstable), so no enum union can give it back; forwarding `fold` (which `Cover3` in the bench does) is not enough. The single-type variant dodges the enum but pays a per-cell branch inside the inner closure and costs about the same.
+
+The absolute numbers make the trade clear: the axial win is ~15–35 ns per call, the general loss up to ~196 ns (`v=(16,16)`, 252.9 → 448.7 ns) — and general chords are the common case once a car is moving on both axes.
+
+`supercover_enum_axial_xy` is kept in `benches/supercover.rs` as the documented contender, so the next person to have this idea gets the numbers instead of the intuition. The shipped walk stays the plain bounding-box scan.
