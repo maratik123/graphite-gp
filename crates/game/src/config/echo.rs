@@ -10,7 +10,7 @@ const TEMPERATURE_DECIMALS: usize = 2;
 
 /// Renders the resolved configuration for the startup echo (AC18) — a pure
 /// formatter, no I/O, so it is testable without a process or a window.
-pub(crate) fn render_startup_echo(config: &GameConfig) -> String {
+pub fn render_startup_echo(config: &GameConfig) -> String {
     let player_line = format!(
         "graphite-gp: cars {cars}, laps {laps}, V_target {v_target}, difficulty {difficulty} (temperature {temp:.prec$})",
         cars = config.race.cars,

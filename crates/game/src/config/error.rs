@@ -14,7 +14,7 @@ use super::Cli;
 /// per-flag ranges, plus the cross-field invariant `block_size ≥
 /// ⌈cars/2⌉`.
 #[derive(Debug, Error)]
-pub(crate) enum ConfigError {
+pub enum ConfigError {
     /// A `clap` parsing/validation error (unknown flag, missing value,
     /// unparseable value, out-of-range value, unrecognised difficulty).
     #[error(transparent)]
@@ -33,6 +33,14 @@ pub(crate) enum ConfigError {
         /// The derived floor, `GenParams::min_width()`.
         floor: u32,
     },
+    /// `--replay-mode` was given without `--replay` (spec § Replay CLI,
+    /// `AC21d`).
+    #[error("--replay-mode requires --replay")]
+    ReplayModeWithoutReplay,
+    /// `--record` and `--replay` were given together (spec § Replay CLI,
+    /// `AC21d`).
+    #[error("--record cannot be combined with --replay")]
+    RecordWithReplay,
 }
 
 impl ConfigError {
@@ -40,10 +48,12 @@ impl ConfigError {
     /// `clap`-formatted for every variant, including the cross-field one
     /// (via `Cli::command().error(..)`, so its rendering matches `clap`'s
     /// own diagnostics).
-    pub(crate) fn exit(self) -> ! {
+    pub fn exit(self) -> ! {
         match self {
             Self::Cli(err) => err.exit(),
-            other @ Self::BlockSizeBelowWidthFloor { .. } => Cli::command()
+            other @ (Self::BlockSizeBelowWidthFloor { .. }
+            | Self::ReplayModeWithoutReplay
+            | Self::RecordWithReplay) => Cli::command()
                 .error(clap::error::ErrorKind::ValueValidation, other.to_string())
                 .exit(),
         }
@@ -86,7 +96,9 @@ mod tests {
                 assert_eq!(block_size, 2);
                 assert_eq!(floor, 3);
             }
-            other @ ConfigError::Cli(_) => panic!("unexpected variant: {other:?}"),
+            other @ (ConfigError::Cli(_)
+            | ConfigError::ReplayModeWithoutReplay
+            | ConfigError::RecordWithReplay) => panic!("unexpected variant: {other:?}"),
         }
     }
 
@@ -121,5 +133,21 @@ mod tests {
         assert!(text.contains("--block-size 2"), "{text}");
         assert!(text.contains("= 3"), "{text}");
         assert!(text.contains("--cars 6"), "{text}");
+    }
+
+    // ---- `AC21d`: the two replay cross-field errors name both flags ----
+
+    #[test]
+    fn ac21d_replay_mode_without_replay_names_both_flags() {
+        let text = rendered(&["--replay-mode", "headless"]);
+        assert!(text.contains("--replay-mode"), "{text}");
+        assert!(text.contains("--replay"), "{text}");
+    }
+
+    #[test]
+    fn ac21d_record_with_replay_names_both_flags() {
+        let text = rendered(&["--record", "a", "--replay", "b"]);
+        assert!(text.contains("--record"), "{text}");
+        assert!(text.contains("--replay"), "{text}");
     }
 }

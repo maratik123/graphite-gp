@@ -1866,6 +1866,9 @@ dependencies = [
  "gp-core",
  "gp-gen",
  "gp-render",
+ "rand 0.10.2",
+ "rand_xoshiro",
+ "strum",
  "thiserror 2.0.19",
  "winit",
 ]

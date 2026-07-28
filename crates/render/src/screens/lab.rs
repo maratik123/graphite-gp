@@ -79,24 +79,40 @@ const PHASE_NAMES: [&str; 7] = [
 /// A single Ф1–Ф7 generation-pipeline phase's caller-supplied status
 /// (gp-render-local — `gp-render` has no `gp-gen` dependency, spec § Key
 /// decisions).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Declared in ascending severity so the derived [`Ord`] **is** the total
+/// order spec § Phase-status ordering requires (`Pending < Skipped < Ok <
+/// Repair < Failed`, `AC9b`) — no hand-written `cmp` to drift. "Worst across
+/// attempts" is then a plain `max`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PhaseStatus {
+    /// The run is still in flight and this phase has not been reached yet.
+    Pending,
+    /// The run (or attempt) finished without ever executing this phase.
+    Skipped,
     /// The phase completed cleanly.
     Ok,
     /// The phase needed local repair.
     Repair,
+    /// The phase produced a blocking issue on some attempt.
+    Failed,
 }
 
 /// Maps a [`PhaseStatus`] to its status-`Badge` tone + label.
 ///
-/// `Ok` → `Ok`-tone "✓", `Repair` → `Warn`-tone "repair" (spec § Key
-/// decisions). FORCED `const fn` — a pure `match` over `Copy` values is
-/// const-eligible (`clippy::missing_const_for_fn`, nursery = deny).
+/// `Pending` → `Neutral`-tone "…", `Skipped` → `Neutral`-tone "skip", `Ok` →
+/// `Ok`-tone "✓", `Repair` → `Warn`-tone "repair", `Failed` → `Danger`-tone
+/// "failed" (spec § Key decisions). FORCED `const fn` — a pure `match` over
+/// `Copy` values is const-eligible (`clippy::missing_const_for_fn`,
+/// nursery = deny).
 #[must_use]
 pub const fn phase_badge(status: PhaseStatus) -> (BadgeTone, &'static str) {
     match status {
+        PhaseStatus::Pending => (BadgeTone::Neutral, "…"),
+        PhaseStatus::Skipped => (BadgeTone::Neutral, "skip"),
         PhaseStatus::Ok => (BadgeTone::Ok, "✓"),
         PhaseStatus::Repair => (BadgeTone::Warn, "repair"),
+        PhaseStatus::Failed => (BadgeTone::Danger, "failed"),
     }
 }
 
@@ -162,7 +178,13 @@ pub struct LabInput<'a> {
     /// The header validity flag (`VALID`/`INVALID` badge).
     pub valid: bool,
     /// The header `seed <N>` tag value.
-    pub seed: i32,
+    pub seed: u64,
+    /// The grid's seating outcome (issue #43 D2, spec Open question 3), or
+    /// `None` when seating is not yet known. [`header_tag_labels`] only
+    /// renders the "seated N of M" notice when `Some` **and** the grid
+    /// seated fewer cars than requested — a `Some` at `seated == requested`
+    /// is a legitimate no-op input.
+    pub seated: Option<SeatedGrid>,
 }
 
 /// `LabScreen` builder.
@@ -253,7 +275,13 @@ impl<'a> LabScreen<'a> {
             Pos2::new(col_left_rect.max.x, action_rect.min.y - COL_LEFT_GAP),
         );
 
-        let menu_response = draw_header(ui, header_rect, self.input.valid, self.input.seed);
+        let menu_response = draw_header(
+            ui,
+            header_rect,
+            self.input.valid,
+            self.input.seed,
+            self.input.seated,
+        );
         draw_canvas(ui, canvas_rect, self.input.track, self.input.geometry);
         let (regenerate_response, test_lap_response) =
             draw_action_row(ui, action_rect, self.regenerate_icon, self.test_lap_icon);
@@ -270,10 +298,53 @@ impl<'a> LabScreen<'a> {
     }
 }
 
+/// A short grid's seating outcome (issue #43 D2, spec Open question 3):
+/// `seated` cars were actually seated out of `requested`
+/// (`seated <= requested`, AC14's "seat fewer and race" floor).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeatedGrid {
+    /// The number of cars actually seated.
+    pub seated: u32,
+    /// The number of cars requested (`--cars`).
+    pub requested: u32,
+}
+
+/// Formats the header's `Tag` labels: `"seed <N>"` always, plus `"seated N
+/// of M"` when short (issue #43 D1/D2).
+///
+/// `seed` is `u64`, widened from the pre-#43 `i32` so any master seed
+/// round-trips without truncation. The "seated N of M" label appears only
+/// when `seated` is `Some` **and** the grid seated fewer cars than
+/// requested.
+///
+/// Pure formatter, the `oracle_tile_strings` precedent (`:127`) — no
+/// `Ui`/`Context`, so it needs no Miri gate and is directly assertable
+/// without a rendered frame. `draw_header` draws one [`Tag`] per returned
+/// label. An absent (or non-degraded) seating notice allocates nothing
+/// beyond the always-present seed label — the AC17 golden-safety condition
+/// (D2 widens no existing Lab golden fixture, which all construct
+/// `seated: None`).
+#[must_use]
+pub fn header_tag_labels(seed: u64, seated: Option<SeatedGrid>) -> Vec<String> {
+    let mut labels = vec![format!("seed {seed}")];
+    if let Some(SeatedGrid { seated, requested }) = seated
+        && seated < requested
+    {
+        labels.push(format!("seated {seated} of {requested}"));
+    }
+    labels
+}
+
 /// Draws the header band: display-face "Track lab" title, a validity
-/// `Badge`, a `seed <N>` `Tag`, and a right-aligned ghost "← Menu" `Button`
-/// — returns the Menu button's `Response`.
-fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: i32) -> Response {
+/// `Badge`, one `Tag` per [`header_tag_labels`] entry, and a right-aligned
+/// ghost "← Menu" `Button` — returns the Menu button's `Response`.
+fn draw_header(
+    ui: &mut Ui,
+    rect: Rect,
+    valid: bool,
+    seed: u64,
+    seated: Option<SeatedGrid>,
+) -> Response {
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
         ui.horizontal_centered(|ui| {
             let title_font = FontId::new(
@@ -305,9 +376,10 @@ fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: i32) -> Response {
             let label = if valid { "VALID" } else { "INVALID" };
             Badge::new(tone, label).show(ui);
 
-            ui.add_space(HEADER_GAP);
-            let seed_label = format!("seed {seed}");
-            Tag::new(&seed_label).selected(true).show(ui);
+            for label in header_tag_labels(seed, seated) {
+                ui.add_space(HEADER_GAP);
+                Tag::new(&label).selected(true).show(ui);
+            }
 
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 Button::new("← Menu")
@@ -453,7 +525,8 @@ fn draw_right_column(ui: &mut Ui, rect: Rect, track: &TrackArtifact, phases: [Ph
 #[cfg(test)]
 mod tests {
     use super::{
-        LAB_OVERLAYS, PHASE_IDS, PHASE_NAMES, PhaseStatus, oracle_tile_strings, phase_badge,
+        LAB_OVERLAYS, PHASE_IDS, PHASE_NAMES, PhaseStatus, SeatedGrid, header_tag_labels,
+        oracle_tile_strings, phase_badge,
     };
     use crate::widgets::BadgeTone;
     use gp_core::geom::{Corridor, Orient, Point, Side};
@@ -548,6 +621,84 @@ mod tests {
         assert_eq!(
             phase_badge(PhaseStatus::Repair),
             (BadgeTone::Warn, "repair")
+        );
+    }
+
+    /// `AC9b` — `PhaseStatus`'s total order is `Pending < Skipped < Ok <
+    /// Repair < Failed`, asserted pairwise, plus `max` over a mixed sequence
+    /// (including `Ok > Skipped`, the ordering fact spec § Phase-status
+    /// ordering calls out explicitly). Pure `Ord` — no `Context` → ungated.
+    #[test]
+    fn phase_status_total_order_is_declaration_order() {
+        use PhaseStatus::{Failed, Ok, Pending, Repair, Skipped};
+
+        let ascending = [Pending, Skipped, Ok, Repair, Failed];
+        for pair in ascending.windows(2) {
+            assert!(pair[0] < pair[1], "{pair:?} should be strictly ascending");
+        }
+        assert!(Ok > Skipped);
+        assert_eq!(
+            [Skipped, Failed, Ok, Pending].into_iter().max(),
+            Some(Failed)
+        );
+        assert_eq!([Pending, Skipped, Ok].into_iter().max(), Some(Ok));
+    }
+
+    /// `AC15` — `header_tag_labels` is pure `u64` formatting: a value
+    /// exceeding `i32::MAX` (the pre-D1 parameter type) round-trips without
+    /// truncation. Context-free → ungated.
+    #[test]
+    fn header_tag_labels_formats_u64_seed_without_truncation() {
+        assert_eq!(header_tag_labels(42, None), vec!["seed 42".to_owned()]);
+        assert_eq!(
+            header_tag_labels(2_147_483_648, None),
+            vec!["seed 2147483648".to_owned()]
+        );
+    }
+
+    /// `AC14` — the "seated N of M" notice: absent (`None`) and
+    /// not-degraded (`seated == requested`) both yield a **one**-element
+    /// vec (the AC17 golden-safety condition — an absent notice allocates
+    /// nothing beyond the seed label); a genuinely short grid appends the
+    /// second label.
+    #[test]
+    fn header_tag_labels_seated_notice_only_when_short() {
+        assert_eq!(header_tag_labels(42, None), vec!["seed 42".to_owned()]);
+        assert_eq!(
+            header_tag_labels(
+                42,
+                Some(SeatedGrid {
+                    seated: 6,
+                    requested: 6
+                })
+            ),
+            vec!["seed 42".to_owned()]
+        );
+        assert_eq!(
+            header_tag_labels(
+                42,
+                Some(SeatedGrid {
+                    seated: 3,
+                    requested: 6
+                })
+            ),
+            vec!["seed 42".to_owned(), "seated 3 of 6".to_owned()]
+        );
+    }
+
+    /// `AC9b` — the ordering comes from `#[derive(Ord)]`, not a hand-written
+    /// `cmp`. A `rg` scan over this file finds no manual `impl (Partial)?Ord
+    /// for PhaseStatus`.
+    #[test]
+    fn phase_status_has_no_hand_written_ord_impl() {
+        let src = include_str!("lab.rs");
+        // Built from parts so this assertion's own source line doesn't trip
+        // the scan it performs (the AC24 `include_str!` self-match trap).
+        let needle_ord = format!("impl {} for PhaseStatus", "Ord");
+        let needle_partial_ord = format!("impl Partial{} for PhaseStatus", "Ord");
+        assert!(
+            !src.contains(&needle_ord) && !src.contains(&needle_partial_ord),
+            "PhaseStatus must derive Ord/PartialOrd, not hand-implement it"
         );
     }
 }

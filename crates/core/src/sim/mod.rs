@@ -37,7 +37,9 @@ impl CarState {
 /// foundation of every braking-distance argument in the design.
 #[bitflags]
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, strum::VariantArray)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, Debug, strum::VariantArray, strum::Display, strum::EnumString,
+)]
 // `#[bitflags]`-generated code triggers `clippy::use_self` (nursery) against
 // the enum's own declaration span; no `Self`-eligible code exists in this
 // hand-written block.
@@ -1276,5 +1278,18 @@ mod tests {
         let mut lap = LapCounter::new();
         lap.register_move(&sf, Point::new(0, 0), Point::new(5, 0));
         assert_eq!(lap.raw(), -1);
+    }
+
+    #[test]
+    fn action_display_from_str_round_trips_over_every_variant() {
+        // C1 / AC21b: the replay record's per-turn action token is `Action`'s
+        // `Display` output, and the parser reads it back with `FromStr`. Every
+        // variant must round-trip exactly, with no separate token table to drift.
+        use std::str::FromStr;
+
+        for &a in Action::VARIANTS {
+            let token = a.to_string();
+            assert_eq!(Action::from_str(&token), Ok(a));
+        }
     }
 }

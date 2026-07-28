@@ -191,8 +191,16 @@ jobs:
       # wall-clock (>1h and growing) — see #134 for the re-enable plan (gated seed
       # sweeps). Native `cargo test` + `clippy::arithmetic_side_effects = deny` (#48)
       # still cover gp-gen's integer discipline; only the Miri UB pass is dropped.
-      - name: cargo miri test (workspace, gp-gen excluded — #134)
-        run: cargo miri test --workspace --exclude gp-gen
+      # gp-game is excluded on the same cost/ergonomics grounds — see #184. Since
+      # #43 it is the orchestration crate: the generation worker spawns real
+      # threads, the persisted replay format does real file I/O, and the CLI
+      # contract tests spawn the built binary. Each is gateable per test, but the
+      # list would grow with nearly every new test and one missed attribute aborts
+      # the whole crate binary (Miri fails fast on the first unsupported op). The
+      # workspace has zero production `unsafe`, and the crate that most warrants
+      # the UB pass — gp-core — stays in the gate and is green.
+      - name: cargo miri test (workspace, gp-gen — #134 — and gp-game — #184 — excluded)
+        run: cargo miri test --workspace --exclude gp-gen --exclude gp-game
 
   build-pass:
     name: Build

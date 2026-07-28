@@ -7,6 +7,8 @@
 //! visible to `config` (for `GameConfig`'s `TryFrom<Cli>`) and every other
 //! descendant of `config` (`error`'s `Cli::command()`), never outside it.
 
+use std::path::PathBuf;
+
 use clap::Parser;
 use gp_render::screens::{DIFFICULTY_LABELS, Difficulty};
 
@@ -14,8 +16,8 @@ use super::{
     BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, CARS_MAX, CARS_MIN, DEFAULT_BLOCK_SIZE, DEFAULT_CARS,
     DEFAULT_DIFFICULTY_LABEL, DEFAULT_LAPS, DEFAULT_MIN_STRAIGHT, DEFAULT_REPAIR_BUDGET,
     DEFAULT_SEED, DEFAULT_SEED_BUDGET, DEFAULT_V_TARGET, LAPS_MAX, LAPS_MIN, MIN_STRAIGHT_MAX,
-    MIN_STRAIGHT_MIN, REPAIR_BUDGET_MAX, REPAIR_BUDGET_MIN, SEED_BUDGET_MAX, SEED_BUDGET_MIN,
-    V_TARGET_MAX, V_TARGET_MIN,
+    MIN_STRAIGHT_MIN, REPAIR_BUDGET_MAX, REPAIR_BUDGET_MIN, ReplayMode, SEED_BUDGET_MAX,
+    SEED_BUDGET_MIN, V_TARGET_MAX, V_TARGET_MIN,
 };
 
 /// Parses `raw` case-insensitively against [`DIFFICULTY_LABELS`], so
@@ -31,6 +33,13 @@ fn parse_difficulty(raw: &str) -> Result<Difficulty, String> {
                 DIFFICULTY_LABELS.join(", ")
             )
         })
+}
+
+/// Parses `raw` case-insensitively as `"headless"` or `"gui"` (spec §
+/// Replay CLI, the `--difficulty`-style label-parse idiom).
+fn parse_replay_mode(raw: &str) -> Result<ReplayMode, String> {
+    ReplayMode::from_label(raw)
+        .ok_or_else(|| "expected one of headless, gui (case-insensitive)".to_string())
 }
 
 /// The raw `clap`-derived argument struct — `pub(super)` to `config`, never
@@ -106,13 +115,26 @@ pub(super) struct Cli {
         value_parser = clap::value_parser!(u32).range(i64::from(REPAIR_BUDGET_MIN)..=i64::from(REPAIR_BUDGET_MAX)),
     )]
     pub(super) repair_budget: u32,
+    /// Persists the race to `PATH` in the replay text format at race end
+    /// (spec § Replay CLI, `AC21`).
+    #[arg(long)]
+    pub(super) record: Option<PathBuf>,
+    /// Replays a persisted record from `PATH` instead of an interactive
+    /// race (spec § Replay CLI, `AC21`).
+    #[arg(long)]
+    pub(super) replay: Option<PathBuf>,
+    /// `--replay`'s playback mode, `headless` or `gui` (case-insensitive);
+    /// resolves to `gui` when not given. Rejected as a cross-field error
+    /// when given without `--replay` (`AC21d`).
+    #[arg(long, value_parser = parse_replay_mode)]
+    pub(super) replay_mode: Option<ReplayMode>,
 }
 
 #[cfg(test)]
 mod tests {
     use clap::CommandFactory;
 
-    use super::super::{kind, parse};
+    use super::super::{ConfigError, kind, parse, parse_err};
     use super::*;
 
     // ---- AC4: per-flag bounds, player flags ----
@@ -234,10 +256,19 @@ mod tests {
         assert_eq!(kind(&["--seed"]), clap::error::ErrorKind::InvalidValue);
     }
 
-    // ---- AC16 (final, subtask 5): all thirteen flags + nine defaults ----
+    // ---- AC16/`AC21d`: all sixteen flags + nine defaults ----
+    //
+    // C3 re-measured this rather than trusting the design's own guess (a
+    // stale-count trap Groups A/B were both burned by, per the progress
+    // file's carry-forward lesson): `--record`/`--replay` are
+    // `Option<PathBuf>` (no default) and `--replay-mode` is
+    // `Option<ReplayMode>` (no default_value either — it resolves to `gui`
+    // at the `GameConfig` level, not at the raw `Cli` flag level, so it
+    // renders no `[default: ]` in `--help`) — three new flags, **zero** new
+    // defaults, so the count stays 9, only the flag total moves 13 -> 16.
 
     #[test]
-    fn ac16_help_lists_all_thirteen_flags_and_nine_defaults() {
+    fn ac16_help_lists_all_sixteen_flags_and_nine_defaults() {
         let help = Cli::command().render_long_help().to_string();
         for flag in [
             "--cars",
@@ -253,6 +284,9 @@ mod tests {
             "--block-size",
             "--seed-budget",
             "--repair-budget",
+            "--record",
+            "--replay",
+            "--replay-mode",
         ] {
             assert!(help.contains(flag), "{help}");
         }
@@ -325,5 +359,73 @@ mod tests {
             kind(&["--repair-budget", "1025"]),
             clap::error::ErrorKind::ValueValidation
         );
+    }
+
+    // ---- `AC21d`: --record/--replay/--replay-mode ----
+
+    #[test]
+    fn ac21d_replay_mode_defaults_to_gui() {
+        assert_eq!(parse(&[]).replay_mode, ReplayMode::Gui);
+        assert_eq!(
+            parse(&["--replay", "x.replay"]).replay_mode,
+            ReplayMode::Gui
+        );
+    }
+
+    #[test]
+    fn ac21d_replay_mode_parses_case_insensitively() {
+        assert_eq!(
+            parse(&["--replay", "x.replay", "--replay-mode", "headless"]).replay_mode,
+            ReplayMode::Headless
+        );
+        assert_eq!(
+            parse(&["--replay", "x.replay", "--replay-mode", "HEADLESS"]).replay_mode,
+            ReplayMode::Headless
+        );
+        assert_eq!(
+            parse(&["--replay", "x.replay", "--replay-mode", "Gui"]).replay_mode,
+            ReplayMode::Gui
+        );
+    }
+
+    #[test]
+    fn ac21d_replay_mode_rejects_unknown_spelling() {
+        assert_eq!(
+            kind(&["--replay", "x.replay", "--replay-mode", "wizard"]),
+            clap::error::ErrorKind::ValueValidation
+        );
+    }
+
+    #[test]
+    fn ac21d_record_and_replay_round_trip() {
+        let config = parse(&["--record", "out.replay"]);
+        assert_eq!(
+            config.record.as_deref(),
+            Some(std::path::Path::new("out.replay"))
+        );
+        assert_eq!(config.replay, None);
+
+        let config = parse(&["--replay", "in.replay"]);
+        assert_eq!(
+            config.replay.as_deref(),
+            Some(std::path::Path::new("in.replay"))
+        );
+        assert_eq!(config.record, None);
+    }
+
+    #[test]
+    fn ac21d_replay_mode_without_replay_is_a_cross_field_error() {
+        match parse_err(&["--replay-mode", "headless"]) {
+            ConfigError::ReplayModeWithoutReplay => {}
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ac21d_record_with_replay_is_a_cross_field_error() {
+        match parse_err(&["--record", "a", "--replay", "b"]) {
+            ConfigError::RecordWithReplay => {}
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }

@@ -25,7 +25,7 @@ wall derivation from the corridor, and the correctness of legality masks all hol
 | [`crates/gen`](crates/gen)     | **1**  | Track generation — coarse-block ring (infield-first) + local repair, phases Ф1–Ф7. |
 | [`crates/render`](crates/render) | **2**  | Rendering + UX — asphalt and walls derived from `D`. Draw-only: takes `egui` 0.35, never `eframe`/`winit`/`wgpu` on a normal edge. |
 | [`crates/ai`](crates/ai)       | **4**  | AI training — feedforward policy over honest local features, 5-action masked softmax. |
-| [`crates/game`](crates/game)   | **3b** | Game loop / orchestration — the runnable `graphite-gp` binary. Owns the `clap` CLI that parses cars / laps / difficulty / `V_target` / seed + generation tuning into `gp_gen::GenParams` and the AI temperature (#41), and the `Controller` seam + player controller (MovePad + keyboard, legal-mask-masked) that yields `Option<Action>` per car per poll — `None` until the player decides, and every `Some(a)` legal by construction (#42). |
+| [`crates/game`](crates/game)   | **3b** | Game loop / orchestration — the runnable `graphite-gp` binary. Owns the `clap` CLI that parses cars / laps / difficulty / `V_target` / seed + generation tuning into `gp_gen::GenParams` and the AI temperature (#41), the `Controller` seam + player controller (MovePad + keyboard, legal-mask-masked) that yields `Option<Action>` per car per poll — `None` until the player decides, and every `Some(a)` legal by construction (#42) — and the **live game loop** (#43): a per-frame turn/round state machine that scores S/F crossings before collision resolution, plays out the round on a win, drives Setup→Lab→Race→Results off a background generation worker, and records every seat's action into a replay that reproduces a race headless or on screen. |
 
 Dependency edges: `gen → core`, `render → core`, `ai → core`, `game → {core, gen, render}`.
 `core` depends on nothing (pure).
@@ -175,15 +175,15 @@ policy). See the `TODO(<block>)` markers.
 ```sh
 cargo build            # whole workspace
 cargo run -p gp-game   # run the graphite-gp binary
-cargo run -p gp-game -- --help   # the thirteen CLI flags and their defaults
-cargo test             # 724 workspace tests green (150 gp-core; 250 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + shell action forwarding + single-galley paint helper + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 264 gp-gen; 58 gp-game: CLI parse/validate/map + process-level exit contract + controller seam / player controller / keyboard map; 2 doc-tests)
+cargo run -p gp-game -- --help   # the sixteen CLI flags and their defaults
+cargo test             # 820 workspace tests green (159 gp-core; 257 gp-render: design tokens, fonts, tessellation smoke (canary), icon pipeline, core widgets + forms widgets + game HUD widgets + MovePad + track canvas + analytics overlays/notebook grid + setup screen + track lab screen + race screen + results screen + app shell/router + shell action forwarding + single-galley paint helper + pending track view + Setup error slot + five-variant phase status + Lab header labels + Results turn counts + gallery/track/overlay/setup/lab/race/results/app-shell goldens; 269 gp-gen; 133 gp-game: CLI parse/validate/map + process-level exit contract + controller seam / player controller / keyboard map + turn/round state machine + standings + background generation worker + session/seed policy + in-memory and persisted replay + headless and GUI playback + three-layer replay divergence detection; 2 doc-tests)
 ```
 
 MSRV: **Rust 1.97.1**. CI (GitHub Actions, `ubuntu-latest`) runs format, build,
 test, clippy (`-D warnings`), and docs on every push/PR to `main`, plus a
 a Miri lane (Tree Borrows, gated via the `miri-pass` aggregator, #76 — reported,
-but deliberately not a required context while its wall-clock is long, pending
-#134);
+but deliberately not a required context while its wall-clock is long; `gp-gen`
+(#134) and `gp-game` (#184) are excluded from it on cost grounds);
 the workspace lint policy (`clippy::pedantic`/`nursery` =
 `deny`) lives in the root `Cargo.toml` + `clippy.toml` (see
 [`ai-docs/code-style.md`](ai-docs/code-style.md) § Linter posture).

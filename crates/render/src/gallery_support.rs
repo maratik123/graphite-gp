@@ -9,8 +9,8 @@ use crate::widgets::CarKind;
 use crate::{RaceSummary, StandingEntry};
 use std::cell::Cell;
 
-/// The fixed 4-car standings fixture — the JSX exemplar (`Screens.jsx:216-219`
-/// `(38 + k * 1.6).toFixed(1)`), in the JSX's own `car_index == slice
+/// The fixed 4-car standings fixture (issue #43 D3 — turn counts, no longer
+/// the JSX's second-based exemplar), in the JSX's own `car_index == slice
 /// position` order (`k == 0` is `You`, `k > 0` is `Ai`).
 pub(crate) fn fixture_standings() -> [StandingEntry; 4] {
     [
@@ -18,32 +18,33 @@ pub(crate) fn fixture_standings() -> [StandingEntry; 4] {
             car_index: 0,
             kind: CarKind::You,
             rank: 1,
-            finish_time: 38.0,
+            finish_turn: Some(38),
         },
         StandingEntry {
             car_index: 1,
             kind: CarKind::Ai,
             rank: 2,
-            finish_time: 39.6,
+            finish_turn: Some(40),
         },
         StandingEntry {
             car_index: 2,
             kind: CarKind::Ai,
             rank: 3,
-            finish_time: 41.2,
+            finish_turn: Some(41),
         },
         StandingEntry {
             car_index: 3,
             kind: CarKind::Ai,
             rank: 4,
-            finish_time: 42.8,
+            finish_turn: Some(43),
         },
     ]
 }
 
-/// The fixed race summary — the JSX exemplar (`Screens.jsx:225-227`).
+/// The fixed race summary (issue #43 D3 — `fastest_lap` is now a turn
+/// count, no longer the JSX's second-based exemplar).
 pub(crate) const FIXED_SUMMARY: RaceSummary = RaceSummary {
-    fastest_lap: 12.4,
+    fastest_lap: 12,
     tempo: 0.87,
     crashes: 1,
 };

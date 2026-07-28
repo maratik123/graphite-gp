@@ -41,8 +41,11 @@ const V_TARGET_STEP: f32 = 1.0;
 /// Design § *Emission mechanism*: mirrors the crate's widget-response idiom,
 /// where the builder's input value doubles as the emitted output on change.
 #[derive(Clone, Copy, Debug)]
-pub struct SetupScreen {
+pub struct SetupScreen<'a> {
     config: RaceConfig,
+    /// A `GenerationError`'s rendered text (Scope 12) — `None` renders no
+    /// error slot at all, so a non-erroring frame allocates nothing extra.
+    error: Option<&'a str>,
 }
 
 /// The response of [`SetupScreen::show`]: the primary button's `Response`,
@@ -62,11 +65,23 @@ pub struct SetupResponse {
     pub generated: bool,
 }
 
-impl SetupScreen {
-    /// Builds a `SetupScreen` starting from `config`.
+impl<'a> SetupScreen<'a> {
+    /// Builds a `SetupScreen` starting from `config`, with no error slot
+    /// (set one via [`Self::error`]).
     #[must_use]
     pub const fn new(config: RaceConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            error: None,
+        }
+    }
+
+    /// Sets the Setup error slot (Scope 12) — a `GenerationError`'s
+    /// rendered text, or `None` to clear it.
+    #[must_use]
+    pub const fn error(mut self, error: Option<&'a str>) -> Self {
+        self.error = error;
+        self
     }
 
     /// Composes the wordmark block, the inputs `Card`, the primary button,
@@ -179,6 +194,11 @@ impl SetupScreen {
                                 .show(ui)
                         })
                         .inner;
+
+                    if let Some(error) = self.error {
+                        ui.add_space(spacing::SPACE_3);
+                        draw_error(ui, error);
+                    }
 
                     ui.add_space(spacing::SPACE_3);
                     draw_footer(ui);
@@ -352,6 +372,36 @@ fn draw_mono_label(ui: &mut Ui, text: &str) {
     );
 }
 
+/// Draws the centered Setup error slot (Scope 12) — a `GenerationError`'s
+/// rendered `text`, in `DANGER`. Mirrors [`draw_footer`]'s layout shape.
+///
+/// # Panics
+///
+/// Panics at layout time if the caller has not installed
+/// [`crate::fonts::definitions`] first.
+fn draw_error(ui: &mut Ui, text: &str) {
+    ui.vertical_centered(|ui| {
+        let font = FontId::new(
+            typography::FS_XS,
+            FontFamily::Name(crate::fonts::JETBRAINS_MONO_REGULAR.into()),
+        );
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text.to_owned(), font, color::DANGER);
+        let (rect, _response) = ui.allocate_exact_size(
+            egui::vec2(galley.size().x, typography::FS_XS * typography::LH_SNUG),
+            Sense::hover(),
+        );
+        crate::text::paint_galley(
+            ui.painter(),
+            rect.left_top(),
+            Align2::LEFT_TOP,
+            galley,
+            color::DANGER,
+        );
+    });
+}
+
 /// Draws the centered mono footer caption, `TEXT_FAINT`.
 ///
 /// # Panics
@@ -384,8 +434,63 @@ fn draw_footer(ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::assemble;
-    use crate::screens::Difficulty;
+    use super::{SetupScreen, assemble};
+    use crate::screens::{Difficulty, RaceConfig};
+    use egui::epaint::Primitive;
+
+    const FIXED_CONFIG: RaceConfig = RaceConfig {
+        cars: 4,
+        laps: 5,
+        v_target: 7,
+        difficulty: Difficulty::Pro,
+    };
+
+    /// AC11 — the render-side half: a `Some(error)` frame tessellates
+    /// strictly more geometry than the same frame with `None` (the error
+    /// slot's text; Scope 12). The `gp-game` half (`GameSession` clearing
+    /// `setup_error` once a later generation succeeds) lands with A7's
+    /// `app/session.rs`, which does not exist yet.
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "drawing text rasterises glyphs via vello_cpu, whose checked \
+                  u8->u32 pixmap cast panics under Miri's 1-byte allocator \
+                  alignment (TargetAlignmentGreaterAndInputNotAligned)"
+    )]
+    fn error_slot_renders_more_geometry_than_no_error() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::fonts::definitions());
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 620.0),
+            )),
+            ..Default::default()
+        };
+
+        let vertex_count = |error: Option<&str>| {
+            let output = ctx.run_ui(input.clone(), |ui| {
+                let _ = SetupScreen::new(FIXED_CONFIG).error(error).show(ui);
+            });
+            let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
+            primitives
+                .iter()
+                .filter_map(|p| match &p.primitive {
+                    Primitive::Mesh(mesh) => Some(mesh.vertices.len()),
+                    Primitive::Callback(_) => None,
+                })
+                .sum::<usize>()
+        };
+
+        let none_count = vertex_count(None);
+        let some_count = vertex_count(Some("generation failed: seed budget exhausted"));
+
+        assert!(
+            some_count > none_count,
+            "Some(error) frame ({some_count} vertices) did not render more \
+             geometry than the None frame ({none_count} vertices)"
+        );
+    }
 
     /// `AC8a` — happy path: mid-range widget values map through to a matching
     /// `RaceConfig`, including `difficulty → temperature`.
