@@ -79,24 +79,40 @@ const PHASE_NAMES: [&str; 7] = [
 /// A single Ф1–Ф7 generation-pipeline phase's caller-supplied status
 /// (gp-render-local — `gp-render` has no `gp-gen` dependency, spec § Key
 /// decisions).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Declared in ascending severity so the derived [`Ord`] **is** the total
+/// order spec § Phase-status ordering requires (`Pending < Skipped < Ok <
+/// Repair < Failed`, `AC9b`) — no hand-written `cmp` to drift. "Worst across
+/// attempts" is then a plain `max`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PhaseStatus {
+    /// The run is still in flight and this phase has not been reached yet.
+    Pending,
+    /// The run (or attempt) finished without ever executing this phase.
+    Skipped,
     /// The phase completed cleanly.
     Ok,
     /// The phase needed local repair.
     Repair,
+    /// The phase produced a blocking issue on some attempt.
+    Failed,
 }
 
 /// Maps a [`PhaseStatus`] to its status-`Badge` tone + label.
 ///
-/// `Ok` → `Ok`-tone "✓", `Repair` → `Warn`-tone "repair" (spec § Key
-/// decisions). FORCED `const fn` — a pure `match` over `Copy` values is
-/// const-eligible (`clippy::missing_const_for_fn`, nursery = deny).
+/// `Pending` → `Neutral`-tone "…", `Skipped` → `Neutral`-tone "skip", `Ok` →
+/// `Ok`-tone "✓", `Repair` → `Warn`-tone "repair", `Failed` → `Danger`-tone
+/// "failed" (spec § Key decisions). FORCED `const fn` — a pure `match` over
+/// `Copy` values is const-eligible (`clippy::missing_const_for_fn`,
+/// nursery = deny).
 #[must_use]
 pub const fn phase_badge(status: PhaseStatus) -> (BadgeTone, &'static str) {
     match status {
+        PhaseStatus::Pending => (BadgeTone::Neutral, "…"),
+        PhaseStatus::Skipped => (BadgeTone::Neutral, "skip"),
         PhaseStatus::Ok => (BadgeTone::Ok, "✓"),
         PhaseStatus::Repair => (BadgeTone::Warn, "repair"),
+        PhaseStatus::Failed => (BadgeTone::Danger, "failed"),
     }
 }
 
@@ -548,6 +564,42 @@ mod tests {
         assert_eq!(
             phase_badge(PhaseStatus::Repair),
             (BadgeTone::Warn, "repair")
+        );
+    }
+
+    /// `AC9b` — `PhaseStatus`'s total order is `Pending < Skipped < Ok <
+    /// Repair < Failed`, asserted pairwise, plus `max` over a mixed sequence
+    /// (including `Ok > Skipped`, the ordering fact spec § Phase-status
+    /// ordering calls out explicitly). Pure `Ord` — no `Context` → ungated.
+    #[test]
+    fn phase_status_total_order_is_declaration_order() {
+        use PhaseStatus::{Failed, Ok, Pending, Repair, Skipped};
+
+        let ascending = [Pending, Skipped, Ok, Repair, Failed];
+        for pair in ascending.windows(2) {
+            assert!(pair[0] < pair[1], "{pair:?} should be strictly ascending");
+        }
+        assert!(Ok > Skipped);
+        assert_eq!(
+            [Skipped, Failed, Ok, Pending].into_iter().max(),
+            Some(Failed)
+        );
+        assert_eq!([Pending, Skipped, Ok].into_iter().max(), Some(Ok));
+    }
+
+    /// `AC9b` — the ordering comes from `#[derive(Ord)]`, not a hand-written
+    /// `cmp`. A `rg` scan over this file finds no manual `impl (Partial)?Ord
+    /// for PhaseStatus`.
+    #[test]
+    fn phase_status_has_no_hand_written_ord_impl() {
+        let src = include_str!("lab.rs");
+        // Built from parts so this assertion's own source line doesn't trip
+        // the scan it performs (the AC24 `include_str!` self-match trap).
+        let needle_ord = format!("impl {} for PhaseStatus", "Ord");
+        let needle_partial_ord = format!("impl Partial{} for PhaseStatus", "Ord");
+        assert!(
+            !src.contains(&needle_ord) && !src.contains(&needle_partial_ord),
+            "PhaseStatus must derive Ord/PartialOrd, not hand-implement it"
         );
     }
 }
