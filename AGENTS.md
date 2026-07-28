@@ -182,6 +182,8 @@ When adding or editing dependencies in `Cargo.toml`:
 > | `.claude/agents/self-review.md` | `.claude/skills/project-review/SKILL.md` AND `.claude/agents/review-findings.md` (Review group) |
 > | `.claude/skills/interview/SKILL.md` | `.claude/agents/spec-writer.md` (Interview group) |
 > | `.claude/agents/spec-writer.md` | `.claude/skills/interview/SKILL.md` (Interview group) |
+> | `.claude/skills/reflect/SKILL.md` | `.claude/agents/self-reflect.md` (Reflect group) |
+> | `.claude/agents/self-reflect.md` | `.claude/skills/reflect/SKILL.md` (Reflect group) |
 > | `.claude/skills/triage/SKILL.md` | `.claude/agents/triage-runner.md` AND `.claude/skills/next/SKILL.md` (Triage group) |
 > | `.claude/agents/triage-runner.md` | `.claude/skills/triage/SKILL.md` AND `.claude/skills/next/SKILL.md` (Triage group) |
 > | `.claude/skills/next/SKILL.md` | `.claude/skills/triage/SKILL.md` AND `.claude/agents/triage-runner.md` (Triage group) |
