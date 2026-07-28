@@ -1,4 +1,4 @@
-//! The real `eframe::App` glue (issue #43, A9).
+//! The real `eframe::App` glue (issue #43, A9; `AppMode`/playback, C5).
 //!
 //! Replaces the hand-built fixture wiring (A2) with
 //! [`session::GameSession`]-backed data. Every fixture constructor A2
@@ -17,10 +17,31 @@ use session::GameSession;
 
 use crate::controller::player::PlayerController;
 use crate::controller::{FrameInput, Roster, keys};
+use crate::race::standings::RaceOutcome;
+use crate::replay::playback::{PLAYBACK_TURN_INTERVAL, PlaybackDriver};
 
-/// The real app shell, driven by a live [`GameSession`] (AC18, AC23, AC24)
-/// — a player-only roster (`m` [`PlayerController`] seats, hot-seat on one
-/// screen, AC23) end-to-end from generation to Results.
+/// Which of the two loops [`GraphiteGpApp`] is currently driving.
+///
+/// C5, spec § Playback pacing: `Interactive` is today's
+/// `GameSession`-backed race (unchanged); `Playback` drives a
+/// [`PlaybackDriver`] one turn per [`PLAYBACK_TURN_INTERVAL`] instead,
+/// with no controller input accepted (transport controls —
+/// pause/step/scrub/speed — are explicitly out of scope).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AppMode {
+    /// The ordinary `GameSession`-driven interactive race.
+    Interactive,
+    /// A `--replay-mode gui` playback (spec § Replay CLI).
+    Playback,
+}
+
+/// The real app shell, driven by a live [`GameSession`].
+///
+/// AC18, AC23, AC24 — a player-only roster (`m` [`PlayerController`]
+/// seats, hot-seat on one screen, AC23) end-to-end from generation to
+/// Results. `--replay-mode gui` (C5) instead drives a [`PlaybackDriver`],
+/// with [`AppMode`] selecting which loop [`eframe::App::ui`] advances this
+/// frame.
 pub struct GraphiteGpApp {
     /// The router owning `Screen`/`RaceConfig`/`Overlays`/`has_generated`.
     shell: AppShell,
@@ -34,19 +55,66 @@ pub struct GraphiteGpApp {
     /// (design § *The loop is a per-frame state machine*) fires exactly
     /// once, not every frame after the race ends.
     finished_transitioned: bool,
+    /// Which loop this frame drives (C5).
+    mode: AppMode,
+    /// The playback driver, `Some` only in [`AppMode::Playback`].
+    playback: Option<PlaybackDriver>,
 }
 
 impl GraphiteGpApp {
     /// Builds the app shell over a fresh, empty [`GameSession`], seeded by
-    /// the CLI-derived `config` (issue #41).
+    /// the CLI-derived `config` (issue #41). When `config.replay` is `Some`
+    /// and `config.replay_mode` is `Gui` (C5), attempts to load that
+    /// persisted record into a [`PlaybackDriver`] and starts in
+    /// [`AppMode::Playback`] instead — a load failure (unreadable file,
+    /// malformed record, track regeneration failure) is reported to stderr
+    /// and falls back to the ordinary [`AppMode::Interactive`] session
+    /// (there is no Setup-screen error slot to route a *pre-window* load
+    /// failure into, unlike a live `GenerationFailure`, which `poll_generation`
+    /// surfaces mid-session).
     #[must_use]
     pub fn new(config: crate::config::GameConfig) -> Self {
+        if let (Some(path), crate::config::ReplayMode::Gui) = (&config.replay, config.replay_mode) {
+            match Self::load_playback(path) {
+                Ok(playback) => {
+                    let mut shell = AppShell::new(config.race);
+                    shell.apply(Nav::Generate);
+                    shell.apply(Nav::TestLap);
+                    return Self {
+                        shell,
+                        session: GameSession::new(config),
+                        roster: Roster::new(),
+                        finished_transitioned: false,
+                        mode: AppMode::Playback,
+                        playback: Some(playback),
+                    };
+                }
+                Err(message) => {
+                    use std::io::Write as _;
+                    let _ = writeln!(std::io::stderr(), "graphite-gp: {message}");
+                }
+            }
+        }
+
         Self {
             shell: AppShell::new(config.race),
             session: GameSession::new(config),
             roster: Roster::new(),
             finished_transitioned: false,
+            mode: AppMode::Interactive,
+            playback: None,
         }
+    }
+
+    /// Reads and parses `path`, then builds a [`PlaybackDriver`] over it
+    /// (regenerating the track once, synchronously — the same one-time cost
+    /// `PlaybackDriver::new` itself documents).
+    fn load_playback(path: &std::path::Path) -> Result<PlaybackDriver, String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|err| format!("failed to read --replay file {}: {err}", path.display()))?;
+        let (file_config, record) =
+            crate::replay::format::parse_record(&text).map_err(|err| err.to_string())?;
+        PlaybackDriver::new(&file_config, &record).map_err(|err| err.to_string())
     }
 
     /// Rebuilds `self.roster` to exactly the current race's seated car
@@ -76,49 +144,138 @@ impl GraphiteGpApp {
     }
 
     /// Assembles this frame's `ShellSession` render inputs from the
-    /// current race (if any) — cars, the active seat, laps done, and the
-    /// rank-ordered standings/summary (converted from [`RaceOutcome`]'s
-    /// native `u32` turn counts to today's `f32` shape; D3 deletes these
-    /// casts once `results.rs` itself moves to turn-count labels).
-    #[allow(
-        clippy::cast_precision_loss,
-        reason = "turn counts are realistically tiny relative to f32's 24-bit \
-                  exact-integer range; a temporary A9 boundary cast, deleted by D3"
-    )]
+    /// current race (if any) — the interactive path's own `outcome`
+    /// source, `session.race_outcome()`. Delegates to
+    /// [`standings_and_summary`], shared with [`Self::ui_playback`] (C5).
     fn results_view(&self) -> (Vec<StandingEntry>, RaceSummary) {
-        let Some(outcome) = self.session.race_outcome() else {
-            return (
-                Vec::new(),
-                RaceSummary {
-                    fastest_lap: 0.0,
-                    tempo: 0.0,
-                    crashes: 0,
-                },
-            );
-        };
-        let standings = outcome
-            .standings
-            .iter()
-            .map(|entry| StandingEntry {
-                car_index: entry.car_index,
-                kind: CarKind::You,
-                rank: entry.rank,
-                finish_time: entry.finish_turn.map_or(0.0, |turn| turn as f32),
-            })
-            .collect();
-        let summary = RaceSummary {
-            fastest_lap: outcome.fastest_lap as f32,
-            tempo: outcome.tempo,
-            crashes: outcome.crashes,
-        };
-        (standings, summary)
+        standings_and_summary(self.session.race_outcome())
     }
+
+    /// [`AppMode::Playback`]'s per-frame body (C5): ticks the
+    /// [`PlaybackDriver`] at most once per [`PLAYBACK_TURN_INTERVAL`],
+    /// renders the SAME `Race`/`Results` screens the interactive path uses
+    /// (sourced from the driver instead of [`GameSession`]), and accepts
+    /// no controller input — transport controls (pause/step/scrub/speed)
+    /// are explicitly out of scope (spec § Playback pacing).
+    fn ui_playback(&mut self, ui: &mut egui::Ui) {
+        // `request_repaint_after`, not a bare `request_repaint` (unlike the
+        // interactive pending-generation path): playback has a known next
+        // event time, so it need not busy-repaint every frame.
+        ui.ctx().request_repaint_after(PLAYBACK_TURN_INTERVAL);
+
+        let Some(playback) = self.playback.as_mut() else {
+            return;
+        };
+        let _ = playback.tick(std::time::Instant::now());
+
+        let race = playback.race();
+        let round = playback.round();
+
+        let cars: Vec<CarState> = race.cars.iter().map(|car| car.state).collect();
+        let trails: Vec<&[gp_core::geom::Point]> =
+            race.cars.iter().map(|car| car.trail.as_slice()).collect();
+        let car_renders: Vec<CarRender<'_>> = cars
+            .iter()
+            .zip(&trails)
+            .enumerate()
+            .map(|(index, (&state, trail))| CarRender::new(state, index, trail, true, 0.0))
+            .collect();
+
+        let active = round.cursor();
+        let laps_done = race.cars.get(active).map_or(0, |car| car.laps.laps());
+        let total_laps = round.total_laps();
+
+        let outcome = RaceOutcome::from_race(race, round.crashes());
+        let (standings, summary) = standings_and_summary(Some(outcome));
+
+        let session_view = ShellSession {
+            track: TrackView::Ready {
+                track: &race.track,
+                geometry: &race.geometry,
+            },
+            setup_error: None,
+            cars: &car_renders,
+            reduced_motion: false,
+            active,
+            laps_done,
+            total_laps,
+            // Playback regenerates its track synchronously, once, before
+            // this loop ever starts (`Self::load_playback`) — there is no
+            // in-flight generation to observe, so every phase reads as the
+            // A9-era interim placeholder the interactive path used before
+            // B3 wired the real worker aggregate.
+            phases: [gp_render::PhaseStatus::Ok; 7],
+            valid: true,
+            // Not wired: `PlaybackDriver` does not carry the file's
+            // `master`/generation seed for display. A known, cosmetic gap
+            // (the Lab header's `seed <N>` tag would read `0`), not a
+            // functional one — playback never re-generates or re-derives
+            // anything from this value. Flagged as a follow-up alongside
+            // the transport controls § Playback pacing already defers.
+            seed: 0,
+            standings: &standings,
+            summary,
+        };
+
+        let _ = self.shell.show(ui, session_view);
+
+        let race_over = round.is_race_over();
+        if race_over && !self.finished_transitioned {
+            self.shell.apply(Nav::Finish);
+            self.finished_transitioned = true;
+        }
+    }
+}
+
+/// Converts a [`RaceOutcome`] (native `u32` turn counts) into today's
+/// `f32`-shaped `gp-render` boundary types — shared by
+/// [`GraphiteGpApp::results_view`] (interactive) and
+/// [`GraphiteGpApp::ui_playback`] (C5). `None` (no race started/finished
+/// yet) renders as an empty, all-zero result. D3 deletes these casts once
+/// `results.rs` itself moves to turn-count labels.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "turn counts are realistically tiny relative to f32's 24-bit exact-integer \
+              range; a temporary A9 boundary cast, deleted by D3"
+)]
+fn standings_and_summary(outcome: Option<RaceOutcome>) -> (Vec<StandingEntry>, RaceSummary) {
+    let Some(outcome) = outcome else {
+        return (
+            Vec::new(),
+            RaceSummary {
+                fastest_lap: 0.0,
+                tempo: 0.0,
+                crashes: 0,
+            },
+        );
+    };
+    let standings = outcome
+        .standings
+        .iter()
+        .map(|entry| StandingEntry {
+            car_index: entry.car_index,
+            kind: CarKind::You,
+            rank: entry.rank,
+            finish_time: entry.finish_turn.map_or(0.0, |turn| turn as f32),
+        })
+        .collect();
+    let summary = RaceSummary {
+        fastest_lap: outcome.fastest_lap as f32,
+        tempo: outcome.tempo,
+        crashes: outcome.crashes,
+    };
+    (standings, summary)
 }
 
 impl eframe::App for GraphiteGpApp {
     // Not `update` — `eframe` 0.35's `App` trait has no such method; `ui` is
     // the required call, `logic` is the optional pre-paint hook (unused here).
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.mode == AppMode::Playback {
+            self.ui_playback(ui);
+            return;
+        }
+
         self.session.poll_generation();
         if self.session.landed().is_none() {
             // Scope 6 — the UI keeps painting and requests repaints while a

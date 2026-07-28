@@ -118,6 +118,16 @@ impl RaceRound {
         self.cursor
     }
 
+    /// The configured lap count a car must reach to finish (C5 — GUI
+    /// playback's HUD needs this to render "laps done / total", the same
+    /// value the interactive path already reads off `GameConfig` directly;
+    /// playback has no `GameConfig` on hand per frame, only this
+    /// `RaceRound`).
+    #[must_use]
+    pub const fn total_laps(&self) -> i32 {
+        self.total_laps
+    }
+
     /// Whether the race has ended: the first finisher's round has been
     /// played out and wrapped (spec § Key decisions).
     #[must_use]
@@ -734,5 +744,12 @@ mod tests {
             1,
             "no extra round after the finishing round wraps"
         );
+    }
+
+    /// C5 — `total_laps()` returns exactly the value `new` was built with.
+    #[test]
+    fn total_laps_returns_the_configured_value() {
+        let round = RaceRound::new(5);
+        assert_eq!(round.total_laps(), 5);
     }
 }

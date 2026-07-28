@@ -1,5 +1,6 @@
-//! The headless replay runner (issue #43, C4, spec § Replay CLI, design §
-//! *How AC21's record is produced*).
+//! The headless replay runner + GUI playback driver (issue #43, C4/C5,
+//! spec § Replay CLI / § Playback pacing, design § *How AC21's record is
+//! produced* / *Playback interval — 250 ms*).
 //!
 //! [`run_headless_race`] is the **one** entry point that drives a race
 //! without a window — the same function both a producing caller (a
@@ -10,6 +11,14 @@
 //! *defined* here and *re-exported* from `replay::mod` as
 //! `pub use playback::run_headless_race;`, so its single public path is
 //! `gp_game::replay::run_headless_race`.
+//!
+//! [`PlaybackClock`]/[`PlaybackDriver`] (C5) are the `--replay-mode gui`
+//! counterpart: the same [`RaceRound`] loop over the same
+//! [`ReplayController`] seats, but gated one turn per real-time interval
+//! instead of run-to-completion — the advance predicate
+//! ([`PlaybackClock::tick`]) is pure and takes `now` as a parameter, so
+//! `AC21c` tests it headlessly with a synthetic clock: no sleeping, no
+//! `egui::Context`, no Miri gate.
 
 use crate::config::GameConfig;
 use crate::controller::{FrameInput, Roster};
@@ -21,6 +30,7 @@ use crate::replay::{FinalCarState, Recorder, ReplayController, ReplayRecord};
 use gp_render::BakedTrackGeometry;
 use std::io::Write as _;
 use std::path::Path;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 /// Errors [`run_headless_race`] can fail with — kept separate from
@@ -205,6 +215,127 @@ fn report_replay_error(err: &ReplayError) {
     report_error(&err.to_string());
 }
 
+/// The GUI playback advance interval: one turn every 250 ms.
+///
+/// Design KD2, spec § Playback pacing — 4 turns/second. A representative
+/// race is ~10 turns/lap × 5 laps × 4 seats ≈ 200 turns ≈ 50 s of
+/// playback — long enough to follow individual moves, short enough to
+/// watch end-to-end. Flagged (design § Playback pacing) as the natural
+/// first follow-up to tune if it proves too fast or too slow; transport
+/// controls (pause / step / scrub / speed) stay explicitly out of scope.
+pub const PLAYBACK_TURN_INTERVAL: Duration = Duration::from_millis(250);
+
+/// A pure "has [`PLAYBACK_TURN_INTERVAL`] elapsed" predicate (`AC21c`).
+///
+/// Takes `now` as a parameter rather than reading `Instant::now()`
+/// internally, so it is testable headlessly with a synthetic clock: no
+/// sleeping, no `egui::Context`, no Miri gate.
+#[derive(Debug, Default)]
+pub struct PlaybackClock {
+    /// The instant of the last tick that returned `true`, or the instant
+    /// of construction/first tick if none has yet.
+    last: Option<Instant>,
+}
+
+impl PlaybackClock {
+    /// A fresh clock. Its very first [`Self::tick`] call always seeds the
+    /// reference instant and returns `false` — nothing has elapsed yet
+    /// relative to a clock that has never ticked.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { last: None }
+    }
+
+    /// `true` iff at least [`PLAYBACK_TURN_INTERVAL`] has elapsed since
+    /// the last `true` (or since construction, for the first call) —
+    /// advances at most once per call, and never fires twice for the same
+    /// `now` (the immediately following call at an unchanged `now` has
+    /// zero elapsed time, which is `< PLAYBACK_TURN_INTERVAL`).
+    pub fn tick(&mut self, now: Instant) -> bool {
+        let Some(last) = self.last else {
+            self.last = Some(now);
+            return false;
+        };
+        if now.saturating_duration_since(last) >= PLAYBACK_TURN_INTERVAL {
+            self.last = Some(now);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Drives a persisted [`ReplayRecord`] on screen, one turn per
+/// [`PlaybackClock`] tick.
+///
+/// `AC21c` — the GUI counterpart to [`run_headless_race`]'s
+/// run-to-completion loop, over the exact same [`RaceRound`] machinery and
+/// [`ReplayController`] seats.
+///
+/// Regenerates the track once, at construction — the same one-time cost
+/// [`run_headless_race`] and `GameSession`'s own background worker both
+/// pay, here paid synchronously since playback has no interactive
+/// Setup/Lab window to cover it. A background-worker playback load is a
+/// natural follow-up (same footing as the transport controls § Playback
+/// pacing already flags as out of scope for this pass).
+pub struct PlaybackDriver {
+    race: RaceState,
+    round: RaceRound,
+    roster: Roster,
+    clock: PlaybackClock,
+}
+
+impl PlaybackDriver {
+    /// Builds a fresh driver over `record`, regenerating its track from
+    /// `config`.
+    ///
+    /// # Errors
+    /// [`HeadlessError::Generation`] if the regenerated track never
+    /// accepts.
+    pub fn new(config: &GameConfig, record: &ReplayRecord) -> Result<Self, HeadlessError> {
+        let track = gp_gen::generate(config.to_gen_params(), &mut ())?;
+        let geometry = BakedTrackGeometry::new(&track);
+        let mut roster = Roster::new();
+        for seat in 0..record.finals.len() {
+            roster.push(Box::new(ReplayController::for_seat(record, seat)));
+        }
+        let race = RaceState::new(track, geometry, config.race.cars, config.seeds.collision);
+        let round = RaceRound::new(config.total_laps());
+        Ok(Self {
+            race,
+            round,
+            roster,
+            clock: PlaybackClock::new(),
+        })
+    }
+
+    /// Advances at most one turn, and only if [`PlaybackClock::tick`]
+    /// fires for `now` — [`Advance::Pending`] on every "not yet" frame,
+    /// mirroring [`RaceRound::advance`]'s own "ask again next frame"
+    /// contract (so a caller's per-frame call site needs no branching
+    /// between the two).
+    pub fn tick(&mut self, now: Instant) -> Advance {
+        if !self.clock.tick(now) {
+            return Advance::Pending;
+        }
+        self.round
+            .advance(&mut self.race, &mut self.roster, FrameInput::default())
+    }
+
+    /// The current race state, for rendering (cars, trails, track).
+    #[must_use]
+    pub const fn race(&self) -> &RaceState {
+        &self.race
+    }
+
+    /// The current turn/round cursor, for rendering (active seat, laps
+    /// done) and race-over detection.
+    #[must_use]
+    pub const fn round(&self) -> &RaceRound {
+        &self.round
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{HeadlessError, run_headless_race};
@@ -295,5 +426,92 @@ mod tests {
 
         let result = run_headless_race(&config, roster, 4);
         assert!(matches!(result, Err(HeadlessError::Diverged)));
+    }
+
+    // ---- AC21c: PlaybackClock ----
+
+    #[test]
+    fn playback_clock_ticks_true_exactly_once_per_elapsed_interval() {
+        use super::{PLAYBACK_TURN_INTERVAL, PlaybackClock};
+        use std::time::{Duration, Instant};
+
+        let t0 = Instant::now();
+        let mut clock = PlaybackClock::new();
+
+        assert!(
+            !clock.tick(t0),
+            "the first tick only seeds the reference instant"
+        );
+        let just_short = (t0 + PLAYBACK_TURN_INTERVAL)
+            .checked_sub(Duration::from_millis(1))
+            .expect("t0 + interval - 1ms must not underflow Instant");
+        assert!(
+            !clock.tick(just_short),
+            "1 ms short of the interval must not fire"
+        );
+        assert!(
+            clock.tick(t0 + PLAYBACK_TURN_INTERVAL),
+            "exactly the interval elapsed must fire"
+        );
+        assert!(
+            !clock.tick(t0 + PLAYBACK_TURN_INTERVAL),
+            "the immediately following tick at the SAME instant must not fire again"
+        );
+    }
+
+    #[test]
+    fn playback_clock_fires_again_after_a_second_full_interval() {
+        use super::{PLAYBACK_TURN_INTERVAL, PlaybackClock};
+        use std::time::Instant;
+
+        let t0 = Instant::now();
+        let mut clock = PlaybackClock::new();
+        assert!(!clock.tick(t0));
+        assert!(clock.tick(t0 + PLAYBACK_TURN_INTERVAL));
+        assert!(clock.tick(t0 + PLAYBACK_TURN_INTERVAL * 2));
+    }
+
+    // ---- AC21c: PlaybackDriver reaches the same final state as the
+    // headless runner ----
+
+    #[cfg_attr(
+        miri,
+        ignore = "runs the gp-gen generation pipeline (twice: once to produce the \
+                  record, once to regenerate for playback) — a multi-second integer \
+                  sweep whose interpreted wall-clock is prohibitive"
+    )]
+    #[test]
+    fn playback_driver_reaches_the_same_final_state_as_the_headless_runner() {
+        use super::{PLAYBACK_TURN_INTERVAL, PlaybackDriver};
+        use std::time::Instant;
+
+        let config = cheap_config();
+        let mut roster = Roster::new();
+        roster.push(Box::new(AlwaysCoast));
+        roster.push(Box::new(AlwaysCoast));
+        let (_, record) = run_headless_race(&config, roster, 4).expect("cheap config must accept");
+
+        let mut driver = PlaybackDriver::new(&config, &record).expect("cheap config must accept");
+        let mut now = Instant::now();
+        // One extra tick beyond `total_processed_turns` to exercise the
+        // "nothing left to advance" tail without asserting on it.
+        for _ in 0..=record.total_processed_turns {
+            now += PLAYBACK_TURN_INTERVAL;
+            let _ = driver.tick(now);
+        }
+
+        let driven_finals: Vec<_> = driver
+            .race()
+            .cars
+            .iter()
+            .enumerate()
+            .map(|(seat, car)| crate::replay::FinalCarState {
+                seat,
+                state: car.state,
+                lap_raw: car.laps.raw(),
+            })
+            .collect();
+        assert_eq!(driven_finals, record.finals);
+        assert_eq!(driver.round().crashes(), 0);
     }
 }
