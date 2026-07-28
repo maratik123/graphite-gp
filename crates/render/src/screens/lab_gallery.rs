@@ -26,7 +26,7 @@ const FIXED_PHASES: [PhaseStatus; 7] = [
 ];
 
 /// The fixed header seed the golden/interaction tests render.
-const FIXED_SEED: i32 = 42;
+const FIXED_SEED: u64 = 42;
 
 /// A `TrackArtifact` fixture: the shared chunky rounded-rect ring
 /// ([`scene_track`]) with [`scene_metrics`]-populated `speed_heatmap` +

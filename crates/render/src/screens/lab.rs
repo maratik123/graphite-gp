@@ -178,7 +178,7 @@ pub struct LabInput<'a> {
     /// The header validity flag (`VALID`/`INVALID` badge).
     pub valid: bool,
     /// The header `seed <N>` tag value.
-    pub seed: i32,
+    pub seed: u64,
 }
 
 /// `LabScreen` builder.
@@ -286,10 +286,23 @@ impl<'a> LabScreen<'a> {
     }
 }
 
+/// Formats the header's `Tag` labels: `"seed <N>"` (issue #43 D1 — `seed` is
+/// `u64`, widened from the pre-#43 `i32` so any master seed round-trips
+/// without truncation).
+///
+/// Pure formatter, the `oracle_tile_strings` precedent (`:127`) — no
+/// `Ui`/`Context`, so it needs no Miri gate and is directly assertable
+/// without a rendered frame. `draw_header` draws one [`Tag`] per returned
+/// label.
+#[must_use]
+pub fn header_tag_labels(seed: u64) -> Vec<String> {
+    vec![format!("seed {seed}")]
+}
+
 /// Draws the header band: display-face "Track lab" title, a validity
-/// `Badge`, a `seed <N>` `Tag`, and a right-aligned ghost "← Menu" `Button`
-/// — returns the Menu button's `Response`.
-fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: i32) -> Response {
+/// `Badge`, one `Tag` per [`header_tag_labels`] entry, and a right-aligned
+/// ghost "← Menu" `Button` — returns the Menu button's `Response`.
+fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: u64) -> Response {
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
         ui.horizontal_centered(|ui| {
             let title_font = FontId::new(
@@ -321,9 +334,10 @@ fn draw_header(ui: &mut Ui, rect: Rect, valid: bool, seed: i32) -> Response {
             let label = if valid { "VALID" } else { "INVALID" };
             Badge::new(tone, label).show(ui);
 
-            ui.add_space(HEADER_GAP);
-            let seed_label = format!("seed {seed}");
-            Tag::new(&seed_label).selected(true).show(ui);
+            for label in header_tag_labels(seed) {
+                ui.add_space(HEADER_GAP);
+                Tag::new(&label).selected(true).show(ui);
+            }
 
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 Button::new("← Menu")
@@ -469,7 +483,8 @@ fn draw_right_column(ui: &mut Ui, rect: Rect, track: &TrackArtifact, phases: [Ph
 #[cfg(test)]
 mod tests {
     use super::{
-        LAB_OVERLAYS, PHASE_IDS, PHASE_NAMES, PhaseStatus, oracle_tile_strings, phase_badge,
+        LAB_OVERLAYS, PHASE_IDS, PHASE_NAMES, PhaseStatus, header_tag_labels, oracle_tile_strings,
+        phase_badge,
     };
     use crate::widgets::BadgeTone;
     use gp_core::geom::{Corridor, Orient, Point, Side};
@@ -585,6 +600,18 @@ mod tests {
             Some(Failed)
         );
         assert_eq!([Pending, Skipped, Ok].into_iter().max(), Some(Ok));
+    }
+
+    /// Scope 14/`AC15` — `header_tag_labels` is pure `u64` formatting: a
+    /// value exceeding `i32::MAX` (the pre-D1 parameter type) round-trips
+    /// without truncation. Context-free → ungated.
+    #[test]
+    fn header_tag_labels_formats_u64_seed_without_truncation() {
+        assert_eq!(header_tag_labels(42), vec!["seed 42".to_owned()]);
+        assert_eq!(
+            header_tag_labels(2_147_483_648),
+            vec!["seed 2147483648".to_owned()]
+        );
     }
 
     /// `AC9b` — the ordering comes from `#[derive(Ord)]`, not a hand-written

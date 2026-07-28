@@ -321,16 +321,7 @@ impl eframe::App for GraphiteGpApp {
 
         let (standings, summary) = self.results_view();
 
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_possible_wrap,
-            reason = "display-only Lab header seed, pre-D1 (still i32); D1 \
-                      widens ShellSession::seed to u64 and removes this cast"
-        )]
-        let seed = self
-            .session
-            .installed_generation_seed()
-            .map_or(0, |seed| seed as i32);
+        let seed = self.session.installed_generation_seed().unwrap_or(0);
 
         let session_view = ShellSession {
             track: track_view,

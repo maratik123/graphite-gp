@@ -408,7 +408,7 @@ pub struct ShellSession<'a> {
     /// The header validity flag — `Lab`.
     pub valid: bool,
     /// The header `seed <N>` tag value — `Lab`.
-    pub seed: i32,
+    pub seed: u64,
     /// The rank-ordered standings slice — `Results`.
     pub standings: &'a [StandingEntry],
     /// The race summary metrics — `Results`.
