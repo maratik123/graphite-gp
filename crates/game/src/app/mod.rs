@@ -450,4 +450,99 @@ mod tests {
             "4-position grid must seat exactly 4, not 6"
         );
     }
+
+    /// AC10's `gp-game`-side half — a structural scan mirroring
+    /// [`no_fixture_identifiers_remain_in_main_or_app_mod`]'s `code_lines`
+    /// idiom: no production (non-`#[cfg(test)]`) `gp-game` source constructs
+    /// a `TrackArtifact` struct literal. `gp-game` only ever *receives* a
+    /// `TrackArtifact` — from `crate::gen_worker::Worker::poll` (real generation) or
+    /// `GameSession::landed`/`spawn_race` (pass-through) — never builds a
+    /// placeholder one itself; the only in-crate construction sites are the
+    /// `#[cfg(test)]`-gated `controller::tests::fixture_track` and the
+    /// `#![cfg(test)]` `test_fixtures` module, neither of which reaches this
+    /// scan (this test's own doc comment names the forbidden pattern, hence
+    /// reusing the comment-stripping `code_lines` idiom rather than a naive
+    /// `str::contains` over `include_str!`).
+    #[test]
+    fn no_placeholder_track_artifact_constructed_in_production_gp_game() {
+        fn code_lines(src: &str) -> String {
+            let mut out = String::new();
+            for line in src.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if trimmed.starts_with("///")
+                    || trimmed.starts_with("//!")
+                    || trimmed.starts_with("//")
+                {
+                    continue;
+                }
+                if trimmed.starts_with("use ") {
+                    continue;
+                }
+                out.push_str(line);
+                out.push('\n');
+            }
+            out
+        }
+
+        let haystack = code_lines(include_str!("../main.rs"))
+            + &code_lines(include_str!("mod.rs"))
+            + &code_lines(include_str!("session.rs"))
+            + &code_lines(include_str!("../race/mod.rs"))
+            + &code_lines(include_str!("../gen_worker.rs"))
+            + &code_lines(include_str!("../replay/mod.rs"))
+            + &code_lines(include_str!("../controller/mod.rs"));
+
+        assert!(
+            !haystack.contains("TrackArtifact {"),
+            "production gp-game source constructs a `TrackArtifact` struct \
+             literal — AC10 requires every artifact to come from generation, \
+             never a placeholder built in gp-game"
+        );
+    }
+
+    /// AC22's GUI-mode half — `format::unrecognised_version_is_rejected`
+    /// (`crates/game/src/replay/format.rs`) and `tests/replay.rs`'s
+    /// `unrecognised_version_exits_nonzero` both only exercise the headless
+    /// path (`--replay-mode headless`); this closes the GUI path,
+    /// `GraphiteGpApp::load_playback`, which reads the file and calls
+    /// `parse_record` before `PlaybackDriver::new` ever runs — so this test
+    /// pays no `gp_gen::generate` cost, unlike a genuine playback-load test
+    /// would.
+    #[test]
+    fn load_playback_rejects_an_unrecognised_version() {
+        struct ScratchFile(std::path::PathBuf);
+        impl ScratchFile {
+            fn new(name: &str) -> Self {
+                Self(std::env::temp_dir().join(format!(
+                    "gp-game-app-mod-test-{}-{name}.replay",
+                    std::process::id()
+                )))
+            }
+        }
+        impl Drop for ScratchFile {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+
+        let scratch = ScratchFile::new("bad-version-gui");
+        std::fs::write(&scratch.0, "graphite-gp-replay 2\nmaster 1\n")
+            .expect("failed to write the scratch replay file");
+
+        // `Result::expect_err` needs `Debug` on the `Ok` type
+        // (`PlaybackDriver`), which no other test-only assertion requires —
+        // matching the `Err` arm directly avoids that (AGENTS.md § Rust
+        // Test Conventions — never add a production `#[derive(Debug)]` for
+        // a test-only assertion).
+        match super::GraphiteGpApp::load_playback(&scratch.0) {
+            Err(message) => assert!(
+                message.contains("version"),
+                "error message must name the version problem: {message}"
+            ),
+            Ok(_) => panic!("an unrecognised version must be rejected"),
+        }
+    }
 }
