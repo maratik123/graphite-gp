@@ -6,10 +6,12 @@
 //! are plain headless tests, no `egui::Context` needed.
 
 use crate::config::GameConfig;
+use crate::controller::{FrameInput, Roster};
 use crate::gen_worker::{GenerationFailure, GenerationId, Worker};
 use crate::race::RaceState;
-use crate::race::round::RaceRound;
+use crate::race::round::{Advance, RaceRound};
 use crate::race::standings::RaceOutcome;
+use crate::replay::{Recorder, ReplayRecord};
 use gp_core::rng::Seeds;
 use gp_core::track::TrackArtifact;
 use gp_gen::GenParams;
@@ -57,6 +59,14 @@ pub struct GameSession {
     race: Option<RaceState>,
     /// The current race's turn/round cursor, alongside `race`.
     round: Option<RaceRound>,
+    /// This race's collision-resolution seed, alongside `race`/`round` —
+    /// needed to build a [`ReplayRecord`] (A8), since `RaceState` does not
+    /// expose the seed it was constructed with.
+    current_collision_seed: Option<u64>,
+    /// Feeds from every `Advance::Moved` outcome the current race
+    /// produces (A8, design § *Module decomposition* — "fed from A4's
+    /// apply step"); reset on every fresh `spawn_race`.
+    recorder: Recorder,
 }
 
 impl GameSession {
@@ -75,6 +85,8 @@ impl GameSession {
             r: 0,
             race: None,
             round: None,
+            current_collision_seed: None,
+            recorder: Recorder::new(),
         }
     }
 
@@ -163,6 +175,8 @@ impl GameSession {
             collision_seed,
         ));
         self.round = Some(RaceRound::new(total_laps));
+        self.current_collision_seed = Some(collision_seed);
+        self.recorder = Recorder::new();
     }
 
     /// `Nav::TestLap` — starts the first race (`r = 0`) on the landed
@@ -239,6 +253,40 @@ impl GameSession {
     pub fn race_outcome(&self) -> Option<RaceOutcome> {
         let (race, round) = (self.race.as_ref()?, self.round.as_ref()?);
         Some(RaceOutcome::from_race(race, round.crashes()))
+    }
+
+    /// Advances the current race by at most one seat (A9's per-frame
+    /// driving call — `RaceRound::advance`'s own contract), recording
+    /// every `Advance::Moved` outcome into this session's [`Recorder`]
+    /// (A8, design § *Module decomposition* — "fed from A4's apply step").
+    /// `None` if no race has been started.
+    pub fn advance_race(&mut self, roster: &mut Roster, input: FrameInput) -> Option<Advance> {
+        let (race, round) = (self.race.as_mut()?, self.round.as_mut()?);
+        let outcome = round.advance(race, roster, input);
+        if let Advance::Moved {
+            seat,
+            action,
+            round_complete: _,
+        } = outcome
+        {
+            self.recorder.record(round.round(), seat, action);
+        }
+        Some(outcome)
+    }
+
+    /// The current race's in-memory replay record, built from this
+    /// session's [`Recorder`] plus the resolved seeds/config the current
+    /// race actually used (A8, AC20) — `None` until a race has been
+    /// started at least once.
+    #[must_use]
+    pub fn replay_record(&self) -> Option<ReplayRecord> {
+        let generation_seed = self.installed_seeds?.generation;
+        let collision_seed = self.current_collision_seed?;
+        Some(
+            self.recorder
+                .clone()
+                .into_record(generation_seed, collision_seed, self.config.race),
+        )
     }
 }
 
@@ -386,11 +434,10 @@ mod tests {
 
     /// AC13 — `Nav::Again` re-seats on the SAME track: the collision seed
     /// advances by exactly `r`, the track is reused (byte-identical, never
-    /// regenerated — `next_k`/`installed_k` untouched). Directly installs
-    /// a landed track (bypassing the worker) for a fast, deterministic
-    /// setup. The "prior in-memory record is discarded" clause of AC13 is
-    /// A8's `Recorder`, which does not exist yet — deferred there, not
-    /// silently dropped.
+    /// regenerated — `next_k`/`installed_k` untouched), and the prior
+    /// in-memory record is discarded (A8's `Recorder`, wired into
+    /// `spawn_race`). Directly installs a landed track (bypassing the
+    /// worker) for a fast, deterministic setup.
     #[test]
     fn race_again_advances_collision_seed_and_reuses_the_track() {
         let mut session = GameSession::new(test_config());
@@ -408,6 +455,19 @@ mod tests {
         assert_eq!(session.r, 0);
         let first_track = format!("{:?}", session.race.as_ref().expect("race started").track);
 
+        // AC13 (A8 amendment): feed the recorder with a turn, then confirm
+        // Race-again discards it -- "the prior in-memory record is
+        // dropped".
+        session.recorder.record(0, 0, gp_core::sim::Action::Coast);
+        assert!(
+            !session
+                .recorder
+                .clone()
+                .into_record(0, 0, test_config().race)
+                .turns
+                .is_empty()
+        );
+
         session.on_nav(Nav::Again);
         assert_eq!(session.r, 1);
         let second_track = format!("{:?}", session.race.as_ref().expect("race restarted").track);
@@ -422,6 +482,15 @@ mod tests {
         assert_eq!(
             session.installed_k, installed_k_before,
             "Race-again must not change which attempt the landed track came from"
+        );
+        assert!(
+            session
+                .recorder
+                .clone()
+                .into_record(0, 0, test_config().race)
+                .turns
+                .is_empty(),
+            "Race-again must discard the prior in-memory record (AC13)"
         );
     }
 }
