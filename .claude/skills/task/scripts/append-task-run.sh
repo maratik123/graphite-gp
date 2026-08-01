@@ -71,6 +71,11 @@ degrade() { incomplete=true; }
 
 rec_date=$(date -u +%F)
 branch=$(git branch --show-current 2>/dev/null)
+# Detached HEAD, or not a git work tree, yields "". `branch` is
+# fallback-required and consumers key the last-line-wins dedup on it (schema
+# page § Append-only + last-line-wins), so a silently empty key is worse than
+# a flagged one.
+[ -n "$branch" ] || degrade
 
 spec_base=$(basename "$pf")
 spec_base=${spec_base%.progress.md}
@@ -153,18 +158,23 @@ if [ -r "$pf" ]; then
       }
       insec && /^\|[[:space:]]*[0-9]/ {
         n = split($0, c, "|")
-        key = c[3]; sev = c[4]; stat = (n >= 6 ? c[6] : "")
+        # Status is always the LAST cell, never a fixed column index: an
+        # escaped pipe inside the Finding cell (e.g. `` `a | b` ``) shifts
+        # every later column right, and only "last cell" survives that.
+        key = c[3]; sev = c[4]; stat = c[n - 1]
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", sev)
         printf "ROW\t%d\t%s\t%s\n", rounds, key, sev
         if (index(stat, "⚠️ Objected")) obj++
         if (index(stat, "🔁 Re-opened")) reop++
+        if (sev != "blocker" && sev != "major" && sev != "minor" && sev != "nit") badsev++
       }
       END {
         printf "ROUNDS\t%d\n", rounds + 0
         for (i = 1; i <= rounds; i++) printf "VERDICT\t%s\n", (havev[i] ? verdict[i] : "")
         printf "OBJ\t%d\n", obj + 0
         printf "REOP\t%d\n", reop + 0
+        printf "BADSEV\t%d\n", badsev + 0
       }
     ' "$pf"
   )
@@ -172,9 +182,15 @@ if [ -r "$pf" ]; then
   rounds=$(printf '%s\n' "$parsed" | sed -nE 's/^ROUNDS\t([0-9]+)$/\1/p')
   objections=$(printf '%s\n' "$parsed" | sed -nE 's/^OBJ\t([0-9]+)$/\1/p')
   objections_reopened=$(printf '%s\n' "$parsed" | sed -nE 's/^REOP\t([0-9]+)$/\1/p')
-  : "${rounds:=0}" "${objections:=0}" "${objections_reopened:=0}"
+  badsev=$(printf '%s\n' "$parsed" | sed -nE 's/^BADSEV\t([0-9]+)$/\1/p')
+  : "${rounds:=0}" "${objections:=0}" "${objections_reopened:=0}" "${badsev:=0}"
 
   [ "$rounds" -gt 0 ] || degrade
+
+  # An unbucketed severity cell drops its row out of both `findings` and
+  # `findings_first_seen` silently — flag the record so a reader can tell a
+  # degraded run from a genuinely small one.
+  [ "$badsev" -eq 0 ] || degrade
 
   # Verdict tokens: anything that is neither APPROVE nor REJECT — including a
   # section with no **Verdict:** line at all — becomes "UNKNOWN".
@@ -184,6 +200,10 @@ if [ -r "$pf" ]; then
       | awk '{ print ($0 == "APPROVE" || $0 == "REJECT") ? $0 : "UNKNOWN" }' \
       | jq -Rsc 'split("\n") | map(select(length > 0))'
   )
+
+  # Any UNKNOWN verdict token (absent line, or neither APPROVE nor REJECT)
+  # means at least one round's verdict was not read cleanly.
+  printf '%s' "$verdicts_json" | jq -e 'index("UNKNOWN")' >/dev/null 2>&1 && degrade
 
   # `findings` sums every bounded row across all rounds; `findings_first_seen`
   # counts only rows whose File:line cell is absent from the IMMEDIATELY

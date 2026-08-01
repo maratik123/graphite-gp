@@ -2,8 +2,8 @@
 # Fixture test for append-task-run.sh.
 #
 # Locks the extractor's contract for the task-run telemetry corpus
-# (ai-docs/metrics/task-runs.jsonl). Fourteen cases; see ai-docs/task-run-schema.md
-# for the schema those cases assert against.
+# (ai-docs/metrics/task-runs.jsonl). Seventeen cases; see
+# ai-docs/task-run-schema.md for the schema those cases assert against.
 #
 # What this test deliberately does NOT cover:
 #   - the /task Step 12 sub-step 5a integration itself. No harness can execute a
@@ -226,6 +226,84 @@ cat > "$f5" <<EOF
 | # | File:line | Severity | Finding | Status |
 |---|-----------|----------|---------|--------|
 | 1 | src/a.rs:10 | major | Description | ⬜ Open |
+EOF
+
+# F6 — a literal `|` inside a `Finding` cell shifts every later column right by
+# one. A parser reading Status off a FIXED column index (e.g. `c[6]`) reads
+# part of the Finding text instead; only "Status is the LAST cell" survives
+# this. This fixture fails on the pre-fix form and must pass on the fix.
+f6="$tmp/f6.progress.md"
+cat > "$f6" <<EOF
+# Progress: fixture — ACTIVE
+
+**Branch:** feat/fixture
+**base_commit:** ${real_base}
+**Issue:** #42
+
+## Self-Review (Round 1)
+
+**Verdict:** REJECT
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1 | src/a.rs:1 | major | uses \`a | b\` here | ⚠️ Objected: x |
+EOF
+
+# F7 — an unbucketed severity cell, ISOLATED: everything else in this fixture
+# is clean (parseable `#N` Issue, resolvable base_commit, a `## Files touched`
+# section, a well-formed Verdict). Only the "critical" severity cell (none of
+# blocker/major/minor/nit) is wrong. incomplete must be TRUE for this reason
+# alone (M2/M3) — no other trigger in this fixture can produce it.
+f7="$tmp/f7.progress.md"
+cat > "$f7" <<EOF
+# Progress: fixture — ACTIVE
+
+**Branch:** feat/fixture
+**base_commit:** ${real_base}
+**Issue:** #42
+
+## Files touched
+
+- \`crates/gp-core/src/a.rs\` — added a thing
+
+## Self-Review (Round 1)
+
+**Verdict:** REJECT
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1 | src/a.rs:10 | critical | Unknown severity | ⬜ Open |
+EOF
+
+# F8 — a verdict-less Self-Review section, ISOLATED the same way: clean
+# header fields, a `## Files touched` section, and a well-bucketed row. Only
+# Round 2 carries no `**Verdict:**` line, so its verdict token becomes
+# "UNKNOWN". incomplete must be TRUE for this reason alone (M2/M3).
+f8="$tmp/f8.progress.md"
+cat > "$f8" <<EOF
+# Progress: fixture — ACTIVE
+
+**Branch:** feat/fixture
+**base_commit:** ${real_base}
+**Issue:** #42
+
+## Files touched
+
+- \`crates/gp-core/src/a.rs\` — added a thing
+
+## Self-Review (Round 1)
+
+**Verdict:** REJECT
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1 | src/a.rs:10 | major | Description | ⬜ Open |
+
+## Self-Review (Round 2)
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1 | src/a.rs:10 | major | No verdict line above | ⬜ Open |
 EOF
 
 # --- Case 1: F1 happy path (AC9) ---------------------------------------------
@@ -481,6 +559,35 @@ l12d=$(sb_run "$(sb_pf "$base_d" d)" d)
 assert_jq "case 12d: singular deletion(-) parsed" "$l12d" \
   '.insertions == 2 and .deletions == 1'
 
+# (e) unobtainable branch (m1) — `git branch --show-current` returns "" on
+# detached HEAD or outside a git work tree. `branch` is fallback-required and
+# last-line-wins consumers key their dedup on it, so an unflagged "" is a
+# silent key collision waiting to happen.
+#
+# ISOLATED via a `git` shim on $PATH rather than the throwaway sandbox: the
+# sandbox's `corpus` command already reads 0 (it has none of AGENTS.md /
+# ai-docs/*.md), which degrades the record for an UNRELATED reason and would
+# make this assertion pass whether or not the branch fix exists. Run against
+# F1 (real repo, every other trigger already closed per case 1) with only
+# `git branch --show-current` intercepted, so `incomplete: true` here can be
+# attributed to the empty branch alone.
+real_git=$(command -v git)
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/git" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "branch" ] && [ "\$2" = "--show-current" ]; then
+  exit 0
+fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$tmp/bin/git"
+t12e="$tmp/out12e.jsonl"
+PATH="$tmp/bin:$PATH" bash "$script" "$f1" "$t12e" >/dev/null 2>&1
+l12e=$(tail -1 "$t12e" 2>/dev/null)
+assert_jq "case 12e: unobtainable branch -> branch is empty" "$l12e" '.branch == ""'
+assert_jq "case 12e: unobtainable branch -> incomplete == true from branch alone" "$l12e" \
+  '.incomplete == true'
+
 # --- Case 14: F1 key drift — the over-count asserted as EXPECTED (AC9a) --------
 # `src/g.rs:70` (R1) and `src/g.rs:73` (R2) are ONE finding: same file, same
 # `Finding` text, at a line number the `src/g.rs:15` fix above them shifted. Under
@@ -506,6 +613,35 @@ assert_jq "case 14: drifted row NOT de-duplicated in first_seen"    "$l1" '.find
 assert_jq "case 14: no de-duplication under a drifted key"          "$l1" \
   '.findings_first_seen.minor == .findings.minor'
 
+# --- Case 15: pipe-in-Finding column shift (M1 regression guard) -------------
+# Fails on the pre-fix `stat = c[6]` form: the escaped-looking pipe inside the
+# Finding cell shifts Status to c[7], so the old code reads " b\` here " (part
+# of the Finding text) as Status and never sees "⚠️ Objected". Passes under
+# `stat = c[n - 1]`.
+t15="$tmp/out15.jsonl"
+bash "$script" "$f6" "$t15" >/dev/null 2>&1
+assert_exit "case 15: F6 exits 0" "$?" 0
+l15=$(tail -1 "$t15" 2>/dev/null)
+assert_jq "case 15: objections == 1 despite the pipe in Finding" "$l15" '.objections == 1'
+assert_jq "case 15: findings.major == 1"                          "$l15" '.findings.major == 1'
+
+# --- Case 16: unbucketed severity ALONE triggers incomplete (M2/M3) ----------
+t16="$tmp/out16.jsonl"
+bash "$script" "$f7" "$t16" >/dev/null 2>&1
+assert_exit "case 16: F7 exits 0" "$?" 0
+l16=$(tail -1 "$t16" 2>/dev/null)
+assert_jq "case 16: incomplete == true from the bad severity alone" "$l16" '.incomplete == true'
+assert_jq "case 16: the bad-severity row lands in no bucket"        "$l16" '([.findings[]] | add) == 0'
+
+# --- Case 17: verdict-less section ALONE triggers incomplete (M2/M3) ---------
+t17="$tmp/out17.jsonl"
+bash "$script" "$f8" "$t17" >/dev/null 2>&1
+assert_exit "case 17: F8 exits 0" "$?" 0
+l17=$(tail -1 "$t17" 2>/dev/null)
+assert_jq "case 17: incomplete == true from the missing Verdict line alone" "$l17" '.incomplete == true'
+assert_jq "case 17: verdict-less round -> UNKNOWN"                          "$l17" \
+  '.verdicts == ["REJECT","UNKNOWN"]'
+
 # --- Case 13: no tracked-file mutation ----------------------------------------
 # True by construction under the sandbox strategy; this case is what proves the
 # construction held.
@@ -517,4 +653,4 @@ if [ "$failures" -gt 0 ]; then
   echo "FAIL: ${failures} assertion(s) failed."
   exit 1
 fi
-echo "PASS: all 14 cases green."
+echo "PASS: all 17 cases green."
