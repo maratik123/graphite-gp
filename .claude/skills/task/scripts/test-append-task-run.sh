@@ -2,8 +2,15 @@
 # Fixture test for append-task-run.sh.
 #
 # Locks the extractor's contract for the task-run telemetry corpus
-# (ai-docs/metrics/task-runs.jsonl). Eighteen cases; see
-# ai-docs/task-run-schema.md for the schema those cases assert against.
+# (ai-docs/metrics/task-runs.jsonl). See ai-docs/task-run-schema.md for the
+# schema those cases assert against.
+#
+# The case count is NOT written here. It is derived at the end of the run and
+# asserted equal to the design's § Cases row count (that assertion IS AC6), and
+# the closing banner prints the derived number. This header previously said
+# "Eighteen cases" and was stale within one round -- a transcribed count in a
+# comment is a claim nothing checks, which is the same defect AC6 exists to
+# catch one layer down.
 #
 # What this test deliberately does NOT cover:
 #   - the /task Step 12 sub-step 5a integration itself. No harness can execute a
@@ -42,8 +49,25 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 
 status_before=$(git status --porcelain)
 
-pass() { printf '  PASS  %s\n' "$1"; }
+# Every assertion label begins `case <N>[<suffix>]:`. Recording N here makes the
+# set of cases that ACTUALLY EXECUTED observable at runtime, which is what AC6
+# compares against the design. Counting `# --- Case N` comments instead would
+# count the inventory rather than the run: deleting a case body while leaving
+# its banner comment would still read as present.
+case_ids=""
+_note_case() {
+  case "$1" in
+    case\ [0-9]*)
+      _n=${1#case }
+      _n=${_n%%[!0-9]*}
+      case_ids="$case_ids $_n"
+      ;;
+  esac
+}
+
+pass() { _note_case "$1"; printf '  PASS  %s\n' "$1"; }
 fail() {
+  _note_case "$1"
   printf '  FAIL  %s\n' "$1"
   [ $# -gt 1 ] && printf '        %s\n' "$2"
   failures=$((failures + 1))
@@ -329,6 +353,48 @@ cat > "$f9" <<EOF
 |---|-----------|----------|---------|--------|
 | 1 | src/z.rs:99 | major | Do the thing | ⚠️ Objected: reason
 | 2 | src/y.rs:5 | minor | Another finding | ⬜ Open 🔁 Re-opened
+EOF
+
+# F10 — an escaped pipe walked through EVERY non-final cell.
+#
+# The property, stated so the fixture cannot be reduced to the cell that
+# happened to fail last: `\|` is cell CONTENT and may appear anywhere, so the
+# parse must locate #, File:line, Severity, Finding and Status correctly with
+# the escape in each of them in turn. Rounds 1 and 2 each shipped a fix named
+# after one observed cell (Finding, then Status) and each moved the hole to
+# another cell. A case pinning one more cell would repeat that; this one
+# enumerates the positions instead.
+#
+# Row 6 carries the escape in the SEVERITY cell, where the correct behaviour
+# differs: the cell is located correctly but its content is then not one of
+# the four buckets, so the row contributes to no bucket and trips `incomplete`.
+# That is the discriminator for mislocation -- a parser that read the wrong
+# cell as severity would likely find a VALID bucket name there and bucket the
+# row, so `([.findings[]] | add) == 5` fails if location is wrong.
+f10="$tmp/f10.progress.md"
+cat > "$f10" <<EOF
+# Progress: fixture — ACTIVE
+
+**Branch:** feat/fixture
+**base_commit:** ${real_base}
+**Issue:** #42
+
+## Self-Review (Round 1)
+
+**Verdict:** REJECT
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1\\|x | src/a.rs:1 | blocker | plain finding | ⚠️ Objected: reason |
+| 2 | src/b\\|c.rs:2 | major | plain finding | ⚠️ Objected: reason |
+| 3 | src/d.rs:3 | major | uses a \\| b here | ⚠️ Objected: reason |
+| 4 | src/e.rs:4 | minor | plain finding | ⚠️ Objected: use a \\| b |
+| 5 | src/f.rs:5 | nit | uses p \\| q | ⬜ Open 🔁 Re-opened for r \\| s |
+| 6 | src/g.rs:6 | ma\\|jor | plain finding | ⬜ Open |
+
+## Files touched
+
+- \`src/a.rs\` — a
 EOF
 
 # --- Case 1: F1 happy path (AC9) ---------------------------------------------
@@ -681,15 +747,73 @@ assert_jq "case 18: objections_reopened == 1 with no trailing pipe" "$l18" '.obj
 assert_jq "case 18: findings.major == 1 and findings.minor == 1"  "$l18" \
   '.findings.major == 1 and .findings.minor == 1'
 
+# --- Case 19: escaped pipe in EVERY non-final cell (M1'' class guard) --------
+# Guards the PROPERTY, not a cell. Falsification directions MEASURED, not
+# reasoned -- the three shipped forms of this fix red three DISJOINT cases:
+#   stat = c[6]           -> case 15 reds (1 assertion); 18 and 19 stay green
+#   stat = c[n - 1]       -> case 18 reds (2 assertions); 15 and 19 stay green
+#   mask removed          -> case 19 reds (4 assertions); 15 and 18 stay green
+# So each case owns exactly one property and none subsumes another. Note what
+# that means for the mask: cases 15 and 18 pass WITHOUT it, because "last cell"
+# already absorbs a shift originating in the Finding cell. The mask is what
+# handles an escape inside the STATUS cell itself, where the status text is
+# split across cells and no single index holds it -- which is the axis rounds 1
+# and 2 both left open. If a future edit reds ONE row here, read that row's
+# cell position before touching the parser: it names the cell the edit dropped.
+t19="$tmp/out19.jsonl"
+bash "$script" "$f10" "$t19" >/dev/null 2>&1
+assert_exit "case 19: F10 exits 0" "$?" 0
+l19=$(tail -1 "$t19" 2>/dev/null)
+# Four rows carry the objection marker in their Status cell (1, 2, 3, 4); row 5
+# is Re-opened; row 6 is plain Open. A mislocated Status cell moves these.
+assert_jq "case 19: objections == 4 with the escape in four positions" "$l19" '.objections == 4'
+assert_jq "case 19: objections_reopened == 1"                          "$l19" \
+  '.objections_reopened == 1'
+# Bucketing proves Severity was located: rows 1-5 bucket, row 6 does not.
+assert_jq "case 19: severity located under every escape position"      "$l19" \
+  '.findings == {"blocker":1,"major":2,"minor":1,"nit":1}'
+assert_jq "case 19: escaped-pipe severity lands in no bucket"          "$l19" \
+  '([.findings[]] | add) == 5'
+# `incomplete` comes from row 6's unbucketed severity ALONE -- the fixture has
+# a resolvable base_commit, an #N Issue, a Verdict and a Files-touched section,
+# so any other degradation path firing here is itself the bug.
+assert_jq "case 19: incomplete traces to the bad severity alone"       "$l19" \
+  '.incomplete == true'
+
 # --- Case 13: no tracked-file mutation ----------------------------------------
 # True by construction under the sandbox strategy; this case is what proves the
 # construction held.
 status_after=$(git status --porcelain)
 assert_eq "case 13: working tree unchanged by the test run" "$status_after" "$status_before"
 
+# --- AC6: the expected case count is DERIVED from the design, both sides ------
+# This assertion is AC6. Before it existed the file ended with a hard-coded
+# `echo "PASS: all 18 cases green."` -- a hand-typed string that agreed with
+# nothing, so fixture-side drift (a case added, the banner not updated) was
+# invisible and the design-side check ran only when a human typed it at a
+# terminal. Both halves are derived now: `cases_run` from the labels emitted by
+# this run, `C` from the design's § Cases table.
+#
+# The design moves to ai-docs/plans/done/ at /task Step 12, so both locations
+# are probed. Absent design == FAIL, deliberately: AC6 IS the coupling, and a
+# gate that quietly skips when its reference is missing is the defect this
+# assertion was written to remove.
+cases_run=$(printf '%s' "$case_ids" | tr ' ' '\n' | sort -un | grep -c .)
+design=""
+for _cand in ai-docs/plans/2026-07-31-task-run-telemetry.design.md \
+             ai-docs/plans/done/2026-07-31-task-run-telemetry.design.md; do
+  if [ -r "$_cand" ]; then design="$_cand"; break; fi
+done
+if [ -z "$design" ]; then
+  fail "AC6: design document not found in either location — cannot derive C"
+else
+  C=$(awk '/^### Cases/{f=1} f&&/^\| [0-9*]/{n++} f&&/^$/&&n{print n;exit}' "$design")
+  assert_eq "AC6: cases exercised == design § Cases rows" "$cases_run" "${C:-0}"
+fi
+
 echo
 if [ "$failures" -gt 0 ]; then
   echo "FAIL: ${failures} assertion(s) failed."
   exit 1
 fi
-echo "PASS: all 18 cases green."
+echo "PASS: all ${cases_run} cases green (count derived from ${design} § Cases)."

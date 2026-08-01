@@ -157,19 +157,34 @@ if [ -r "$pf" ]; then
         next
       }
       insec && /^\|[[:space:]]*[0-9]/ {
-        n = split($0, c, "|")
-        # Status is always the LAST cell, never a fixed column index: an
-        # escaped pipe inside the Finding cell (e.g. `` `a | b` ``) shifts
-        # every later column right, and only "last cell" survives that.
-        # GFM makes a row trailing pipe OPTIONAL and the row matcher
-        # above requires only the leading one, so `split` can leave c[n]
-        # empty (trailing-pipe row -> trailing empty field) or non-empty
-        # (no-trailing-pipe row -> c[n] IS Status). Take c[n] unless it is
-        # blank, in which case Status is one cell earlier.
+        # MASK ESCAPED PIPES BEFORE SPLITTING. `\|` is a cell CONTENT
+        # character, not a delimiter, and it may appear in ANY cell -- the
+        # Finding cell, the free-text tail of `⚠️ Objected: <reason>`, or a
+        # path. Masking removes the column shift at its source, so no later
+        # step has to compensate for it at some particular index.
+        #
+        # This is the third form of this fix and the first named after the
+        # INPUT rather than after the cell where the shift was last seen: a
+        # fixed index (c[6]) broke on a shifted Finding cell; "last cell"
+        # broke on a `\|` inside the Status cell itself. Both were correct
+        # about the instance they were written for and wrong about the class.
+        row = $0
+        gsub(/\\\|/, "\002", row)
+        n = split(row, c, "|")
+        # Status is the LAST cell -- but GFM makes a row trailing pipe
+        # OPTIONAL and the matcher above requires only the leading one, so
+        # `split` leaves c[n] empty on a trailing-pipe row and c[n] IS Status
+        # without one. Take c[n] unless blank. This is a SEPARATE property
+        # from the masking above (row shape, not cell content); case 18
+        # guards it and case 19 guards the mask.
         key = c[3]; sev = c[4]
         stat = (c[n] ~ /^[[:space:]]*$/ ? c[n - 1] : c[n])
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", sev)
+        # Restore the masked delimiters so extracted values are faithful.
+        gsub(/\002/, "\\|", key)
+        gsub(/\002/, "\\|", sev)
+        gsub(/\002/, "\\|", stat)
         printf "ROW\t%d\t%s\t%s\n", rounds, key, sev
         if (index(stat, "⚠️ Objected")) obj++
         if (index(stat, "🔁 Re-opened")) reop++
