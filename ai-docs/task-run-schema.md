@@ -37,14 +37,14 @@ omitted on that path. The fallback MUST NOT emit any key absent from this table.
 | `files_changed` | int | `git diff --shortstat <base>..HEAD`, by keyword | fallback-required |
 | `insertions` | int | same, by keyword | fallback-required |
 | `deletions` | int | same, by keyword | fallback-required |
-| `rounds` | int | count of `^## Self-Review \(Round [0-9]+\)$` headings | fallback-optional |
+| `rounds` | int | count of `^## Self-Review \(Round [0-9]+\)[[:space:]]*$` headings — trailing whitespace tolerated | fallback-optional |
 | `hit_round_cap` | bool | `rounds >= 3 && verdicts[2] == "REJECT"` | fallback-optional |
 | `verdicts` | array\<string\> | first `^\*\*Verdict:\*\*` line per section, in round order | fallback-optional |
-| `findings` | object `{blocker,major,minor,nit}` int | severity cell of every `^\| [0-9]` row inside a Self-Review section | fallback-optional |
+| `findings` | object `{blocker,major,minor,nit}` int | severity cell of every `^\|[[:space:]]*[0-9]` row inside a Self-Review section — the leading pipe may be followed by any amount of whitespace, so column-aligned (`\|  1 \|`) and tight (`\|1\|`) rows both count | fallback-optional |
 | `findings_first_seen` | object `{blocker,major,minor,nit}` int | same rows, restricted to those absent from the preceding round — **coupled** to its degeneracy signature, see § *Counting units* | fallback-optional |
-| `objections` | int | cells containing `⚠️ Objected` (substring match) | fallback-optional |
-| `objections_reopened` | int | cells containing `🔁 Re-opened` (substring match) | fallback-optional |
-| `files_touched` | array\<string\> | `` ^- `<path>` `` lines under `## Files touched` | fallback-optional |
+| `objections` | int | **status** cells containing `⚠️ Objected` (substring match) — the marker is counted only in the row's status cell, never elsewhere in the row | fallback-optional |
+| `objections_reopened` | int | **status** cells containing `🔁 Re-opened` (substring match) — same restriction | fallback-optional |
+| `files_touched` | array\<string\> | `` ^-[[:space:]]+`<path>` `` lines under `## Files touched` — one or more spaces after the dash | fallback-optional |
 | `instruction_corpus_lines` | int | the pinned `:(glob)` command below | fallback-optional |
 
 **`issue` is `#N`-only.** The canonical progress template specifies
@@ -60,7 +60,7 @@ and `⬜ Open 🔁 Re-opened` — two carry a parenthesised suffix, one a traili
 free-text reason, one an appended marker. A whole-cell compare misses all four.
 
 **Section bounding.** All Self-Review parsing is bounded to the text between a
-`^## Self-Review \(Round [0-9]+\)$` heading and the next `^## ` heading. This
+`^## Self-Review \(Round [0-9]+\)[[:space:]]*$` heading and the next `^## ` heading. This
 keeps `## AC Status` rows, `## Decisions log` prose, and any later
 `## Comment cycle round M` table out of `findings` / `objections`.
 
@@ -82,8 +82,13 @@ Stated per field, in words, because the unit is not inferable from the number:
   Round 1 contributes all of its rows. This is the
   defect-population measure, and the field to correlate against a landed
   `/improve` escalation.
-- **Identity key: the `File:line` cell, verbatim.** Two rows in consecutive
-  rounds are "the same finding" iff their `File:line` cells are byte-identical.
+- **Identity key: the `File:line` cell, after trimming surrounding whitespace.**
+  Two rows in consecutive rounds are "the same finding" iff their `File:line`
+  cells are identical once leading and trailing whitespace is stripped
+  (`gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)`). Cell **padding** therefore
+  does not drift the key — `\| src/a.rs:9 \|` and `\|src/a.rs:9\|` are the same
+  finding. Nothing else is normalised: the path and line number are compared
+  byte-for-byte, which is why a line-number shift *does* drift the key.
 - **Known bias, direction fixed: `findings_first_seen` is biased upward.** If a
   finding's location moves between rounds — a fix shifted line numbers, or the
   reviewer cites a different line for the same defect — the key changes and the
@@ -161,6 +166,7 @@ which also makes shape 3 fall out correctly as `0/0/0` with no special case.
 | `**Issue:**` line absent, or present in URL form rather than `#N` | `issue: null` — the field is fallback-required, so it is always emitted; `null` is its defined "present but unparseable" value, not an omission |
 | `**base_commit:**` absent or unparseable | trio computed off `git merge-base main HEAD` instead — the looser base is flagged, never silently substituted |
 | Both bases unobtainable — no `main` ref, detached HEAD, shallow clone, or not a git work tree | trio emitted as `0/0/0`. Reachable, not theoretical: a `git init` sandbox has no `main`. `0/0/0` is indistinguishable from a genuine no-change diff, so `incomplete: true` is what carries the difference |
+| `git branch --show-current` yields empty (detached HEAD, or not a git work tree) | `branch: ""` — fallback-required, and last-line-wins dedup keys on it |
 | Zero `## Self-Review (Round N)` sections | `rounds: 0`, `verdicts: []` |
 | A section has no `**Verdict:**` line, or a token that is neither `APPROVE` nor `REJECT` | `"UNKNOWN"` pushed into `verdicts` |
 | A row's severity cell is not one of `blocker` / `major` / `minor` / `nit` | that row contributes to no bucket |
@@ -247,10 +253,15 @@ very trend the field exists to show. The one case that would genuinely under-cou
 is a file that **stops satisfying the criterion** (repurposed, or its volume
 becoming instruction-driven); v1 does not detect that and accepts it.
 
-**Baseline: 9,091 lines over 59 files**, measured 2026-07-31 with the command
-above. Any pre-exclusion figure is **not comparable** with a post-exclusion one —
-the two count different sets — so a series starts from the post-exclusion baseline
-and never splices the older basis onto it.
+**Baseline: the first `instruction_corpus_lines` value recorded in
+`ai-docs/metrics/task-runs.jsonl`**, over 59 files at the `:(glob)` pathspec's
+scope. Not restated as a number here: the corpus is still growing while this
+page's own commits land, so any figure pinned in prose decays before the log
+it describes exists. Re-derive with the pinned command above, against the
+commit the first corpus line was appended at, if a fixed reference point is
+needed. Any pre-exclusion figure is **not comparable** with a post-exclusion
+one — the two count different sets — so a series starts from the
+post-exclusion baseline and never splices the older basis onto it.
 
 **Why the obvious pathspec is wrong.** Git's default wildmatch lets `*` cross
 `/`, so a plain `'ai-docs/*.md'` reaches below depth 1 into `ai-docs/plans/`,

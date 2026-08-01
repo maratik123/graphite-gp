@@ -161,7 +161,13 @@ if [ -r "$pf" ]; then
         # Status is always the LAST cell, never a fixed column index: an
         # escaped pipe inside the Finding cell (e.g. `` `a | b` ``) shifts
         # every later column right, and only "last cell" survives that.
-        key = c[3]; sev = c[4]; stat = c[n - 1]
+        # GFM makes a row trailing pipe OPTIONAL and the row matcher
+        # above requires only the leading one, so `split` can leave c[n]
+        # empty (trailing-pipe row -> trailing empty field) or non-empty
+        # (no-trailing-pipe row -> c[n] IS Status). Take c[n] unless it is
+        # blank, in which case Status is one cell earlier.
+        key = c[3]; sev = c[4]
+        stat = (c[n] ~ /^[[:space:]]*$/ ? c[n - 1] : c[n])
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", sev)
         printf "ROW\t%d\t%s\t%s\n", rounds, key, sev

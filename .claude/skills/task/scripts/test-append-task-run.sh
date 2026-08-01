@@ -2,7 +2,7 @@
 # Fixture test for append-task-run.sh.
 #
 # Locks the extractor's contract for the task-run telemetry corpus
-# (ai-docs/metrics/task-runs.jsonl). Seventeen cases; see
+# (ai-docs/metrics/task-runs.jsonl). Eighteen cases; see
 # ai-docs/task-run-schema.md for the schema those cases assert against.
 #
 # What this test deliberately does NOT cover:
@@ -304,6 +304,31 @@ cat > "$f8" <<EOF
 | # | File:line | Severity | Finding | Status |
 |---|-----------|----------|---------|--------|
 | 1 | src/a.rs:10 | major | No verdict line above | ⬜ Open |
+EOF
+
+# F9 — GFM makes a row's TRAILING pipe optional; the row matcher
+# (`/^\|[[:space:]]*[0-9]/`) requires only the LEADING one, so a no-trailing-pipe
+# row is accepted by the matcher and must still be read correctly. Two rows,
+# neither closed with `|`: row 1's Status cell is the LAST split field (no
+# empty trailing field to fall back past); row 2 likewise, carrying the
+# re-opened marker instead. Independent of F6/case 15, which pins the
+# trailing-pipe-plus-embedded-pipe shape.
+f9="$tmp/f9.progress.md"
+cat > "$f9" <<EOF
+# Progress: fixture — ACTIVE
+
+**Branch:** feat/fixture
+**base_commit:** ${real_base}
+**Issue:** #42
+
+## Self-Review (Round 1)
+
+**Verdict:** REJECT
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1 | src/z.rs:99 | major | Do the thing | ⚠️ Objected: reason
+| 2 | src/y.rs:5 | minor | Another finding | ⬜ Open 🔁 Re-opened
 EOF
 
 # --- Case 1: F1 happy path (AC9) ---------------------------------------------
@@ -642,6 +667,20 @@ assert_jq "case 17: incomplete == true from the missing Verdict line alone" "$l1
 assert_jq "case 17: verdict-less round -> UNKNOWN"                          "$l17" \
   '.verdicts == ["REJECT","UNKNOWN"]'
 
+# --- Case 18: no-trailing-pipe row shape (M1' regression guard) --------------
+# Fails on a `stat = c[n - 1]` form (assumes a trailing pipe unconditionally):
+# with no trailing pipe, `c[n]` IS Status and `c[n-1]` is the Finding cell, so
+# that form reads "Do the thing" / "Another finding" as Status and finds
+# neither marker. Passes under the ternary that takes `c[n]` unless blank.
+t18="$tmp/out18.jsonl"
+bash "$script" "$f9" "$t18" >/dev/null 2>&1
+assert_exit "case 18: F9 exits 0" "$?" 0
+l18=$(tail -1 "$t18" 2>/dev/null)
+assert_jq "case 18: objections == 1 with no trailing pipe"        "$l18" '.objections == 1'
+assert_jq "case 18: objections_reopened == 1 with no trailing pipe" "$l18" '.objections_reopened == 1'
+assert_jq "case 18: findings.major == 1 and findings.minor == 1"  "$l18" \
+  '.findings.major == 1 and .findings.minor == 1'
+
 # --- Case 13: no tracked-file mutation ----------------------------------------
 # True by construction under the sandbox strategy; this case is what proves the
 # construction held.
@@ -653,4 +692,4 @@ if [ "$failures" -gt 0 ]; then
   echo "FAIL: ${failures} assertion(s) failed."
   exit 1
 fi
-echo "PASS: all 17 cases green."
+echo "PASS: all 18 cases green."
