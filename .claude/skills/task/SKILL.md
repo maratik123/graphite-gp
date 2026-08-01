@@ -3,7 +3,7 @@ name: task
 description: "Full task workflow from a user description OR a GitHub issue number: interview → spec → design → design-review → impl → verify → self-review. Steps are strictly ordered and cannot be skipped."
 disable-model-invocation: true
 argument-hint: "[issue-number | task description]"
-allowed-tools: Bash(cargo build) Bash(cargo test *) Bash(cargo clippy *) Bash(cargo fmt *) Bash(cargo doc *) Bash(git diff *) Bash(git rev-parse *) Bash(git checkout *) Bash(git branch *) Bash(git add *) Bash(git commit *) Bash(git push *) Bash(gh issue list *) Bash(gh issue view *) Bash(gh issue create *) Bash(gh issue comment *) Bash(gh pr create *) Bash(gh pr view *)
+allowed-tools: Bash(cargo build) Bash(cargo test *) Bash(cargo clippy *) Bash(cargo fmt *) Bash(cargo doc *) Bash(git diff *) Bash(git rev-parse *) Bash(git checkout *) Bash(git branch *) Bash(git add *) Bash(git commit *) Bash(git push *) Bash(gh issue list *) Bash(gh issue view *) Bash(gh issue create *) Bash(gh issue comment *) Bash(gh pr create *) Bash(gh pr view *) Bash(.claude/skills/task/scripts/append-task-run.sh *)
 ---
 
 Full workflow for a task. Steps execute **strictly in sequence** — proceeding to N+1 before N is complete is FORBIDDEN.
@@ -228,8 +228,9 @@ After all findings are resolved, run gates (`cargo build`, `cargo test`, `cargo 
    - Move spec/design files to `ai-docs/plans/done/`
    - Update dependency tree and **Suggested next steps**
 5. **Inbox propagation — parse the just-finalised spec (and its design if present) and append one JSON line per item to `ai-docs/deferred/_inbox.jsonl`** (row shape: [`ai-docs/templates/inbox-row.md`](../../../ai-docs/templates/inbox-row.md)). Apply the file-level dedupe rule against the thematic `.jsonl` files in `ai-docs/deferred/` (the `*.jsonl` siblings of `_inbox.jsonl`; dedupe over `.source_path` via `jq`); emit a `WARN:` line on unrecognised body shapes and continue. Full per-shape parser + dedupe rules in `reference.md` § Step 12 — inbox propagation (detail) and in [`inbox-propagation.md`](inbox-propagation.md). The Step 12 commit (sub-step 7 below) stages `_inbox.jsonl` alongside the existing artefacts.
+   - **Sub-step 5a — append the task-run telemetry record** — single writer, append-only; schema and rationale: [`ai-docs/task-run-schema.md`](../../../ai-docs/task-run-schema.md). Run that page's § *Precondition assertion* first, then `.claude/skills/task/scripts/append-task-run.sh ai-docs/plans/<spec-base>.progress.md`. Exit 0 (full **or** degraded) → continue; non-zero → hand-write the nine `fallback-required` fields per its § *Fallback recipe*, then continue. Never halt Step 12 here. Finally run its § *Step-12 verification block* and record both results in the PR body **Test plan**.
 6. `cargo build` — ensures `Cargo.lock` is refreshed and included if changed.
-7. Stage all changed files: implementation files from `## Files touched`, `context-status.md` (+ `context.md` if its summary changed), `README.md`, `ai-docs/learnings.md` (if modified), updated `INDEX.md`, `ai-docs/deferred/_inbox.jsonl` (rows appended in sub-step 5), and spec/design now in `done/`.
+7. Stage all changed files: implementation files from `## Files touched`, `context-status.md` (+ `context.md` if its summary changed), `README.md`, `ai-docs/learnings.md` (if modified), updated `INDEX.md`, `ai-docs/deferred/_inbox.jsonl` (rows appended in sub-step 5), `ai-docs/metrics/task-runs.jsonl` (record appended in sub-step 5a), and spec/design now in `done/`.
 8. Commit `feat(<crate>): <imperative summary>` with a 1–3 line body and `N new tests; all M tests green.`
 9. `git push -u origin <branch>`
 10. `gh pr create` with title + body — body must include **Summary** / **Tracking** (`Closes #N` for full-resolve or `Refs #N` for partial; omit if `Tracked in: none`) / **Test plan** (one line per AC + clippy/build). Full body template: `reference.md` § Step 12 — PR-body template (detail).
