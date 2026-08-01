@@ -379,14 +379,25 @@ else fail "case 10: every appending case ends with 0x0a"; fi
 # numbers: check-citations.sh's header documents at length how a line-pinned
 # exclusion silently re-points after an unrelated insertion.
 req_f="$tmp/keys-required.txt"; ex_f="$tmp/keys-example.txt"; sc_f="$tmp/keys-script.txt"
+all_f="$tmp/keys-all.txt"
 awk '/^## Field table$/{f=1;next} f&&/^## /{exit} f' "$schema" \
   | awk -F'|' '/^\| `/ && $(NF-1) ~ /fallback-required/ {gsub(/[ `]/,"",$2); print $2}' \
   | sort > "$req_f"
+awk '/^## Field table$/{f=1;next} f&&/^## /{exit} f' "$schema" \
+  | awk -F'|' '/^\| `/ {gsub(/[ `]/,"",$2); print $2}' \
+  | sort > "$all_f"
 awk '/^### Worked fallback example$/{f=1} f&&/^```json$/{g=1;next} g&&/^```$/{exit} g' "$schema" \
   | jq -r 'keys[]' | sort > "$ex_f"
 printf '%s' "$l1" | jq -r 'keys[]' | sort > "$sc_f"
 
-assert_eq "case 11: schema page declares 9 fallback-required fields" "$(grep -c '' "$req_f")" "9"
+# Every count here is DERIVED from the schema page, never written down: a
+# transcribed cardinality fails-on-correct the moment a field is legitimately
+# added, and that is the failure mode this corpus keeps re-learning.
+if [ -s "$req_f" ] && [ -s "$all_f" ]; then
+  pass "case 11: field-table extraction is non-empty (required $(grep -c '' "$req_f") of $(grep -c '' "$all_f"))"
+else
+  fail "case 11: field-table extraction is non-empty" "the page's field table yielded no names"
+fi
 assert_eq "case 11: REQUIRED subset of EXAMPLE" "$(comm -23 "$req_f" "$ex_f" | tr '\n' ' ')" ""
 assert_eq "case 11: EXAMPLE subset of SCRIPT"   "$(comm -23 "$ex_f" "$sc_f" | tr '\n' ' ')" ""
 if [ -s "$sc_f" ] && [ -n "$(comm -13 "$ex_f" "$sc_f")" ]; then
@@ -394,6 +405,12 @@ if [ -s "$sc_f" ] && [ -n "$(comm -13 "$ex_f" "$sc_f")" ]; then
 else
   fail "case 11: EXAMPLE is a PROPER subset of SCRIPT" "script emitted no key beyond the fallback set"
 fi
+# WHITELIST, not a blacklist: the script's key set must EQUAL the page's field
+# table. A blacklist can only name the fields someone already thought of; this
+# rejects any unmandated field — including the three v1 explicitly excludes —
+# and equally rejects a field the page mandates but the script never emits.
+assert_eq "case 11: SCRIPT key set equals the schema page's field table" \
+  "$(comm -3 "$all_f" "$sc_f" | tr -d '\t' | tr '\n' ' ')" ""
 
 # --- Case 12: AC11a shortstat shapes ------------------------------------------
 # A real throwaway repo, not a "parse this string" hook in the script: adding an
