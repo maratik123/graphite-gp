@@ -129,6 +129,8 @@ For each `⚠️ Objected` item in the progress file:
 - `nit` / `minor`: is any reason stated at all? If not → re-open.
 - An objection to a `major`/`blocker` finding that was not first confirmed by the user (as required by the calling skill's fix-loop / objection rules) is automatically invalid → re-open.
 
+"Re-open" is defined once, at the § *Rules* round > 1 write site below: the finding reappears in the **new** round's table with status `⬜ Open 🔁 Re-opened`. The three bullets above all mean that.
+
 ## What you do NOT check
 
 - `cargo fmt` / formatting drift — already mandated after every subtask in the Implementation step; guaranteed clean before self-review runs
@@ -160,6 +162,20 @@ Append **exactly** this section to the progress file:
 
 Severity levels: `blocker` · `major` · `minor` · `nit`
 
+Status vocabulary in the Status column: `⬜ Open` · `✅ Fixed` · `⚠️ Objected: <reason>`.
+
+`🔁 Re-opened` is a **reviewer-side annotation, and it is ADDITIVE**: it appends to
+the status, producing `⬜ Open 🔁 Re-opened`. It never replaces `⬜ Open`. That is
+not cosmetic — every loop downstream selects on `⬜ Open`, so a replacement token
+would silently drop re-opened findings out of exactly the loops that fix and
+surface them, and those are the findings the reviewer judged most in need of
+attention. Read the Status column by **substring**, never by whole-cell equality.
+
+The marker lands on the row in the **new** round's table. Instruction 8 appends a
+`## Self-Review (Round N)` section and never replaces an existing one, so
+re-opening a round-N objection means emitting a row in round N+1 — never editing
+round N's cell.
+
 - For APPROVE: table is empty (no rows) or contains only already-resolved items.
 - For REJECT: at least one `blocker` or `major` row with `⬜ Open` status.
 
@@ -172,8 +188,8 @@ Severity levels: `blocker` · `major` · `minor` · `nit`
 - On re-review (round > 1):
   - `✅ Fixed` items: do not re-raise unless the fix is incorrect or incomplete.
   - `⚠️ Objected` items: **evaluate the objection rationale — do not accept it blindly.**
-    - `major` / `blocker`: valid only if the reason is specific and technically correct (e.g., Rust type system enforces the constraint at compile time, genuine out-of-scope, well-known intentional design tradeoff with a named authority). Vague reasons ("probably fine", "too much work", "negligible") → re-open as `⬜ Open`.
-    - `nit` / `minor`: more latitude, but a reason must be stated. No reason at all → re-open.
+    - `major` / `blocker`: valid only if the reason is specific and technically correct (e.g., Rust type system enforces the constraint at compile time, genuine out-of-scope, well-known intentional design tradeoff with a named authority). Vague reasons ("probably fine", "too much work", "negligible") → re-open as `⬜ Open 🔁 Re-opened` in the new round's table.
+    - `nit` / `minor`: more latitude, but a reason must be stated. No reason at all → re-open, with the same additive marker.
   - Focus on remaining `⬜ Open` items plus anything newly introduced.
 
 ## Patterns
