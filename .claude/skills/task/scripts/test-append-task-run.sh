@@ -780,6 +780,54 @@ assert_jq "case 19: escaped-pipe severity lands in no bucket"          "$l19" \
 assert_jq "case 19: incomplete traces to the bad severity alone"       "$l19" \
   '.incomplete == true'
 
+# --- Case 20: escaped BACKSLASH before a real delimiter (M1''' class guard) --
+# The failure this guards is a FALSE POSITIVE, not a parse error, which is why
+# it survived case 19: `\\` is an escaped backslash and the `|` after it is a
+# GENUINE delimiter. A single-stage pipe mask matches the second backslash
+# together with that pipe, eats the delimiter, and MERGES Finding into Status
+# -- so a Finding cell whose prose mentions the objection marker is counted as
+# an objection while the row's real status is `✅ Fixed`. The count moves in the
+# direction that looks like more review work, and nothing flags it.
+#
+# Row 1 is the discriminator: prose marker + a trailing `\\` + a real `✅ Fixed`
+# status. Row 2 pins that a `\\` NOT adjacent to a delimiter still round-trips.
+# Falsification: delete the `gsub(/\\\\/, "\001", row)` stage and row 1 reports
+# objections == 1.
+f11="$tmp/f11.progress.md"
+cat > "$f11" <<EOF
+# Progress: fixture — ACTIVE
+
+**Branch:** feat/fixture
+**base_commit:** ${real_base}
+**Issue:** #42
+
+## Self-Review (Round 1)
+
+**Verdict:** REJECT
+
+| # | File:line | Severity | Finding | Status |
+|---|-----------|----------|---------|--------|
+| 1 | src/w.rs:1 | major | prose naming ⚠️ Objected, ends in a backslash \\\\| ✅ Fixed |
+| 2 | src/v.rs:2 | minor | a \\\\ mid-cell, then a real \\| escape | ⚠️ Objected: r |
+
+## Files touched
+
+- \`src/w.rs\` — w
+EOF
+
+t20="$tmp/out20.jsonl"
+bash "$script" "$f11" "$t20" >/dev/null 2>&1
+assert_exit "case 20: F11 exits 0" "$?" 0
+l20=$(tail -1 "$t20" 2>/dev/null)
+# Row 1's true status is ✅ Fixed; only row 2 is an objection. A merged
+# Finding+Status cell makes this read 2.
+assert_jq "case 20: escaped backslash does not merge Finding into Status" "$l20" \
+  '.objections == 1'
+assert_jq "case 20: both rows bucket normally"                            "$l20" \
+  '.findings == {"blocker":0,"major":1,"minor":1,"nit":0}'
+assert_jq "case 20: no degradation from either escape form"               "$l20" \
+  '.incomplete == false'
+
 # --- Case 13: no tracked-file mutation ----------------------------------------
 # True by construction under the sandbox strategy; this case is what proves the
 # construction held.
@@ -798,6 +846,12 @@ assert_eq "case 13: working tree unchanged by the test run" "$status_after" "$st
 # are probed. Absent design == FAIL, deliberately: AC6 IS the coupling, and a
 # gate that quietly skips when its reference is missing is the defect this
 # assertion was written to remove.
+# These paths are $PWD-relative and that is SAFE, not an oversight: the script
+# resolves `repo_root` and `cd`s to it at the top (see `set -uo pipefail`
+# block), so $PWD is the repo root by the time any assertion runs, and a run
+# from outside a work tree exits there rather than reaching this gate. Do not
+# add a second anchoring here -- duplicating an invariant creates two places to
+# keep in sync, and the copy is what goes stale.
 cases_run=$(printf '%s' "$case_ids" | tr ' ' '\n' | sort -un | grep -c .)
 design=""
 for _cand in ai-docs/plans/2026-07-31-task-run-telemetry.design.md \
@@ -807,7 +861,13 @@ done
 if [ -z "$design" ]; then
   fail "AC6: design document not found in either location — cannot derive C"
 else
-  C=$(awk '/^### Cases/{f=1} f&&/^\| [0-9*]/{n++} f&&/^$/&&n{print n;exit}' "$design")
+  # `^\|[[:space:]]*[0-9*]`, NOT `^\| [0-9*]`. The narrow form requires exactly
+  # one space and misses column-aligned (`|  19 |`) and tight (`|19|`) rows --
+  # the same defect corrected on the schema page as its `findings` row matcher.
+  # A gate against desync must not itself miscount when a row is reformatted:
+  # C would under-read, this assertion would red, and the next reader would go
+  # fix the fixture rather than the matcher.
+  C=$(awk '/^### Cases/{f=1} f&&/^\|[[:space:]]*[0-9*]/{n++} f&&/^$/&&n{print n;exit}' "$design")
   assert_eq "AC6: cases exercised == design § Cases rows" "$cases_run" "${C:-0}"
 fi
 

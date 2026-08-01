@@ -168,7 +168,21 @@ if [ -r "$pf" ]; then
         # fixed index (c[6]) broke on a shifted Finding cell; "last cell"
         # broke on a `\|` inside the Status cell itself. Both were correct
         # about the instance they were written for and wrong about the class.
+        #
+        # TWO STAGES, AND THE ORDER IS LOAD-BEARING. An escaped BACKSLASH
+        # (`\\`) may itself precede a REAL delimiter. Masking pipes first
+        # matches the second backslash together with the pipe, eats a real
+        # delimiter, and MERGES two cells -- which produced a false positive,
+        # not a parse failure: a Finding cell whose prose mentioned the
+        # objection marker, followed by a genuine `✅ Fixed` status, counted
+        # as an objection. So escaped backslashes are consumed FIRST, leaving
+        # only genuine `\|` pairs for the second pass.
+        #
+        # Sentinels \001 and \002 are assumed absent from progress files.
+        # Stated as an assumption rather than defended: a literal control
+        # character in a markdown table would be restored as `\\` or `\|`.
         row = $0
+        gsub(/\\\\/, "\001", row)
         gsub(/\\\|/, "\002", row)
         n = split(row, c, "|")
         # Status is the LAST cell -- but GFM makes a row trailing pipe
@@ -181,10 +195,10 @@ if [ -r "$pf" ]; then
         stat = (c[n] ~ /^[[:space:]]*$/ ? c[n - 1] : c[n])
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
         gsub(/^[[:space:]]+|[[:space:]]+$/, "", sev)
-        # Restore the masked delimiters so extracted values are faithful.
-        gsub(/\002/, "\\|", key)
-        gsub(/\002/, "\\|", sev)
-        gsub(/\002/, "\\|", stat)
+        # Restore both sentinels so extracted values are faithful.
+        gsub(/\002/, "\\|", key);  gsub(/\001/, "\\\\", key)
+        gsub(/\002/, "\\|", sev);  gsub(/\001/, "\\\\", sev)
+        gsub(/\002/, "\\|", stat); gsub(/\001/, "\\\\", stat)
         printf "ROW\t%d\t%s\t%s\n", rounds, key, sev
         if (index(stat, "⚠️ Objected")) obj++
         if (index(stat, "🔁 Re-opened")) reop++
