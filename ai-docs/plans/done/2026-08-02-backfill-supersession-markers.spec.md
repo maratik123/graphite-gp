@@ -208,7 +208,11 @@ This is one confirmed instance, **not** the sweep's result. The sweep (Scope 3) 
 entries and report its own total (AC4).
 
 > **Sweep heuristics** (starting points, not a closed list — a sweep bounded by the instances that
-> surfaced it under-covers; `ai-docs/learnings.md:745`): the in-text idioms `the entry below`, `the
+> surfaced it under-covers, a failure mode described in the `ai-docs/learnings.md` entry
+> `2026-08-01 ("a remediation sweep must be bounded by the PROPERTY, not by the instances that
+> surfaced it")`. That entry is `Kind: correction`, `Escalated?` **no**, and carries no
+> `Superseded by:` — it is in force in **no** instruction file, and this run read it only because
+> `learnings.md` is this task's deliverable): the in-text idioms `the entry below`, `the
 > entry above`, `the preceding entry`, `the same-day entry`, `SUPERSEDES`, `Supersedes`, `CORRECTION`,
 > `is WRONG`, `is REFUTED`, `Retroactive correction`, `Extends the`, `Corroborates`, `Companion to`,
 > the `[[…]]` wiki-link form, and every `Kind: validation` entry (enumerate them in the run —
