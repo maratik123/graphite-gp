@@ -55,7 +55,7 @@ Two outputs per invocation:
 
 ### 1. Side effect: spec on disk
 
-Write the spec at `spec_path` using the format from `.claude/skills/interview/SKILL.md` § *Spec format*:
+Write the spec at `spec_path` using this format:
 
 ```markdown
 # [Task name]
