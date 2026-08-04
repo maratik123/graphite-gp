@@ -67,7 +67,7 @@ jobs:
           cache-shared-key: ${{ runner.os }}-stable-v2
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
       - name: Build
         run: cargo build --workspace --keep-going
 
@@ -91,7 +91,7 @@ jobs:
           cache-shared-key: ${{ runner.os }}-stable-v2
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
       - name: Install Vulkan software stack
         run: |
           sudo apt-get update
@@ -135,7 +135,7 @@ jobs:
           cache-shared-key: ${{ runner.os }}-stable-v2
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -156,7 +156,7 @@ jobs:
           cache-shared-key: ${{ runner.os }}-stable-v2
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
       - name: Docs
         run: cargo doc --no-deps --workspace --keep-going
         env:
